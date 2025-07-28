@@ -1,3 +1,12 @@
+import { db } from './firebase-config.js';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  addDoc
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
 const menuToggle = document.getElementById('menuToggle');
@@ -5,24 +14,28 @@ const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
 const usernameElem = document.getElementById('username');
+const profileCircle = document.getElementById('profileCircle');
 const logoutBtn = document.getElementById('logoutBtn');
 
-// Session check
 const loggedInUser = localStorage.getItem("username");
 
 if (!loggedInUser) {
   window.location.href = "index.html";
 } else {
-  // Show username in greeting
   if (usernameElem) {
     usernameElem.textContent = loggedInUser;
   }
 
-  // Set initials in profile circle
-  if (profileBtn) {
-    const initials = loggedInUser.split(" ").map(n => n[0]).join("").toUpperCase();
-    profileBtn.textContent = initials;
+  if (profileCircle) {
+    const initials = loggedInUser
+      .split(" ")
+      .map(part => part[0])
+      .join("")
+      .toUpperCase();
+    profileCircle.textContent = initials;
   }
+
+  loadUserData();  // ⬅️ Load user-specific data from Firestore
 }
 
 // Sidebar toggle
@@ -62,3 +75,48 @@ logoutBtn?.addEventListener('click', () => {
   localStorage.removeItem("username");
   window.location.href = "index.html";
 });
+
+/* 🔥 Load User-Specific Data from Firestore */
+async function loadUserData() {
+  try {
+    const incomeRef = collection(db, "incomes");
+    const expenseRef = collection(db, "expenses");
+    const remindersRef = collection(db, "reminders");
+
+    const incomeQuery = query(incomeRef, where("username", "==", loggedInUser));
+    const expenseQuery = query(expenseRef, where("username", "==", loggedInUser));
+    const reminderQuery = query(remindersRef, where("username", "==", loggedInUser));
+
+    const incomeSnapshot = await getDocs(incomeQuery);
+    const expenseSnapshot = await getDocs(expenseQuery);
+    const reminderSnapshot = await getDocs(reminderQuery);
+
+    // Calculate and show totals
+    let totalIncome = 0;
+    incomeSnapshot.forEach(doc => {
+      totalIncome += parseFloat(doc.data().amount || 0);
+    });
+    document.getElementById("totalIncome").textContent = `₹${totalIncome}`;
+
+    let totalExpense = 0;
+    expenseSnapshot.forEach(doc => {
+      totalExpense += parseFloat(doc.data().amount || 0);
+    });
+    document.getElementById("totalExpense").textContent = `₹${totalExpense}`;
+
+    // Render reminders (you can improve calendar rendering here)
+    const calendarContainer = document.getElementById('calendarContainer');
+    calendarContainer.innerHTML = ''; // Clear previous
+
+    reminderSnapshot.forEach(doc => {
+      const data = doc.data();
+      const div = document.createElement('div');
+      div.classList.add('card');
+      div.innerHTML = `<strong>${data.title}</strong><br>${data.date} - ${data.type}`;
+      calendarContainer.appendChild(div);
+    });
+
+  } catch (error) {
+    console.error("Error loading user data:", error);
+  }
+}
