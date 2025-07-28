@@ -1,19 +1,4 @@
-// === Firebase Setup ===
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-  authDomain: "budget-app-1365f.firebaseapp.com",
-  projectId: "budget-app-1365f",
-  storageBucket: "budget-app-1365f.appspot.com",
-  messagingSenderId: "1036194450411",
-  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-  measurementId: "G-YFFJL2H54X"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);  
+  
   
   
   
@@ -152,166 +137,155 @@ const db = getFirestore(app);
   });
 
   // === FullCalendar Setup ===
-let calendar;
-let currentEvents = [];
+  let calendar;
+  let currentEvents = [];
 
-async function getReminderEventsFromFirebase() {
-  const events = [];
-  const q = query(collection(db, "reminders"), where("user", "==", loggedInUser));
-  const snapshot = await getDocs(q);
+  function getReminderEvents() {
+    const today = new Date();
+    return [
+      {
+        title: 'Meeting with John',
+        start: today.toISOString().split('T')[0],
+        color: '#2196f3',
+        extendedProps: { type: 'meeting', time: '14:00', notes: 'Zoom call' },
+      },
+      {
+        title: 'Birthday - Alex',
+        start: new Date(today.setDate(today.getDate() + 2)).toISOString().split('T')[0],
+        color: '#ff9800',
+        extendedProps: { type: 'birthday', notes: 'Buy cake!' },
+      },
+    ];
+  }
 
-  snapshot.forEach(docSnap => {
-    const data = docSnap.data();
-    events.push({
-      id: docSnap.id,
-      title: data.title,
-      start: data.start,
-      color: data.color,
-      extendedProps: {
-        time: data.extendedProps?.time,
-        notes: data.extendedProps?.notes,
-        type: data.extendedProps?.type
-      }
-    });
+  document.addEventListener('DOMContentLoaded', () => {
+    const calendarEl = document.getElementById('calendarContainer');
+    const chartContainer = document.getElementById("chartContainer");
+    if (chartContainer && !document.getElementById("spendingChart")) {
+      const canvas = document.createElement("canvas");
+      canvas.id = "spendingChart";
+      chartContainer.appendChild(canvas);
+    }
+
+    if (calendarEl) {
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        height: 'auto',
+        events: getReminderEvents(),
+        eventClick: handleEventClick
+      });
+      calendar.render();
+    }
+
+    fetchSummaryData('month');
   });
 
-  return events;
-}
+  // === Reminder Modal Logic ===
+  const addReminderBtn = document.getElementById("addReminderBtn");
+  const reminderModal = document.getElementById("reminderModal");
+  const closeModalBtn = document.getElementById("closeModal");
+  const saveReminderBtn = document.getElementById("saveReminder");
+  const reminderTypeSelect = document.getElementById("reminderType");
+  const formFieldsContainer = document.getElementById("formFields");
 
-document.addEventListener("DOMContentLoaded", async () => {
-  const calendarEl = document.getElementById('calendarContainer');
-  const chartContainer = document.getElementById("chartContainer");
-
-  if (chartContainer && !document.getElementById("spendingChart")) {
-    const canvas = document.createElement("canvas");
-    canvas.id = "spendingChart";
-    chartContainer.appendChild(canvas);
+  function openReminderModal() {
+    reminderModal.style.display = "flex";
+    renderReminderForm(reminderTypeSelect.value);
   }
 
-  if (calendarEl) {
-    const eventsFromFirebase = await getReminderEventsFromFirebase();
-
-    calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth',
-      height: 'auto',
-      events: eventsFromFirebase,
-      eventClick: handleEventClick
-    });
-    calendar.render();
+  function closeReminderModal() {
+    reminderModal.style.display = "none";
+    formFieldsContainer.innerHTML = "";
   }
 
-  fetchSummaryData('month');
-});
+  addReminderBtn?.addEventListener("click", openReminderModal);
+  closeModalBtn?.addEventListener("click", closeReminderModal);
 
-// === Reminder Modal ===
-// (same references)
+  reminderTypeSelect?.addEventListener("change", () => {
+    renderReminderForm(reminderTypeSelect.value);
+  });
 
-function openReminderModal() {
-  reminderModal.style.display = "flex";
-  renderReminderForm(reminderTypeSelect.value);
-}
-
-function closeReminderModal() {
-  reminderModal.style.display = "none";
-  formFieldsContainer.innerHTML = "";
-}
-
-addReminderBtn?.addEventListener("click", openReminderModal);
-closeModalBtn?.addEventListener("click", closeReminderModal);
-reminderTypeSelect?.addEventListener("change", () => {
-  renderReminderForm(reminderTypeSelect.value);
-});
-
-function renderReminderForm(type) {
-  formFieldsContainer.innerHTML = `
-    <label>Title</label>
-    <input type="text" id="reminderTitle" required />
-    <label>Date</label>
-    <input type="date" id="reminderDate" required />
-    <label>Time</label>
-    <input type="time" id="reminderTime" />
-    <label>Notes</label>
-    <textarea id="reminderNotes"></textarea>
-  `;
-}
-
-saveReminderBtn?.addEventListener("click", async () => {
-  const title = document.getElementById("reminderTitle")?.value;
-  const date = document.getElementById("reminderDate")?.value;
-  const time = document.getElementById("reminderTime")?.value;
-  const notes = document.getElementById("reminderNotes")?.value;
-  const type = reminderTypeSelect?.value;
-
-  if (!title || !date) {
-    alert("Please fill in required fields.");
-    return;
+  function renderReminderForm(type) {
+    formFieldsContainer.innerHTML = `
+      <label>Title</label>
+      <input type="text" id="reminderTitle" required />
+      <label>Date</label>
+      <input type="date" id="reminderDate" required />
+      <label>Time</label>
+      <input type="time" id="reminderTime" />
+      <label>Notes</label>
+      <textarea id="reminderNotes"></textarea>
+    `;
   }
 
-  const colorMap = {
-    reminder: "#4caf50",
-    birthday: "#ff9800",
-    meeting: "#2196f3",
-  };
+  saveReminderBtn?.addEventListener("click", async () => {
+    const title = document.getElementById("reminderTitle")?.value;
+    const date = document.getElementById("reminderDate")?.value;
+    const time = document.getElementById("reminderTime")?.value;
+    const notes = document.getElementById("reminderNotes")?.value;
+    const type = reminderTypeSelect?.value;
 
-  const newEvent = {
-    title,
-    start: date,
-    color: colorMap[type],
-    extendedProps: { time, notes, type },
-    user: loggedInUser,
-    createdAt: new Date().toISOString()
-  };
+    if (!title || !date) {
+      alert("Please fill in required fields.");
+      return;
+    }
 
-  try {
-    const docRef = await addDoc(collection(db, "reminders"), newEvent);
+    const colorMap = {
+      reminder: "#4caf50",
+      birthday: "#ff9800",
+      meeting: "#2196f3",
+    };
 
-    calendar.addEvent({
-      id: docRef.id,
+    const newEvent = {
       title,
       start: date,
-      color: newEvent.color,
-      extendedProps: newEvent.extendedProps
+      color: colorMap[type],
+      extendedProps: { time, notes, type }
+    };
+
+    try {
+      const db = firebase.firestore();
+      await db.collection("reminders").add({
+        ...newEvent,
+        user: loggedInUser,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error saving reminder to Firebase:", error);
+    }
+
+    calendar.addEvent(newEvent);
+    currentEvents.push(newEvent);
+    closeReminderModal();
+  });
+
+  // === Popup Detail + Delete Handler ===
+  function handleEventClick(info) {
+    const event = info.event;
+    const props = event.extendedProps;
+
+    const popup = document.createElement("div");
+    popup.className = "popup-modal";
+    popup.innerHTML = `
+      <div class="popup-content">
+        <span class="close-popup" id="closePopupBtn">&times;</span>
+        <h3>${event.title}</h3>
+        <p><strong>Date:</strong> ${event.start.toLocaleDateString()}</p>
+        <p><strong>Time:</strong> ${props.time || '—'}</p>
+        <p><strong>Notes:</strong> ${props.notes || '—'}</p>
+        <button id="deleteEventBtn">Delete</button>
+      </div>
+    `;
+    document.body.appendChild(popup);
+
+    document.getElementById("closePopupBtn").addEventListener("click", () => {
+      popup.remove();
     });
 
-    closeReminderModal();
-  } catch (error) {
-    console.error("Error saving reminder to Firebase:", error);
-  }
-});
-
-// === Event Click & Delete Popup ===
-function handleEventClick(info) {
-  const event = info.event;
-  const props = event.extendedProps;
-
-  const popup = document.createElement("div");
-  popup.className = "popup-modal";
-  popup.innerHTML = `
-    <div class="popup-content">
-      <span class="close-popup" id="closePopupBtn">&times;</span>
-      <h3>${event.title}</h3>
-      <p><strong>Date:</strong> ${event.start.toLocaleDateString()}</p>
-      <p><strong>Time:</strong> ${props.time || '—'}</p>
-      <p><strong>Notes:</strong> ${props.notes || '—'}</p>
-      <button id="deleteEventBtn">Delete</button>
-    </div>
-  `;
-  document.body.appendChild(popup);
-
-  document.getElementById("closePopupBtn").addEventListener("click", () => {
-    popup.remove();
-  });
-
-  document.getElementById("deleteEventBtn").addEventListener("click", async () => {
-    if (confirm("Are you sure you want to delete this reminder?")) {
-      try {
-        await deleteDoc(doc(db, "reminders", event.id));
+    document.getElementById("deleteEventBtn").addEventListener("click", () => {
+      if (confirm("Are you sure you want to delete this reminder?")) {
         event.remove();
         popup.remove();
-      } catch (error) {
-        console.error("Error deleting reminder:", error);
-        alert("Failed to delete reminder.");
       }
-    }
-  });
-}
+    });
+  }
