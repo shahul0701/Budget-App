@@ -36,7 +36,6 @@ menuToggle?.addEventListener('click', () => {
   sidebar.classList.add('active');
   overlay.classList.add('active');
 });
-
 overlay?.addEventListener('click', () => {
   sidebar.classList.remove('active');
   overlay.classList.remove('active');
@@ -48,7 +47,6 @@ profileBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
   profileDropdown?.classList.toggle('show-dropdown');
 });
-
 window.addEventListener('click', () => {
   profileDropdown?.classList.remove('show-dropdown');
 });
@@ -71,7 +69,6 @@ logoutBtn?.addEventListener('click', () => {
 
 // === Chart.js Setup ===
 let spendingChart;
-
 function renderSpendingChart(filter) {
   const chartCanvas = document.getElementById("spendingChart");
   if (!chartCanvas) return;
@@ -85,9 +82,7 @@ function renderSpendingChart(filter) {
 
   const selected = dummyChartData[filter] || dummyChartData.month;
 
-  if (spendingChart) {
-    spendingChart.destroy();
-  }
+  if (spendingChart) spendingChart.destroy();
 
   spendingChart = new Chart(chartCanvas, {
     type: "doughnut",
@@ -102,11 +97,7 @@ function renderSpendingChart(filter) {
     },
     options: {
       responsive: true,
-      plugins: {
-        legend: {
-          position: "bottom",
-        },
-      },
+      plugins: { legend: { position: "bottom" } },
     },
   });
 }
@@ -136,25 +127,44 @@ timeFilter?.addEventListener('change', (e) => {
 let calendar;
 let currentEvents = [];
 
-function getReminderEvents() {
-  const today = new Date();
-  return [
-    {
-      title: 'Meeting with John',
-      start: today.toISOString().split('T')[0],
-      color: '#2196f3',
-      extendedProps: { type: 'meeting', time: '14:00', notes: 'Zoom call' },
-    },
-    {
-      title: 'Birthday - Alex',
-      start: new Date(today.setDate(today.getDate() + 2)).toISOString().split('T')[0],
-      color: '#ff9800',
-      extendedProps: { type: 'birthday', notes: 'Buy cake!' },
-    },
-  ];
+async function fetchRemindersFromFirestore() {
+  const db = firebase.firestore();
+  const snapshot = await db.collection("reminders")
+    .where("user", "==", loggedInUser).get();
+
+  const events = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    let event = {
+      id: doc.id,
+      title: data.title,
+      start: data.start,
+      color: data.color,
+      extendedProps: {
+        ...data.extendedProps,
+        time: data.extendedProps?.time || '',
+        notes: data.extendedProps?.notes || '',
+        type: data.extendedProps?.type || '',
+      },
+    };
+
+    if (data.extendedProps?.type === "birthday") {
+      event.display = "background";
+      event.backgroundColor = "#ff9800";
+      event.start = new Date(data.start).toISOString().split("T")[0];
+      event.rrule = {
+        freq: "yearly",
+        dtstart: data.start,
+      };
+    }
+
+    events.push(event);
+  });
+
+  return events;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const calendarEl = document.getElementById('calendarContainer');
   const chartContainer = document.getElementById("chartContainer");
   if (chartContainer && !document.getElementById("spendingChart")) {
@@ -164,11 +174,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (calendarEl) {
+    const events = await fetchRemindersFromFirestore();
     calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
       height: 'auto',
-      events: getReminderEvents(),
-      eventClick: handleEventClick
+      events,
+      eventClick: handleEventClick,
     });
     calendar.render();
   }
@@ -196,7 +207,6 @@ function closeReminderModal() {
 
 addReminderBtn?.addEventListener("click", openReminderModal);
 closeModalBtn?.addEventListener("click", closeReminderModal);
-
 reminderTypeSelect?.addEventListener("change", () => {
   renderReminderForm(reminderTypeSelect.value);
 });
@@ -236,23 +246,27 @@ saveReminderBtn?.addEventListener("click", async () => {
     title,
     start: date,
     color: colorMap[type],
-    extendedProps: { time, notes, type }
+    extendedProps: { time, notes, type },
+    user: loggedInUser,
+    createdAt: new Date().toISOString(),
   };
 
   try {
     const db = firebase.firestore();
-    await db.collection("reminders").add({
-      ...newEvent,
-      user: loggedInUser,
-      createdAt: new Date().toISOString(),
-    });
+    const docRef = await db.collection("reminders").add(newEvent);
+    newEvent.id = docRef.id;
+
+    if (calendar) {
+      calendar.addEvent({
+        ...newEvent,
+        id: docRef.id,
+      });
+    }
+
+    closeReminderModal();
   } catch (error) {
     console.error("Error saving reminder to Firebase:", error);
   }
-
-  calendar.addEvent(newEvent);
-  currentEvents.push(newEvent);
-  closeReminderModal();
 });
 
 // === Popup Detail + Delete Handler ===
@@ -278,10 +292,17 @@ function handleEventClick(info) {
     popup.remove();
   });
 
-  document.getElementById("deleteEventBtn").addEventListener("click", () => {
+  document.getElementById("deleteEventBtn").addEventListener("click", async () => {
     if (confirm("Are you sure you want to delete this reminder?")) {
-      event.remove();
-      popup.remove();
+      try {
+        const db = firebase.firestore();
+        await db.collection("reminders").doc(event.id).delete();
+        event.remove();
+        popup.remove();
+      } catch (err) {
+        console.error("Failed to delete:", err);
+        alert("Failed to delete the reminder.");
+      }
     }
   });
 }
