@@ -16,24 +16,31 @@
   const totalIncomeElem = document.getElementById('totalIncome');
   const totalExpensesElem = document.getElementById('totalExpenses');
 
-  // === Session Check & Initialization ===
-  const loggedInUser = localStorage.getItem("username");
+// === Session Check & Initialization ===
+const loggedInUser = localStorage.getItem("username");
+const dashboardContent = document.getElementById('dashboardContent');
 
-  if (!loggedInUser) {
-    window.location.href = "index.html";
-  } else {
-    if (usernameElem) {
-      usernameElem.textContent = loggedInUser;
-    }
-    if (profileCircle) {
-      const initials = loggedInUser
-        .split(" ")
-        .map(part => part[0])
-        .join("")
-        .toUpperCase();
-      profileCircle.textContent = initials;
-    }
+if (!loggedInUser) {
+  window.location.href = "index.html";
+} else {
+  // Show dashboard content now that user is logged in
+  if (dashboardContent) {
+    dashboardContent.style.display = "block";
   }
+  
+  if (usernameElem) {
+    usernameElem.textContent = loggedInUser;
+  }
+  if (profileCircle) {
+    const initials = loggedInUser
+      .split(" ")
+      .map(part => part[0])
+      .join("")
+      .toUpperCase();
+    profileCircle.textContent = initials;
+  }
+}
+
 
   // === Sidebar Toggle ===
   menuToggle?.addEventListener('click', () => {
