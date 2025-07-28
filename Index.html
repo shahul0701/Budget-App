@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Financial Budget App</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Inter', sans-serif;
@@ -53,12 +54,6 @@
     .hidden {
       display: none;
     }
-
-    .loading {
-      text-align: center;
-      margin-top: 15px;
-      font-size: 14px;
-    }
   </style>
 </head>
 <body>
@@ -76,7 +71,6 @@
       <input type="text" id="login-username" placeholder="Username or Email" />
       <input type="password" id="login-password" placeholder="Password" />
       <button onclick="loginUser()">Login</button>
-      <div class="loading" id="login-loading" style="display: none;">Logging in...</div>
       <button onclick="goBack()">Back</button>
     </div>
 
@@ -86,15 +80,14 @@
       <input type="email" id="signup-email" placeholder="Email" />
       <input type="password" id="signup-password" placeholder="Password" />
       <button onclick="registerUser()">Sign Up</button>
-      <div class="loading" id="signup-loading" style="display: none;">Signing up...</div>
+      <div id="signup-loading" class="hidden">Loading...</div>
       <button onclick="goBack()">Back</button>
     </div>
   </div>
 
-  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
-    import { getFirestore, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -109,7 +102,6 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // UI Navigation
     window.showLogin = () => {
       document.getElementById('welcome-section').classList.add('hidden');
       document.getElementById('login-section').classList.remove('hidden');
@@ -126,80 +118,66 @@
       document.getElementById('welcome-section').classList.remove('hidden');
     };
 
-    // Register User
     window.registerUser = async () => {
       const username = document.getElementById("signup-username").value.trim();
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
       const loading = document.getElementById("signup-loading");
-      loading.style.display = "block";
+      loading.classList.remove("hidden");
 
       if (!username || !email || !password) {
         alert("❌ Fill all fields");
-        loading.style.display = "none";
+        loading.classList.add("hidden");
         return;
       }
 
-      const q = query(collection(db, "Users"), where("username", "==", username));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        alert("❌ Username already taken");
-        loading.style.display = "none";
-        return;
+      try {
+        const existingUsers = await getDocs(
+          query(collection(db, "Users"), where("username", "==", username))
+        );
+        if (!existingUsers.empty) {
+          alert("❌ Username already taken");
+          loading.classList.add("hidden");
+          return;
+        }
+
+        await addDoc(collection(db, "Users"), {
+          username,
+          email,
+          password,
+          createdAt: new Date()
+        });
+
+        alert("✅ Sign-up successful!");
+        window.location.href = "index.html";
+      } catch (e) {
+        alert("❌ " + e.message);
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
-      await addDoc(collection(db, "Users"), {
-        username,
-        email,
-        password: hashedPassword,
-        createdAt: new Date()
-      });
-
-      loading.style.display = "none";
-      alert("✅ Sign up successful! Please log in.");
-      window.location.href = "index.html";
+      loading.classList.add("hidden");
     };
 
-    // Login User
     window.loginUser = async () => {
-      const usernameOrEmail = document.getElementById("login-username").value.trim();
+      const loginId = document.getElementById("login-username").value.trim();
       const password = document.getElementById("login-password").value;
-      const loading = document.getElementById("login-loading");
-      loading.style.display = "block";
 
-      const q = query(
-        collection(db, "Users"),
-        where("username", "==", usernameOrEmail)
-      );
-      const qEmail = query(
-        collection(db, "Users"),
-        where("email", "==", usernameOrEmail)
-      );
+      try {
+        const q = query(
+          collection(db, "Users"),
+          where("password", "==", password),
+          where("username", "==", loginId)
+        );
 
-      const [snapByUsername, snapByEmail] = await Promise.all([
-        getDocs(q),
-        getDocs(qEmail)
-      ]);
+        const snapshot = await getDocs(q);
 
-      const userDoc = snapByUsername.empty ? snapByEmail.docs[0] : snapByUsername.docs[0];
-
-      if (!userDoc) {
-        alert("❌ User not found");
-        loading.style.display = "none";
-        return;
-      }
-
-      const user = userDoc.data();
-      const match = await bcrypt.compare(password, user.password);
-
-      if (match) {
-        loading.style.display = "none";
-        alert("✅ Login successful");
-        window.location.href = "home.html";
-      } else {
-        alert("❌ Incorrect password");
-        loading.style.display = "none";
+        if (snapshot.empty) {
+          alert("❌ Invalid credentials");
+        } else {
+          alert("✅ Logged in");
+          window.location.href = "home.html";
+        }
+      } catch (e) {
+        alert("❌ Error logging in: " + e.message);
       }
     };
   </script>
