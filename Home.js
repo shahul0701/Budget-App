@@ -289,3 +289,7 @@
       }
     });
   }
+  
+document.getElementById("chartOfAccountsBtn").addEventListener("click", () => {
+  window.location.href = "COA.html";
+});
