@@ -3,10 +3,10 @@ import {
   collection,
   query,
   where,
-  getDocs,
-  addDoc
+  getDocs
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
+// DOM elements
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
 const menuToggle = document.getElementById('menuToggle');
@@ -14,50 +14,46 @@ const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
 const usernameElem = document.getElementById('username');
-const profileCircle = document.getElementById('profileCircle');
+const profileCircle = document.getElementById('userInitials'); // was 'profileCircle'
 const logoutBtn = document.getElementById('logoutBtn');
 
+// Check session
 const loggedInUser = localStorage.getItem("username");
-
 if (!loggedInUser) {
   window.location.href = "index.html";
 } else {
-  if (usernameElem) {
-    usernameElem.textContent = loggedInUser;
-  }
+  // Set full name
+  usernameElem.textContent = loggedInUser;
 
-  if (profileCircle) {
-    const initials = loggedInUser
-      .split(" ")
-      .map(part => part[0])
-      .join("")
-      .toUpperCase();
-    profileCircle.textContent = initials;
-  }
+  // Set initials
+  const nameParts = loggedInUser.trim().split(" ");
+  const initials = nameParts.length >= 2
+    ? nameParts[0][0] + nameParts[1][0]
+    : loggedInUser.slice(0, 2);
+  profileCircle.textContent = initials.toUpperCase();
 
-  loadUserData();  // ⬅️ Load user-specific data from Firestore
+  // Load data
+  loadUserData();
 }
 
 // Sidebar toggle
-menuToggle.addEventListener('click', () => {
+menuToggle?.addEventListener('click', () => {
   sidebar.classList.add('active');
   overlay.classList.add('active');
 });
 
-// Close sidebar
-overlay.addEventListener('click', () => {
+overlay?.addEventListener('click', () => {
   sidebar.classList.remove('active');
   overlay.classList.remove('active');
   profileDropdown.classList.remove('show-dropdown');
 });
 
-// Toggle profile dropdown
-profileBtn.addEventListener('click', (e) => {
+// Profile dropdown toggle
+profileBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
   profileDropdown.classList.toggle('show-dropdown');
 });
 
-// Hide dropdown on outside click
 window.addEventListener('click', () => {
   profileDropdown.classList.remove('show-dropdown');
 });
@@ -76,24 +72,25 @@ logoutBtn?.addEventListener('click', () => {
   window.location.href = "index.html";
 });
 
-/* 🔥 Load User-Specific Data from Firestore */
+/* 🔥 Load User-Specific Reminders from Firestore */
 async function loadUserData() {
   try {
     const remindersRef = collection(db, "reminders");
     const reminderQuery = query(remindersRef, where("username", "==", loggedInUser));
-    const reminderSnapshot = await getDocs(reminderQuery);
+    const snapshot = await getDocs(reminderQuery);
 
     const reminders = [];
-    reminderSnapshot.forEach(doc => {
+    snapshot.forEach(doc => {
       reminders.push(doc.data());
     });
 
-    renderCalendar(reminders); // Pass reminders to calendar renderer
-  } catch (error) {
-    console.error("Error loading reminders:", error);
+    renderCalendar(reminders);
+  } catch (err) {
+    console.error("Error fetching reminders:", err);
   }
 }
 
+/* 🗓 Render Calendar with Reminders */
 function renderCalendar(reminders) {
   const calendarContainer = document.getElementById('calendarContainer');
   calendarContainer.innerHTML = '';
@@ -108,7 +105,6 @@ function renderCalendar(reminders) {
   const calendarGrid = document.createElement('div');
   calendarGrid.className = 'calendar-grid';
 
-  // Day labels
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   dayNames.forEach(day => {
     const dayElem = document.createElement('div');
@@ -117,14 +113,13 @@ function renderCalendar(reminders) {
     calendarGrid.appendChild(dayElem);
   });
 
-  // Empty slots before 1st
+  // Padding before 1st day
   for (let i = 0; i < firstDay; i++) {
-    const empty = document.createElement('div');
-    empty.className = 'calendar-date';
-    calendarGrid.appendChild(empty);
+    const pad = document.createElement('div');
+    pad.className = 'calendar-date empty';
+    calendarGrid.appendChild(pad);
   }
 
-  // Actual days
   for (let date = 1; date <= daysInMonth; date++) {
     const cellDate = new Date(year, month, date);
     const cellDateStr = cellDate.toISOString().split('T')[0];
@@ -137,15 +132,16 @@ function renderCalendar(reminders) {
 
     dateElem.innerHTML = `<strong>${date}</strong>`;
 
-    // Match reminders for this date
-    const dayReminders = reminders.filter(r => r.date === cellDateStr);
+    const todaysReminders = reminders.filter(r => r.date === cellDateStr);
 
-    dayReminders.forEach(r => {
+    todaysReminders.forEach(r => {
       const badge = document.createElement('div');
-      badge.style.fontSize = '10px';
-      badge.style.marginTop = '3px';
-      badge.textContent = r.type === 'birthday' ? '🎂' :
-                          r.type === 'meeting' ? '📅' : '✅';
+      badge.className = 'reminder-badge';
+      badge.title = r.title;
+
+      badge.textContent = r.type === 'birthday' ? '🎂'
+                        : r.type === 'meeting' ? '📅'
+                        : '✅';
       dateElem.appendChild(badge);
     });
 
