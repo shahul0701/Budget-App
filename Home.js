@@ -6,7 +6,7 @@ const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
 const usernameElem = document.getElementById('username');
-const profileCircle = document.getElementById('userInitials'); // Displays initials
+const profileCircle = document.getElementById('userInitials');
 const logoutBtn = document.getElementById('logoutBtn');
 const timeFilter = document.getElementById('timeFilter');
 const totalIncomeElem = document.getElementById('totalIncome');
@@ -72,6 +72,51 @@ logoutBtn?.addEventListener('click', () => {
   window.location.href = "index.html";
 });
 
+// === Chart.js Setup ===
+let spendingChart;
+
+function renderSpendingChart(filter) {
+  const chartCanvas = document.getElementById("spendingChart");
+  if (!chartCanvas) return;
+
+  const dummyChartData = {
+    today: { labels: ["Food", "Travel", "Utilities"], values: [150, 120, 130] },
+    week: { labels: ["Groceries", "Rent", "Transport", "Others"], values: [800, 1000, 300, 200] },
+    month: { labels: ["Rent", "Bills", "Shopping", "Subscriptions"], values: [4000, 1500, 2000, 1000] },
+    year: { labels: ["Rent", "Education", "Trips", "Gadgets"], values: [50000, 25000, 30000, 15000] },
+  };
+
+  const selected = dummyChartData[filter] || dummyChartData.month;
+
+  // Destroy previous chart if exists
+  if (spendingChart) {
+    spendingChart.destroy();
+  }
+
+  spendingChart = new Chart(chartCanvas, {
+    type: "doughnut",
+    data: {
+      labels: selected.labels,
+      datasets: [
+        {
+          label: "Expenses",
+          data: selected.values,
+          backgroundColor: ["#4caf50", "#f44336", "#2196f3", "#ff9800"],
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: "bottom",
+        },
+      },
+    },
+  });
+}
+
 // === Dummy Income & Expense Summary ===
 function fetchSummaryData(filter) {
   const dummyData = {
@@ -90,6 +135,8 @@ function fetchSummaryData(filter) {
   if (totalExpensesElem) {
     totalExpensesElem.textContent = `₹${selected.expenses.toLocaleString()}`;
   }
+
+  renderSpendingChart(filter); // Update chart too
 }
 
 timeFilter?.addEventListener('change', (e) => {
@@ -97,35 +144,42 @@ timeFilter?.addEventListener('change', (e) => {
   fetchSummaryData(filter);
 });
 
-// Initial summary load
-fetchSummaryData('month');
-
-// === FullCalendar Setup ===
+// === FullCalendar Setup + Chart Initialization ===
 document.addEventListener('DOMContentLoaded', () => {
+  // Calendar
   const calendarEl = document.getElementById('calendarContainer');
-  if (!calendarEl) return;
+  if (calendarEl) {
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'dayGridMonth',
+      height: 500,
+      events: [
+        {
+          title: 'Meeting with John',
+          start: new Date().toISOString().split('T')[0],
+          color: '#2196f3',
+        },
+        {
+          title: 'Birthday - Alex',
+          start: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0],
+          color: '#ff9800',
+        },
+        {
+          title: 'One-time Payment',
+          start: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString().split('T')[0],
+          color: '#4caf50',
+        }
+      ]
+    });
+    calendar.render();
+  }
 
-  const calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: 'dayGridMonth',
-    height: 500,
-    events: [
-      {
-        title: 'Meeting with John',
-        start: new Date().toISOString().split('T')[0],
-        color: '#2196f3',
-      },
-      {
-        title: 'Birthday - Alex',
-        start: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0],
-        color: '#ff9800',
-      },
-      {
-        title: 'One-time Payment',
-        start: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString().split('T')[0],
-        color: '#4caf50',
-      }
-    ]
-  });
+  // Add chart canvas dynamically if not present
+  const chartContainer = document.getElementById("chartContainer");
+  if (chartContainer && !document.getElementById("spendingChart")) {
+    const canvas = document.createElement("canvas");
+    canvas.id = "spendingChart";
+    chartContainer.appendChild(canvas);
+  }
 
-  calendar.render();
+  fetchSummaryData('month'); // Initial load
 });
