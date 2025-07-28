@@ -98,7 +98,7 @@
     </div>
 
     <div id="login-section" class="hidden">
-      <input type="text" id="login-username" placeholder="Username or Email" />
+      <input type="email" id="login-email" placeholder="Email" />
       <input type="password" id="login-password" placeholder="Password" />
       <button onclick="loginUser()">Login</button>
       <button onclick="goBack()">Back</button>
@@ -116,6 +116,7 @@
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
 
   <script>
@@ -131,6 +132,7 @@
     };
 
     firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
     const db = firebase.firestore();
 
     function fadeSwitch(hideId, showId) {
@@ -171,23 +173,20 @@
       loading.classList.remove("hidden");
 
       try {
-        const existingUsers = await db.collection("Users").where("username", "==", username).get();
-        if (!existingUsers.empty) {
-          alert("❌ Username already taken");
-          loading.classList.add("hidden");
-          return;
-        }
+        // Create user using Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        const user = userCredential.user;
 
-        await db.collection("Users").add({
+        // Save user data to Firestore under UID
+        await db.collection("Users").doc(user.uid).set({
           username,
           email,
-          password,
-          createdAt: new Date()
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        alert("✅ Sign-up successful!");
+        alert("✅ Account created!");
         document.body.style.opacity = 0;
-        setTimeout(() => window.location.href = "index.html", 500);
+        setTimeout(() => window.location.href = "home.html", 500);
       } catch (e) {
         alert("❌ " + e.message);
       }
@@ -196,32 +195,26 @@
     }
 
     async function loginUser() {
-      const loginId = document.getElementById("login-username").value.trim();
+      const email = document.getElementById("login-email").value.trim();
       const password = document.getElementById("login-password").value;
 
+      if (!email || !password) {
+        alert("❌ Fill in both fields");
+        return;
+      }
+
       try {
-        const snapshot = await db.collection("Users")
-          .where("username", "==", loginId)
-          .where("password", "==", password)
-          .get();
+        await auth.signInWithEmailAndPassword(email, password);
+        alert("✅ Login successful");
 
-        if (snapshot.empty) {
-          alert("❌ Invalid credentials");
-        } else {
-          alert("✅ Login successful");
-
-          // ✅ Store session
-          localStorage.setItem("username", loginId);
-
-          document.body.style.opacity = 0;
-          setTimeout(() => window.location.href = "home.html", 500);
-        }
+        document.body.style.opacity = 0;
+        setTimeout(() => window.location.href = "home.html", 500);
       } catch (e) {
-        alert("❌ Login error: " + e.message);
+        alert("❌ Login failed: " + e.message);
       }
     }
 
-    // Animation on load
+    // Show animation on load
     window.addEventListener("DOMContentLoaded", () => {
       document.querySelector(".container").classList.add("visible");
     });
