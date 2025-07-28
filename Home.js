@@ -3,7 +3,8 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  addDoc
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 const sidebar = document.getElementById('sidebar');
@@ -12,50 +13,56 @@ const menuToggle = document.getElementById('menuToggle');
 const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
-const calendarContainer = document.getElementById('calendarContainer');
-const usernameElem = document.getElementById("username");
-const initialsElem = document.getElementById("userInitials");
+const usernameElem = document.getElementById('username');
+const profileCircle = document.getElementById('profileCircle');
+const logoutBtn = document.getElementById('logoutBtn');
 
-// User Session
 const loggedInUser = localStorage.getItem("username");
+
 if (!loggedInUser) {
   window.location.href = "index.html";
 } else {
-  usernameElem.textContent = loggedInUser;
-  const nameParts = loggedInUser.trim().split(" ");
-  const initials = nameParts.length >= 2
-    ? nameParts[0][0] + nameParts[1][0]
-    : loggedInUser.slice(0, 2);
-  initialsElem.textContent = initials.toUpperCase();
-}
+  if (usernameElem) {
+    usernameElem.textContent = loggedInUser;
+  }
 
-// Logout
-document.getElementById("logoutBtn")?.addEventListener("click", () => {
-  localStorage.removeItem("username");
-  window.location.href = "index.html";
-});
+  if (profileCircle) {
+    const initials = loggedInUser
+      .split(" ")
+      .map(part => part[0])
+      .join("")
+      .toUpperCase();
+    profileCircle.textContent = initials;
+  }
+
+  loadUserData();  // ⬅️ Load user-specific data from Firestore
+}
 
 // Sidebar toggle
 menuToggle.addEventListener('click', () => {
   sidebar.classList.add('active');
   overlay.classList.add('active');
 });
+
+// Close sidebar
 overlay.addEventListener('click', () => {
   sidebar.classList.remove('active');
   overlay.classList.remove('active');
   profileDropdown.classList.remove('show-dropdown');
 });
 
-// Profile dropdown
-profileBtn?.addEventListener('click', (e) => {
+// Toggle profile dropdown
+profileBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   profileDropdown.classList.toggle('show-dropdown');
 });
+
+// Hide dropdown on outside click
 window.addEventListener('click', () => {
   profileDropdown.classList.remove('show-dropdown');
 });
 
-// Clock
+// Live datetime
 function updateTime() {
   const now = new Date();
   datetimeElem.textContent = now.toLocaleString();
@@ -63,77 +70,53 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
-// Load Reminders from Firestore
-async function loadReminders() {
+// Logout
+logoutBtn?.addEventListener('click', () => {
+  localStorage.removeItem("username");
+  window.location.href = "index.html";
+});
+
+/* 🔥 Load User-Specific Data from Firestore */
+async function loadUserData() {
   try {
-    const reminderRef = collection(db, "reminders");
-    const q = query(reminderRef, where("username", "==", loggedInUser));
-    const snapshot = await getDocs(q);
-    const events = [];
+    const incomeRef = collection(db, "incomes");
+    const expenseRef = collection(db, "expenses");
+    const remindersRef = collection(db, "reminders");
 
-    snapshot.forEach(doc => {
+    const incomeQuery = query(incomeRef, where("username", "==", loggedInUser));
+    const expenseQuery = query(expenseRef, where("username", "==", loggedInUser));
+    const reminderQuery = query(remindersRef, where("username", "==", loggedInUser));
+
+    const incomeSnapshot = await getDocs(incomeQuery);
+    const expenseSnapshot = await getDocs(expenseQuery);
+    const reminderSnapshot = await getDocs(reminderQuery);
+
+    // Calculate and show totals
+    let totalIncome = 0;
+    incomeSnapshot.forEach(doc => {
+      totalIncome += parseFloat(doc.data().amount || 0);
+    });
+    document.getElementById("totalIncome").textContent = `₹${totalIncome}`;
+
+    let totalExpense = 0;
+    expenseSnapshot.forEach(doc => {
+      totalExpense += parseFloat(doc.data().amount || 0);
+    });
+    document.getElementById("totalExpense").textContent = `₹${totalExpense}`;
+
+    // Render reminders (you can improve calendar rendering here)
+    const calendarContainer = document.getElementById('calendarContainer');
+    calendarContainer.innerHTML = ''; // Clear previous
+
+    reminderSnapshot.forEach(doc => {
       const data = doc.data();
-      const baseEvent = {
-        title: data.title,
-        start: data.date,
-        allDay: true
-      };
-
-      // One-time
-      if (data.type === "one-time") {
-        baseEvent.title = `✅ ${data.title}`;
-        events.push(baseEvent);
-      }
-
-      // Meeting
-      else if (data.type === "meeting") {
-        baseEvent.title = `📅 ${data.title}`;
-        baseEvent.backgroundColor = "#d6f0ff";
-        baseEvent.textColor = "#1a1a1a";
-        events.push(baseEvent);
-      }
-
-      // Birthday (Repeat yearly)
-      else if (data.type === "birthday") {
-        const origDate = new Date(data.date);
-        const yearsToAdd = 5; // show next 5 years
-        for (let i = 0; i < yearsToAdd; i++) {
-          const year = origDate.getFullYear() + i;
-          const birthdayDate = new Date(origDate);
-          birthdayDate.setFullYear(year);
-
-          events.push({
-            title: `🎂 ${data.title}`,
-            start: birthdayDate.toISOString().split('T')[0],
-            allDay: true,
-            backgroundColor: "#ffe0e0",
-            textColor: "#d12f2f"
-          });
-        }
-      }
+      const div = document.createElement('div');
+      div.classList.add('card');
+      div.innerHTML = `<strong>${data.title}</strong><br>${data.date} - ${data.type}`;
+      calendarContainer.appendChild(div);
     });
 
-    renderFullCalendar(events);
-  } catch (err) {
-    console.error("Error loading reminders:", err);
+  } catch (error) {
+    console.error("Error loading user data:", error);
   }
 }
-
-function renderFullCalendar(events) {
-  calendarContainer.innerHTML = "";
-
-  const calendar = new FullCalendar.Calendar(calendarContainer, {
-    initialView: 'dayGridMonth',
-    height: 'auto',
-    headerToolbar: {
-      left: 'prev,next today',
-      center: 'title',
-      right: 'dayGridMonth,listWeek'
-    },
-    events: events
-  });
-
-  calendar.render();
-}
-
-loadReminders();
