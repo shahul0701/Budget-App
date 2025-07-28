@@ -79,17 +79,38 @@ async function loadReminders() {
         allDay: true
       };
 
-      if (data.type === "birthday") {
-        baseEvent.title = `🎂 ${data.title}`;
-        baseEvent.backgroundColor = "#ffe0e0";
-        baseEvent.textColor = "#d12f2f";
-      } else if (data.type === "meeting") {
-        baseEvent.title = `📅 ${data.title}`;
-      } else {
+      // One-time
+      if (data.type === "one-time") {
         baseEvent.title = `✅ ${data.title}`;
+        events.push(baseEvent);
       }
 
-      events.push(baseEvent);
+      // Meeting
+      else if (data.type === "meeting") {
+        baseEvent.title = `📅 ${data.title}`;
+        baseEvent.backgroundColor = "#d6f0ff";
+        baseEvent.textColor = "#1a1a1a";
+        events.push(baseEvent);
+      }
+
+      // Birthday (Repeat yearly)
+      else if (data.type === "birthday") {
+        const origDate = new Date(data.date);
+        const yearsToAdd = 5; // show next 5 years
+        for (let i = 0; i < yearsToAdd; i++) {
+          const year = origDate.getFullYear() + i;
+          const birthdayDate = new Date(origDate);
+          birthdayDate.setFullYear(year);
+
+          events.push({
+            title: `🎂 ${data.title}`,
+            start: birthdayDate.toISOString().split('T')[0],
+            allDay: true,
+            backgroundColor: "#ffe0e0",
+            textColor: "#d12f2f"
+          });
+        }
+      }
     });
 
     renderFullCalendar(events);
