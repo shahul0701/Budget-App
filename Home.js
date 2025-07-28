@@ -146,12 +146,20 @@ timeFilter?.addEventListener('change', (e) => {
 
 // === FullCalendar Setup + Chart Initialization ===
 document.addEventListener('DOMContentLoaded', () => {
+  // Add chart canvas dynamically if not present
+  const chartContainer = document.getElementById("chartContainer");
+  if (chartContainer && !document.getElementById("spendingChart")) {
+    const canvas = document.createElement("canvas");
+    canvas.id = "spendingChart";
+    chartContainer.appendChild(canvas);
+  }
+
   // Calendar
   const calendarEl = document.getElementById('calendarContainer');
   if (calendarEl) {
     const calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
-      height: 500,
+      height: 'auto',
       events: [
         {
           title: 'Meeting with John',
@@ -171,14 +179,6 @@ document.addEventListener('DOMContentLoaded', () => {
       ]
     });
     calendar.render();
-  }
-
-  // Add chart canvas dynamically if not present
-  const chartContainer = document.getElementById("chartContainer");
-  if (chartContainer && !document.getElementById("spendingChart")) {
-    const canvas = document.createElement("canvas");
-    canvas.id = "spendingChart";
-    chartContainer.appendChild(canvas);
   }
 
   fetchSummaryData('month'); // Initial load
