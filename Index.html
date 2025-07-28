@@ -1,10 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Financial Budget App</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
   <style>
     body {
@@ -54,6 +53,12 @@
     .hidden {
       display: none;
     }
+
+    .loading {
+      text-align: center;
+      margin-top: 15px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -68,9 +73,10 @@
 
     <!-- LOGIN FORM -->
     <div id="login-section" class="hidden">
-      <input type="text" id="login-username" placeholder="Username" />
+      <input type="text" id="login-username" placeholder="Username or Email" />
       <input type="password" id="login-password" placeholder="Password" />
       <button onclick="loginUser()">Login</button>
+      <div class="loading" id="login-loading" style="display: none;">Logging in...</div>
       <button onclick="goBack()">Back</button>
     </div>
 
@@ -80,10 +86,12 @@
       <input type="email" id="signup-email" placeholder="Email" />
       <input type="password" id="signup-password" placeholder="Password" />
       <button onclick="registerUser()">Sign Up</button>
+      <div class="loading" id="signup-loading" style="display: none;">Signing up...</div>
       <button onclick="goBack()">Back</button>
     </div>
   </div>
 
+  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
     import { getFirestore, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
@@ -94,7 +102,8 @@
       projectId: "budget-app-1365f",
       storageBucket: "budget-app-1365f.appspot.com",
       messagingSenderId: "1036194450411",
-      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae"
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -117,26 +126,29 @@
       document.getElementById('welcome-section').classList.remove('hidden');
     };
 
-    // Register (Save to Firestore)
+    // Register User
     window.registerUser = async () => {
       const username = document.getElementById("signup-username").value.trim();
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
+      const loading = document.getElementById("signup-loading");
+      loading.style.display = "block";
 
       if (!username || !email || !password) {
-        alert("❌ Please fill all fields");
+        alert("❌ Fill all fields");
+        loading.style.display = "none";
         return;
       }
 
       const q = query(collection(db, "Users"), where("username", "==", username));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        alert("❌ Username already exists");
+        alert("❌ Username already taken");
+        loading.style.display = "none";
         return;
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
-
       await addDoc(collection(db, "Users"), {
         username,
         email,
@@ -144,31 +156,50 @@
         createdAt: new Date()
       });
 
-      alert("✅ Account created!");
-      goBack();
+      loading.style.display = "none";
+      alert("✅ Sign up successful! Please log in.");
+      window.location.href = "index.html";
     };
 
-    // Login (Check credentials)
+    // Login User
     window.loginUser = async () => {
-      const username = document.getElementById("login-username").value.trim();
+      const usernameOrEmail = document.getElementById("login-username").value.trim();
       const password = document.getElementById("login-password").value;
+      const loading = document.getElementById("login-loading");
+      loading.style.display = "block";
 
-      const q = query(collection(db, "Users"), where("username", "==", username));
-      const snapshot = await getDocs(q);
+      const q = query(
+        collection(db, "Users"),
+        where("username", "==", usernameOrEmail)
+      );
+      const qEmail = query(
+        collection(db, "Users"),
+        where("email", "==", usernameOrEmail)
+      );
 
-      if (snapshot.empty) {
-        alert("❌ Username not found");
+      const [snapByUsername, snapByEmail] = await Promise.all([
+        getDocs(q),
+        getDocs(qEmail)
+      ]);
+
+      const userDoc = snapByUsername.empty ? snapByEmail.docs[0] : snapByUsername.docs[0];
+
+      if (!userDoc) {
+        alert("❌ User not found");
+        loading.style.display = "none";
         return;
       }
 
-      const user = snapshot.docs[0].data();
+      const user = userDoc.data();
       const match = await bcrypt.compare(password, user.password);
 
       if (match) {
-        alert("✅ Welcome " + user.username);
-        // Redirect or show dashboard
+        loading.style.display = "none";
+        alert("✅ Login successful");
+        window.location.href = "home.html";
       } else {
         alert("❌ Incorrect password");
+        loading.style.display = "none";
       }
     };
   </script>
