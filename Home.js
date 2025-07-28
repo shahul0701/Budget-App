@@ -4,27 +4,34 @@ const menuToggle = document.getElementById('menuToggle');
 const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
-const profileUsername = document.getElementById('profile-username'); // Make sure this exists in your HTML
+const usernameElem = document.getElementById('username');
+const logoutBtn = document.getElementById('logoutBtn');
 
-// Check session
+// Session check
 const loggedInUser = localStorage.getItem("username");
+
 if (!loggedInUser) {
-  // If no session, redirect to login page
   window.location.href = "index.html";
 } else {
-  // Set username in profile
-  if (profileUsername) {
-    profileUsername.textContent = loggedInUser;
+  // Show username in greeting
+  if (usernameElem) {
+    usernameElem.textContent = loggedInUser;
+  }
+
+  // Set initials in profile circle
+  if (profileBtn) {
+    const initials = loggedInUser.split(" ").map(n => n[0]).join("").toUpperCase();
+    profileBtn.textContent = initials;
   }
 }
 
-// Toggle sidebar
+// Sidebar toggle
 menuToggle.addEventListener('click', () => {
   sidebar.classList.add('active');
   overlay.classList.add('active');
 });
 
-// Close sidebar when overlay clicked
+// Close sidebar
 overlay.addEventListener('click', () => {
   sidebar.classList.remove('active');
   overlay.classList.remove('active');
@@ -37,12 +44,12 @@ profileBtn.addEventListener('click', (e) => {
   profileDropdown.classList.toggle('show-dropdown');
 });
 
-// Close dropdown on click outside
+// Hide dropdown on outside click
 window.addEventListener('click', () => {
   profileDropdown.classList.remove('show-dropdown');
 });
 
-// Update time
+// Live datetime
 function updateTime() {
   const now = new Date();
   datetimeElem.textContent = now.toLocaleString();
@@ -50,8 +57,8 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
-// Optional: Logout functionality
-document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  localStorage.removeItem('username');
-  window.location.href = 'index.html';
+// Logout
+logoutBtn?.addEventListener('click', () => {
+  localStorage.removeItem("username");
+  window.location.href = "index.html";
 });
