@@ -4,6 +4,19 @@ const menuToggle = document.getElementById('menuToggle');
 const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
+const profileUsername = document.getElementById('profile-username'); // Make sure this exists in your HTML
+
+// Check session
+const loggedInUser = localStorage.getItem("username");
+if (!loggedInUser) {
+  // If no session, redirect to login page
+  window.location.href = "index.html";
+} else {
+  // Set username in profile
+  if (profileUsername) {
+    profileUsername.textContent = loggedInUser;
+  }
+}
 
 // Toggle sidebar
 menuToggle.addEventListener('click', () => {
@@ -36,3 +49,9 @@ function updateTime() {
 }
 setInterval(updateTime, 1000);
 updateTime();
+
+// Optional: Logout functionality
+document.getElementById('logoutBtn')?.addEventListener('click', () => {
+  localStorage.removeItem('username');
+  window.location.href = 'index.html';
+});
