@@ -79,44 +79,78 @@ logoutBtn?.addEventListener('click', () => {
 /* 🔥 Load User-Specific Data from Firestore */
 async function loadUserData() {
   try {
-    const incomeRef = collection(db, "incomes");
-    const expenseRef = collection(db, "expenses");
     const remindersRef = collection(db, "reminders");
-
-    const incomeQuery = query(incomeRef, where("username", "==", loggedInUser));
-    const expenseQuery = query(expenseRef, where("username", "==", loggedInUser));
     const reminderQuery = query(remindersRef, where("username", "==", loggedInUser));
-
-    const incomeSnapshot = await getDocs(incomeQuery);
-    const expenseSnapshot = await getDocs(expenseQuery);
     const reminderSnapshot = await getDocs(reminderQuery);
 
-    // Calculate and show totals
-    let totalIncome = 0;
-    incomeSnapshot.forEach(doc => {
-      totalIncome += parseFloat(doc.data().amount || 0);
-    });
-    document.getElementById("totalIncome").textContent = `₹${totalIncome}`;
-
-    let totalExpense = 0;
-    expenseSnapshot.forEach(doc => {
-      totalExpense += parseFloat(doc.data().amount || 0);
-    });
-    document.getElementById("totalExpense").textContent = `₹${totalExpense}`;
-
-    // Render reminders (you can improve calendar rendering here)
-    const calendarContainer = document.getElementById('calendarContainer');
-    calendarContainer.innerHTML = ''; // Clear previous
-
+    const reminders = [];
     reminderSnapshot.forEach(doc => {
-      const data = doc.data();
-      const div = document.createElement('div');
-      div.classList.add('card');
-      div.innerHTML = `<strong>${data.title}</strong><br>${data.date} - ${data.type}`;
-      calendarContainer.appendChild(div);
+      reminders.push(doc.data());
     });
 
+    renderCalendar(reminders); // Pass reminders to calendar renderer
   } catch (error) {
-    console.error("Error loading user data:", error);
+    console.error("Error loading reminders:", error);
   }
+}
+
+function renderCalendar(reminders) {
+  const calendarContainer = document.getElementById('calendarContainer');
+  calendarContainer.innerHTML = '';
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const calendarGrid = document.createElement('div');
+  calendarGrid.className = 'calendar-grid';
+
+  // Day labels
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  dayNames.forEach(day => {
+    const dayElem = document.createElement('div');
+    dayElem.className = 'calendar-day';
+    dayElem.textContent = day;
+    calendarGrid.appendChild(dayElem);
+  });
+
+  // Empty slots before 1st
+  for (let i = 0; i < firstDay; i++) {
+    const empty = document.createElement('div');
+    empty.className = 'calendar-date';
+    calendarGrid.appendChild(empty);
+  }
+
+  // Actual days
+  for (let date = 1; date <= daysInMonth; date++) {
+    const cellDate = new Date(year, month, date);
+    const cellDateStr = cellDate.toISOString().split('T')[0];
+
+    const dateElem = document.createElement('div');
+    dateElem.className = 'calendar-date';
+    if (cellDate.toDateString() === today.toDateString()) {
+      dateElem.classList.add('calendar-today');
+    }
+
+    dateElem.innerHTML = `<strong>${date}</strong>`;
+
+    // Match reminders for this date
+    const dayReminders = reminders.filter(r => r.date === cellDateStr);
+
+    dayReminders.forEach(r => {
+      const badge = document.createElement('div');
+      badge.style.fontSize = '10px';
+      badge.style.marginTop = '3px';
+      badge.textContent = r.type === 'birthday' ? '🎂' :
+                          r.type === 'meeting' ? '📅' : '✅';
+      dateElem.appendChild(badge);
+    });
+
+    calendarGrid.appendChild(dateElem);
+  }
+
+  calendarContainer.appendChild(calendarGrid);
 }
