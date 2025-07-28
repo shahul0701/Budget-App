@@ -13,18 +13,20 @@ const profileBtn = document.getElementById('profileBtn');
 const profileDropdown = document.getElementById('profileDropdown');
 const datetimeElem = document.getElementById('datetime');
 const calendarContainer = document.getElementById('calendarContainer');
+const usernameElem = document.getElementById("username");
+const initialsElem = document.getElementById("userInitials");
 
-// Session & Profile
+// User Session
 const loggedInUser = localStorage.getItem("username");
 if (!loggedInUser) {
   window.location.href = "index.html";
 } else {
-  document.getElementById("username").textContent = loggedInUser;
+  usernameElem.textContent = loggedInUser;
   const nameParts = loggedInUser.trim().split(" ");
   const initials = nameParts.length >= 2
     ? nameParts[0][0] + nameParts[1][0]
     : loggedInUser.slice(0, 2);
-  document.getElementById("userInitials").textContent = initials.toUpperCase();
+  initialsElem.textContent = initials.toUpperCase();
 }
 
 // Logout
@@ -38,14 +40,13 @@ menuToggle.addEventListener('click', () => {
   sidebar.classList.add('active');
   overlay.classList.add('active');
 });
-
 overlay.addEventListener('click', () => {
   sidebar.classList.remove('active');
   overlay.classList.remove('active');
   profileDropdown.classList.remove('show-dropdown');
 });
 
-// Profile dropdown toggle
+// Profile dropdown
 profileBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
   profileDropdown.classList.toggle('show-dropdown');
@@ -62,7 +63,7 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
-// 🔥 Load reminders and render on FullCalendar
+// Load Reminders from Firestore
 async function loadReminders() {
   try {
     const reminderRef = collection(db, "reminders");
@@ -72,29 +73,23 @@ async function loadReminders() {
 
     snapshot.forEach(doc => {
       const data = doc.data();
-      const event = {
+      const baseEvent = {
         title: data.title,
         start: data.date,
         allDay: true
       };
 
-      // Set emoji based on type
       if (data.type === "birthday") {
-        event.title = `🎂 ${data.title}`;
-        event.display = 'background';
-        event.backgroundColor = "#ffe0e0";
-        event.textColor = "#d12f2f";
-        event.rrule = {
-          freq: 'yearly',
-          dtstart: data.date
-        };
+        baseEvent.title = `🎂 ${data.title}`;
+        baseEvent.backgroundColor = "#ffe0e0";
+        baseEvent.textColor = "#d12f2f";
       } else if (data.type === "meeting") {
-        event.title = `📅 ${data.title}`;
+        baseEvent.title = `📅 ${data.title}`;
       } else {
-        event.title = `✅ ${data.title}`;
+        baseEvent.title = `✅ ${data.title}`;
       }
 
-      events.push(event);
+      events.push(baseEvent);
     });
 
     renderFullCalendar(events);
@@ -104,7 +99,7 @@ async function loadReminders() {
 }
 
 function renderFullCalendar(events) {
-  calendarContainer.innerHTML = ""; // Clear previous calendar
+  calendarContainer.innerHTML = "";
 
   const calendar = new FullCalendar.Calendar(calendarContainer, {
     initialView: 'dayGridMonth',
