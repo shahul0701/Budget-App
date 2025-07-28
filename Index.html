@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <title>Financial Budget App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
   <style>
     body {
       font-family: 'Inter', sans-serif;
@@ -51,11 +51,6 @@
       background: #eee;
     }
 
-    .google-btn {
-      background-color: #fff;
-      color: #db4437;
-    }
-
     .hidden {
       display: none;
     }
@@ -73,7 +68,7 @@
 
     <!-- LOGIN FORM -->
     <div id="login-section" class="hidden">
-      <input type="email" id="login-email" placeholder="Email" />
+      <input type="text" id="login-username" placeholder="Username" />
       <input type="password" id="login-password" placeholder="Password" />
       <button onclick="loginUser()">Login</button>
       <button onclick="goBack()">Back</button>
@@ -81,21 +76,18 @@
 
     <!-- SIGNUP FORM -->
     <div id="signup-section" class="hidden">
-      <input type="text" id="signup-name" placeholder="Full Name" />
+      <input type="text" id="signup-username" placeholder="Username" />
       <input type="email" id="signup-email" placeholder="Email" />
       <input type="password" id="signup-password" placeholder="Password" />
       <button onclick="registerUser()">Sign Up</button>
-      <button class="google-btn" onclick="signUpWithGoogle()">Sign up with Google</button>
       <button onclick="goBack()">Back</button>
     </div>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
-    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+    import { getFirestore, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
 
-    // Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
       authDomain: "budget-app-1365f.firebaseapp.com",
@@ -105,11 +97,8 @@
       appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae"
     };
 
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
     const db = getFirestore(app);
-    const provider = new GoogleAuthProvider();
 
     // UI Navigation
     window.showLogin = () => {
@@ -128,65 +117,58 @@
       document.getElementById('welcome-section').classList.remove('hidden');
     };
 
-    // Sign Up with Email
+    // Register (Save to Firestore)
     window.registerUser = async () => {
-      const name = document.getElementById("signup-name").value.trim();
+      const username = document.getElementById("signup-username").value.trim();
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
 
-      if (!name || !email || !password) {
+      if (!username || !email || !password) {
         alert("❌ Please fill all fields");
         return;
       }
 
-      try {
-        const userCred = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCred.user;
-
-        await setDoc(doc(db, "Users", user.uid), {
-          uid: user.uid,
-          name,
-          email,
-          provider: "email",
-          createdAt: new Date()
-        });
-
-        alert("✅ Account created!");
-      } catch (e) {
-        alert("❌ " + e.message);
+      const q = query(collection(db, "Users"), where("username", "==", username));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        alert("❌ Username already exists");
+        return;
       }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      await addDoc(collection(db, "Users"), {
+        username,
+        email,
+        password: hashedPassword,
+        createdAt: new Date()
+      });
+
+      alert("✅ Account created!");
+      goBack();
     };
 
-    // Login with Email
+    // Login (Check credentials)
     window.loginUser = async () => {
-      const email = document.getElementById("login-email").value;
+      const username = document.getElementById("login-username").value.trim();
       const password = document.getElementById("login-password").value;
 
-      try {
-        const userCred = await signInWithEmailAndPassword(auth, email, password);
-        alert("✅ Logged in as " + userCred.user.email);
-      } catch (e) {
-        alert("❌ " + e.message);
+      const q = query(collection(db, "Users"), where("username", "==", username));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        alert("❌ Username not found");
+        return;
       }
-    };
 
-    // Sign Up with Google
-    window.signUpWithGoogle = async () => {
-      try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
+      const user = snapshot.docs[0].data();
+      const match = await bcrypt.compare(password, user.password);
 
-        await setDoc(doc(db, "Users", user.uid), {
-          uid: user.uid,
-          name: user.displayName,
-          email: user.email,
-          provider: "google",
-          createdAt: new Date()
-        }, { merge: true });
-
-        alert("✅ Signed up with Google: " + user.email);
-      } catch (e) {
-        alert("❌ " + e.message);
+      if (match) {
+        alert("✅ Welcome " + user.username);
+        // Redirect or show dashboard
+      } else {
+        alert("❌ Incorrect password");
       }
     };
   </script>
