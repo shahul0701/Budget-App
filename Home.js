@@ -322,3 +322,7 @@ function handleEventClick(info) {
 chartOfAccountsBtn?.addEventListener("click", () => {
   window.location.href = "COA.html";
 });
+
+ExpenseTrackerBtn?.addEventListener("click", () => {
+  window.location.href = "EXP.html";
+});
