@@ -2,637 +2,475 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Expense Ledger</title>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
-    import {
-      getFirestore,
-      collection,
-      query,
-      orderBy,
-      getDocs,
-      addDoc,
-      serverTimestamp
-    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
-    import {
-      getStorage,
-      ref,
-      uploadBytes,
-      getDownloadURL
-    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-      authDomain: "budget-app-1365f.firebaseapp.com",
-      projectId: "budget-app-1365f",
-      storageBucket: "budget-app-1365f.appspot.com",
-      messagingSenderId: "1036194450411",
-      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-      measurementId: "G-YFFJL2H54X"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const storage = getStorage(app);
-
-    let allEntries = [];
-    let filteredEntries = [];
-    let currentPage = 1;
-    const pageSize = 10;
-    let currentUser = null;
-
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        currentUser = user;
-        document.getElementById("user-name").textContent = user.displayName || user.email || "User";
-        document.getElementById("user-photo").src = user.photoURL || "https://via.placeholder.com/40";
-        await loadEntries(user.uid);
-        applyFilters(); // Apply default filters
-      } else {
-        window.location.href = "login.html";
-      }
-    });
-
-    async function loadEntries(uid) {
-      const entriesRef = collection(db, "users", uid, "entries");
-      const q = query(entriesRef, orderBy("date", "desc"));
-      const querySnapshot = await getDocs(q);
-      allEntries = [];
-      querySnapshot.forEach(doc => {
-        allEntries.push({ id: doc.id, ...doc.data() });
-      });
-    }
-
-    function applyFilters() {
-      const type = document.getElementById("typeFilter").value;
-      const search = document.getElementById("searchFilter").value.toLowerCase();
-      const dateRange = document.getElementById("dateFilter").value;
-
-      const now = new Date();
-      let startDate = new Date(0);
-      let endDate = new Date();
-
-      if (dateRange === "week") {
-        startDate = new Date();
-        startDate.setDate(now.getDate() - 7);
-      } else if (dateRange === "month") {
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      } else if (dateRange === "year") {
-        startDate = new Date(now.getFullYear(), 0, 1);
-      } else if (dateRange === "all") {
-        startDate = new Date(0); // from epoch start
-      }
-
-      filteredEntries = allEntries.filter(entry => {
-        const entryDate = new Date(entry.date);
-        const matchesDate = entryDate >= startDate && entryDate <= endDate;
-        const matchesType = type === "all" || entry.type === type;
-        const matchesSearch = search === "" || (entry.note || "").toLowerCase().includes(search) || (entry.account || "").toLowerCase().includes(search);
-        return matchesDate && matchesType && matchesSearch;
-      });
-
-      currentPage = 1;
-      renderTable();
-      renderPagination();
-    }
-
-    function renderTable() {
-      const tbody = document.getElementById("entry-table-body");
-      tbody.innerHTML = "";
-
-      const start = (currentPage - 1) * pageSize;
-      const end = start + pageSize;
-      const entriesToShow = filteredEntries.slice(start, end);
-
-      let index = start + 1;
-      let runningBalance = 0;
-
-      entriesToShow.forEach(entry => {
-        if (entry.type === "income") {
-          runningBalance += entry.amount;
-        } else {
-          runningBalance -= entry.amount;
-        }
-
-        const date = new Date(entry.date);
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${index++}</td>
-          <td>${date.toLocaleDateString()}</td>
-          <td>${date.toLocaleTimeString()}</td>
-          <td>${entry.account || ''}</td>
-          <td>${entry.mode || ''}</td>
-          <td>${entry.bank || ''}</td>
-          <td>${entry.type === "income" ? entry.amount.toFixed(2) : ''}</td>
-          <td>${entry.type === "expense" ? entry.amount.toFixed(2) : ''}</td>
-          <td>${entry.note || ''}</td>
-          <td>${runningBalance.toFixed(2)}</td>
-          <td>${entry.attachment ? `<a href="${entry.attachment}" target="_blank">View</a>` : ''}</td>
-        `;
-        tbody.appendChild(row);
-      });
-    }
-
-    function renderPagination() {
-      const totalPages = Math.ceil(filteredEntries.length / pageSize);
-      const pagination = document.getElementById("pagination");
-      pagination.innerHTML = "";
-
-      const startPage = Math.max(1, currentPage - 1);
-      const endPage = Math.min(totalPages, startPage + 2);
-
-      if (currentPage > 1) {
-        const prev = document.createElement("button");
-        prev.textContent = "« Prev";
-        prev.onclick = () => { currentPage--; renderTable(); renderPagination(); };
-        pagination.appendChild(prev);
-      }
-
-      for (let i = startPage; i <= endPage; i++) {
-        const btn = document.createElement("button");
-        btn.textContent = i;
-        if (i === currentPage) btn.style.fontWeight = "bold";
-        btn.onclick = () => { currentPage = i; renderTable(); renderPagination(); };
-        pagination.appendChild(btn);
-      }
-
-      if (currentPage < totalPages) {
-        const next = document.createElement("button");
-        next.textContent = "Next »";
-        next.onclick = () => { currentPage++; renderTable(); renderPagination(); };
-        pagination.appendChild(next);
-      }
-    }
-
-    // Show the add entry modal
-    window.uploadEntry = () => {
-      document.getElementById("uploadModal").style.display = "block";
-    };
-
-    // Show the CSV upload modal
-    window.openCsvModal = () => {
-      document.getElementById("csvUploadModal").style.display = "block";
-    };
-
-    // Close modals
-    function closeModal(id) {
-      document.getElementById(id).style.display = "none";
-      if (id === "uploadModal") {
-        document.getElementById("uploadForm").reset();
-      } else if (id === "csvUploadModal") {
-        document.getElementById("csvUploadForm").reset();
-      }
-    }
-    window.closeModal = closeModal;
-
-    // Upload form submission handler for single entry
-    async function handleUpload(event) {
-      event.preventDefault();
-
-      if (!currentUser) {
-        alert("User not logged in");
-        return;
-      }
-
-      const form = event.target;
-      const type = form.type.value;
-      const amount = parseFloat(form.amount.value);
-      if (isNaN(amount) || amount <= 0) {
-        alert("Please enter a valid positive amount");
-        return;
-      }
-      const note = form.note.value.trim();
-      const account = form.account.value.trim();
-      const mode = form.mode.value.trim();
-      const bank = form.bank.value.trim();
-      const dateStr = form.date.value;
-      const timeStr = form.time.value;
-      if (!dateStr || !timeStr) {
-        alert("Please select both date and time");
-        return;
-      }
-      const date = new Date(dateStr + "T" + timeStr);
-      const file = form.attachment.files[0];
-
-      // Upload attachment if present
-      let attachmentURL = "";
-      if (file) {
-        try {
-          const storageRef = ref(storage, `users/${currentUser.uid}/attachments/${Date.now()}_${file.name}`);
-          const snapshot = await uploadBytes(storageRef, file);
-          attachmentURL = await getDownloadURL(snapshot.ref);
-        } catch (err) {
-          alert("Attachment upload failed: " + err.message);
-          return;
-        }
-      }
-
-      // Save entry to Firestore
-      try {
-        await addDoc(collection(db, "users", currentUser.uid, "entries"), {
-          type,
-          amount,
-          note,
-          account,
-          mode,
-          bank,
-          date: date.toISOString(),
-          attachment: attachmentURL,
-          createdAt: serverTimestamp()
-        });
-        alert("Entry added successfully!");
-        closeModal("uploadModal");
-        await loadEntries(currentUser.uid);
-        applyFilters();
-      } catch (err) {
-        alert("Failed to save entry: " + err.message);
-      }
-    }
-    window.handleUpload = handleUpload;
-
-    // Handle CSV upload form submit
-    async function handleCSVUpload(event) {
-      event.preventDefault();
-
-      if (!currentUser) {
-        alert("User not logged in");
-        return;
-      }
-
-      const form = event.target;
-      const file = form.csvfile.files[0];
-      if (!file) {
-        alert("Please select a CSV file.");
-        return;
-      }
-
-      const text = await file.text();
-
-      // Parse CSV (simple, assuming header row)
-      const lines = text.trim().split(/\r?\n/);
-      if (lines.length < 2) {
-        alert("CSV file is empty or has no data.");
-        return;
-      }
-
-      // Expected headers:
-      // type,amount,date,time,account,mode,bank,note
-      // Example:
-      // income,1000,2025-07-28,14:30,My Account,Cash,My Bank,Salary for July
-
-      const header = lines[0].toLowerCase().split(",");
-      const expectedHeaders = ["type","amount","date","time","account","mode","bank","note"];
-
-      // Check if headers are correct (order insensitive)
-      const missingHeaders = expectedHeaders.filter(h => !header.includes(h));
-      if (missingHeaders.length > 0) {
-        alert("Missing headers in CSV: " + missingHeaders.join(", "));
-        return;
-      }
-
-      // Map header indexes for flexibility
-      const idxMap = {};
-      expectedHeaders.forEach(h => {
-        idxMap[h] = header.indexOf(h);
-      });
-
-      let addedCount = 0;
-      let failedCount = 0;
-
-      for (let i = 1; i < lines.length; i++) {
-        const row = lines[i].split(",");
-
-        // Read values using idxMap
-        const type = (row[idxMap.type] || "").trim().toLowerCase();
-        const amountStr = (row[idxMap.amount] || "").trim();
-        const dateStr = (row[idxMap.date] || "").trim();
-        const timeStr = (row[idxMap.time] || "").trim();
-        const account = (row[idxMap.account] || "").trim();
-        const mode = (row[idxMap.mode] || "").trim();
-        const bank = (row[idxMap.bank] || "").trim();
-        const note = (row[idxMap.note] || "").trim();
-
-        const amount = parseFloat(amountStr);
-        if (!["income", "expense"].includes(type) || isNaN(amount) || amount <= 0 || !dateStr || !timeStr) {
-          failedCount++;
-          continue; // skip invalid rows
-        }
-
-        const date = new Date(dateStr + "T" + timeStr);
-        if (isNaN(date.getTime())) {
-          failedCount++;
-          continue;
-        }
-
-        try {
-          await addDoc(collection(db, "users", currentUser.uid, "entries"), {
-            type,
-            amount,
-            note,
-            account,
-            mode,
-            bank,
-            date: date.toISOString(),
-            attachment: "",
-            createdAt: serverTimestamp()
-          });
-          addedCount++;
-        } catch {
-          failedCount++;
-        }
-      }
-
-      alert(`CSV upload completed.\nAdded: ${addedCount}\nFailed: ${failedCount}`);
-      closeModal("csvUploadModal");
-      await loadEntries(currentUser.uid);
-      applyFilters();
-    }
-    window.handleCSVUpload = handleCSVUpload;
-
-    // Close modal if clicked outside the modal content
-    window.onclick = function(event) {
-      const uploadModal = document.getElementById("uploadModal");
-      const csvModal = document.getElementById("csvUploadModal");
-      if (event.target === uploadModal) {
-        closeModal("uploadModal");
-      } else if (event.target === csvModal) {
-        closeModal("csvUploadModal");
-      }
-    };
-  </script>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expense & Income Manager</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #f4f6f8;
-      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f7f7f7;
+      margin: 0; padding: 0;
     }
-
-    .header,
-    .filters {
-      display: flex;
-      justify-content: space-between;
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 20px;
+      background: #fff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .header-left {
+      font-weight: bold;
+    }
+    .header-right {
+      display: flex; align-items: center; gap: 10px;
+    }
+    #userInitials {
+      background: #007bff; color: white; border-radius: 50%;
+      width: 32px; height: 32px;
+      display: flex; justify-content: center; align-items: center;
+      font-weight: bold;
+    }
+    #username {
+      font-weight: bold;
+    }
+    #logoutBtn {
+      background: #dc3545; color: white; border: none;
+      border-radius: 4px; padding: 6px 12px; cursor: pointer;
+    }
+    #logoutBtn:hover {
+      background: #a71d2a;
+    }
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    form {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 15px 20px;
       align-items: center;
-      margin-bottom: 15px;
-      flex-wrap: wrap;
     }
-
-    .user-info {
-      display: flex;
-      align-items: center;
+    label {
+      font-weight: bold;
     }
-
-    .user-info img {
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      margin-right: 10px;
+    select, input[type="text"], input[type="number"], input[type="date"] {
+      padding: 8px;
+      font-size: 1rem;
+      width: 100%;
+      box-sizing: border-box;
     }
-
-    .buttons {
-      display: flex;
-      gap: 10px;
-    }
-
     button {
-      padding: 6px 12px;
-      background: #2c7be5;
+      grid-column: 2 / 3;
+      background: #28a745;
       color: white;
+      padding: 10px 20px;
       border: none;
+      font-size: 1rem;
       border-radius: 5px;
       cursor: pointer;
+      margin-top: 10px;
+      width: fit-content;
     }
-
-    select,
-    input[type="text"],
-    input[type="number"],
-    input[type="date"],
-    input[type="time"],
-    input[type="file"] {
-      padding: 5px;
-      margin: 0 5px 5px 0;
+    button:hover {
+      background: #218838;
     }
-
+    #uploadCSVBtn {
+      background: #007bff;
+      margin-left: 10px;
+    }
+    #uploadCSVBtn:hover {
+      background: #0056b3;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
-      background-color: white;
+      margin-top: 30px;
     }
-
-    th,
-    td {
-      border: 1px solid #ddd;
-      padding: 8px;
+    th, td {
+      padding: 12px;
+      border: 1px solid #ccc;
       text-align: left;
     }
-
     th {
-      background-color: #007BFF;
+      background: #f1f1f1;
+    }
+    .Income {
+      color: green;
+    }
+    .Expense {
+      color: red;
+    }
+    .action-btn {
+      background: #007bff;
       color: white;
-    }
-
-    tr:nth-child(even) {
-      background-color: #f2f2f2;
-    }
-
-    #pagination {
-      margin-top: 10px;
-      text-align: center;
-    }
-
-    #pagination button {
-      margin: 0 3px;
-      padding: 5px 10px;
-    }
-
-    /* Modal styles */
-    #uploadModal, #csvUploadModal {
-      display: none;
-      position: fixed;
-      z-index: 999;
-      padding-top: 80px;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      overflow: auto;
-      background-color: rgba(0, 0, 0, 0.4);
-    }
-
-    #uploadModal .modal-content, #csvUploadModal .modal-content {
-      background-color: #fefefe;
-      margin: auto;
-      padding: 20px;
-      border-radius: 8px;
-      width: 400px;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-      position: relative;
-    }
-
-    #uploadModal h2, #csvUploadModal h2 {
-      margin-top: 0;
-      margin-bottom: 10px;
-      color: #007BFF;
-    }
-
-    #uploadModal label, #csvUploadModal label {
-      display: block;
-      margin-top: 10px;
-      font-weight: 600;
-    }
-
-    #uploadModal input, #uploadModal select, #csvUploadModal input {
-      width: 100%;
-      box-sizing: border-box;
-      margin-top: 5px;
-    }
-
-    #uploadModal .modal-actions, #csvUploadModal .modal-actions {
-      margin-top: 15px;
-      text-align: right;
-    }
-
-    #uploadModal .close, #csvUploadModal .close {
-      position: absolute;
-      top: 10px;
-      right: 15px;
-      font-size: 22px;
-      font-weight: bold;
-      color: #aaa;
+      border: none;
+      padding: 6px 10px;
+      margin-right: 5px;
       cursor: pointer;
+      border-radius: 4px;
     }
-
-    #uploadModal .close:hover, #csvUploadModal .close:hover {
-      color: #000;
+    .action-btn:hover {
+      background: #0056b3;
     }
-
-    #csvInstructions {
-      font-size: 0.9em;
-      color: #333;
-      background: #eef5ff;
-      padding: 8px;
-      border-radius: 5px;
-      margin-bottom: 10px;
-      white-space: pre-wrap;
+    .delete-btn {
+      background: #dc3545;
+    }
+    .delete-btn:hover {
+      background: #a71d2a;
     }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <div class="user-info">
-      <img id="user-photo" src="https://via.placeholder.com/40" alt="User" />
-      <div id="user-name">User</div>
-    </div>
-    <div class="buttons">
-      <button onclick="uploadEntry()">Add Entry</button>
-      <button onclick="openCsvModal()">Upload CSV</button>
-    </div>
+<div class="header">
+  <div class="header-left">
+    <a href="home.html" style="text-decoration:none; color:#007bff; font-weight:bold;">
+      <i class="fa fa-home"></i> Home
+    </a>
+    <span style="margin-left: 20px;" id="datetime">Loading time...</span>
+  </div>
+  <div class="header-right">
+    <div id="userInitials">U</div>
+    <span id="username">User</span>
+    <button id="logoutBtn">Logout</button>
+  </div>
+</div>
+
+<div class="container">
+  <h2>Expense & Income Manager</h2>
+
+  <!-- Upload CSV file -->
+  <div style="margin-bottom: 20px;">
+    <label for="csvFile">Upload CSV: </label>
+    <input type="file" id="csvFile" accept=".csv" />
+    <button id="uploadCSVBtn">Upload CSV</button>
   </div>
 
-  <div class="filters">
-    <select id="typeFilter" onchange="applyFilters()">
-      <option value="all">All Types</option>
-      <option value="income">Income</option>
-      <option value="expense">Expense</option>
+  <!-- Add/Edit Form -->
+  <form id="entryForm">
+    <input type="hidden" id="entryId" />
+    <label for="entryType">Type</label>
+    <select id="entryType" required>
+      <option value="">Select Type</option>
+      <option value="Income">Income</option>
+      <option value="Expense">Expense</option>
     </select>
 
-    <input type="text" id="searchFilter" placeholder="Search notes or account" oninput="applyFilters()" />
+    <label for="entryCategory">Category</label>
+    <input type="text" id="entryCategory" placeholder="e.g. Sales, Rent" required />
 
-    <select id="dateFilter" onchange="applyFilters()">
-      <option value="all">All Time</option>
-      <option value="week">Past Week</option>
-      <option value="month">This Month</option>
-      <option value="year">This Year</option>
-    </select>
-  </div>
+    <label for="entryAmount">Amount</label>
+    <input type="number" id="entryAmount" min="0" step="0.01" placeholder="0.00" required />
+
+    <label for="entryDate">Date</label>
+    <input type="date" id="entryDate" required />
+
+    <label for="entryDescription">Description</label>
+    <input type="text" id="entryDescription" placeholder="Optional" />
+
+    <div></div>
+    <button type="submit" id="submitBtn">Add Entry</button>
+    <button type="button" id="cancelEditBtn" style="display:none; margin-left:10px;">Cancel Edit</button>
+  </form>
 
   <table>
     <thead>
       <tr>
-        <th>#</th>
+        <th>Type</th>
+        <th>Category</th>
+        <th>Amount</th>
         <th>Date</th>
-        <th>Time</th>
-        <th>Account</th>
-        <th>Mode</th>
-        <th>Bank</th>
-        <th>Income</th>
-        <th>Expense</th>
-        <th>Note</th>
-        <th>Balance</th>
-        <th>Attachment</th>
+        <th>Description</th>
+        <th>Actions</th>
       </tr>
     </thead>
-    <tbody id="entry-table-body"></tbody>
+    <tbody id="entriesTable"></tbody>
   </table>
+</div>
 
-  <div id="pagination"></div>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    query,
+    where,
+    doc,
+    updateDoc,
+    deleteDoc,
+    serverTimestamp,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import {
+    getAuth,
+    onAuthStateChanged,
+    signOut,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-  <!-- Add Entry Modal -->
-  <div id="uploadModal">
-    <div class="modal-content">
-      <span class="close" onclick="closeModal('uploadModal')">&times;</span>
-      <h2>Add Entry</h2>
-      <form id="uploadForm" onsubmit="handleUpload(event)">
-        <label for="type">Type</label>
-        <select id="type" name="type" required>
-          <option value="income">Income</option>
-          <option value="expense">Expense</option>
-        </select>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+    authDomain: "budget-app-1365f.firebaseapp.com",
+    projectId: "budget-app-1365f",
+    storageBucket: "budget-app-1365f.appspot.com",
+    messagingSenderId: "1036194450411",
+    appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+    measurementId: "G-YFFJL2H54X"
+  };
 
-        <label for="amount">Amount</label>
-        <input type="number" name="amount" id="amount" step="0.01" min="0" required />
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
 
-        <label for="date">Date</label>
-        <input type="date" name="date" id="date" required />
+  const entryForm = document.getElementById("entryForm");
+  const entryTypeSelect = document.getElementById("entryType");
+  const entryCategoryInput = document.getElementById("entryCategory");
+  const entryAmountInput = document.getElementById("entryAmount");
+  const entryDateInput = document.getElementById("entryDate");
+  const entryDescriptionInput = document.getElementById("entryDescription");
+  const entryIdInput = document.getElementById("entryId");
+  const submitBtn = document.getElementById("submitBtn");
+  const cancelEditBtn = document.getElementById("cancelEditBtn");
+  const entriesTable = document.getElementById("entriesTable");
 
-        <label for="time">Time</label>
-        <input type="time" name="time" id="time" required />
+  const usernameElem = document.getElementById("username");
+  const profileCircle = document.getElementById("userInitials");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const datetimeElem = document.getElementById("datetime");
+  const csvFileInput = document.getElementById("csvFile");
+  const uploadCSVBtn = document.getElementById("uploadCSVBtn");
 
-        <label for="account">Account</label>
-        <input type="text" name="account" id="account" />
+  let currentUser = null;
 
-        <label for="mode">Mode</label>
-        <input type="text" name="mode" id="mode" />
+  // Real-time clock
+  function updateTime() {
+    const now = new Date();
+    datetimeElem.textContent = now.toLocaleString();
+  }
+  setInterval(updateTime, 1000);
+  updateTime();
 
-        <label for="bank">Bank</label>
-        <input type="text" name="bank" id="bank" />
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      currentUser = user;
+      const storedUsername = localStorage.getItem("username");
+      const displayName = storedUsername || user.displayName || user.email;
+      usernameElem.textContent = displayName;
+      profileCircle.textContent = displayName.charAt(0).toUpperCase();
+      await loadEntries();
+    } else {
+      setTimeout(() => {
+        if (!auth.currentUser) {
+          alert("You must be logged in.");
+          window.location.href = "index.html";
+        }
+      }, 500);
+    }
+  });
 
-        <label for="note">Note</label>
-        <input type="text" name="note" id="note" />
+  logoutBtn.addEventListener("click", async () => {
+    localStorage.removeItem("username");
+    await signOut(auth);
+    window.location.href = "index.html";
+  });
 
-        <label for="attachment">Attachment (optional)</label>
-        <input type="file" name="attachment" id="attachment" accept="image/*,application/pdf" />
+  function resetForm() {
+    entryForm.reset();
+    entryIdInput.value = "";
+    submitBtn.textContent = "Add Entry";
+    cancelEditBtn.style.display = "none";
+  }
 
-        <div class="modal-actions">
-          <button type="submit">Save</button>
-          <button type="button" onclick="closeModal('uploadModal')">Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  cancelEditBtn.addEventListener("click", () => {
+    resetForm();
+  });
 
-  <!-- CSV Upload Modal -->
-  <div id="csvUploadModal">
-    <div class="modal-content">
-      <span class="close" onclick="closeModal('csvUploadModal')">&times;</span>
-      <h2>Upload CSV</h2>
-      <div id="csvInstructions">
-        CSV Format (Headers): type,amount,date,time,account,mode,bank,note
-        Example:
-        income,1000,2025-07-28,14:30,My Account,Cash,My Bank,Salary for July
-      </div>
-      <form id="csvUploadForm" onsubmit="handleCSVUpload(event)">
-        <input type="file" name="csvfile" accept=".csv" required />
-        <div class="modal-actions">
-          <button type="submit">Upload</button>
-          <button type="button" onclick="closeModal('csvUploadModal')">Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  entryForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
 
+    if (!currentUser) return alert("User not authenticated.");
+
+    const entryData = {
+      type: entryTypeSelect.value,
+      category: entryCategoryInput.value.trim(),
+      amount: parseFloat(entryAmountInput.value),
+      date: entryDateInput.value,
+      description: entryDescriptionInput.value.trim(),
+      userId: currentUser.uid,
+      timestamp: serverTimestamp(),
+    };
+
+    if (!entryData.type || !entryData.category || isNaN(entryData.amount) || !entryData.date) {
+      return alert("Please fill in all required fields.");
+    }
+
+    try {
+      if (entryIdInput.value) {
+        // Update existing
+        const docRef = doc(db, "expensesIncome", entryIdInput.value);
+        await updateDoc(docRef, entryData);
+        alert("Entry updated.");
+      } else {
+        // Add new
+        await addDoc(collection(db, "expensesIncome"), entryData);
+        alert("Entry added.");
+      }
+      resetForm();
+      loadEntries();
+    } catch (err) {
+      console.error("Error adding/updating entry:", err);
+      alert("Error saving entry.");
+    }
+  });
+
+  async function loadEntries() {
+    if (!currentUser) return;
+
+    entriesTable.innerHTML = "<tr><td colspan='6'>Loading...</td></tr>";
+    try {
+      const q = query(collection(db, "expensesIncome"), where("userId", "==", currentUser.uid));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        entriesTable.innerHTML = "<tr><td colspan='6'>No entries found.</td></tr>";
+        return;
+      }
+
+      entriesTable.innerHTML = "";
+      snapshot.forEach((docSnap) => {
+        const entry = docSnap.data();
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td class="${entry.type}">${entry.type}</td>
+          <td>${entry.category}</td>
+          <td>${entry.amount.toFixed(2)}</td>
+          <td>${entry.date}</td>
+          <td>${entry.description || ""}</td>
+          <td>
+            <button class="action-btn edit-btn" data-id="${docSnap.id}"><i class="fa fa-edit"></i></button>
+            <button class="action-btn delete-btn" data-id="${docSnap.id}"><i class="fa fa-trash"></i></button>
+          </td>
+        `;
+
+        entriesTable.appendChild(tr);
+      });
+
+      // Attach edit/delete handlers
+      document.querySelectorAll(".edit-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const id = btn.getAttribute("data-id");
+          editEntry(id);
+        });
+      });
+      document.querySelectorAll(".delete-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const id = btn.getAttribute("data-id");
+          deleteEntry(id);
+        });
+      });
+    } catch (err) {
+      console.error("Error loading entries:", err);
+      entriesTable.innerHTML = "<tr><td colspan='6'>Failed to load entries.</td></tr>";
+    }
+  }
+
+  async function editEntry(id) {
+    const docRef = doc(db, "expensesIncome", id);
+    const docSnap = await getDocs(query(collection(db, "expensesIncome"), where("__name__", "==", id)));
+    // or getDoc from firestore
+    import { getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    const docSnapshot = await getDoc(docRef);
+    if (!docSnapshot.exists()) {
+      alert("Entry not found.");
+      return;
+    }
+    const data = docSnapshot.data();
+
+    entryIdInput.value = id;
+    entryTypeSelect.value = data.type;
+    entryCategoryInput.value = data.category;
+    entryAmountInput.value = data.amount;
+    entryDateInput.value = data.date;
+    entryDescriptionInput.value = data.description || "";
+
+    submitBtn.textContent = "Update Entry";
+    cancelEditBtn.style.display = "inline-block";
+  }
+
+  async function deleteEntry(id) {
+    if (!confirm("Are you sure you want to delete this entry?")) return;
+
+    try {
+      await deleteDoc(doc(db, "expensesIncome", id));
+      alert("Entry deleted.");
+      loadEntries();
+    } catch (err) {
+      console.error("Error deleting entry:", err);
+      alert("Failed to delete entry.");
+    }
+  }
+
+  // CSV Upload logic
+  function parseCSV(text) {
+    // Very simple CSV parser: expects header row: type,category,amount,date,description
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return [];
+
+    const header = lines[0].toLowerCase().split(",").map(h => h.trim());
+    const rows = lines.slice(1);
+    return rows.map(row => {
+      const cols = row.split(",");
+      const obj = {};
+      header.forEach((h, i) => {
+        obj[h] = cols[i]?.trim() || "";
+      });
+      return obj;
+    });
+  }
+
+  uploadCSVBtn.addEventListener("click", async () => {
+    if (!csvFileInput.files.length) return alert("Please select a CSV file first.");
+    const file = csvFileInput.files[0];
+    const text = await file.text();
+    const entries = parseCSV(text);
+
+    if (!entries.length) return alert("No valid entries found in CSV.");
+
+    let failed = 0;
+    for (const entry of entries) {
+      if (!entry.type || !entry.category || !entry.amount || !entry.date) {
+        failed++;
+        continue;
+      }
+      if (!["Income", "Expense"].includes(entry.type)) {
+        failed++;
+        continue;
+      }
+      try {
+        await addDoc(collection(db, "expensesIncome"), {
+          type: entry.type,
+          category: entry.category,
+          amount: parseFloat(entry.amount),
+          date: entry.date,
+          description: entry.description || "",
+          userId: currentUser.uid,
+          timestamp: serverTimestamp(),
+        });
+      } catch (e) {
+        failed++;
+      }
+    }
+    alert(`Upload completed. Failed entries: ${failed}`);
+    csvFileInput.value = "";
+    loadEntries();
+  });
+</script>
 </body>
 </html>
