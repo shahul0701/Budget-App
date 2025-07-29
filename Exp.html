@@ -1,38 +1,35 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" >
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dashboard - Transactions</title>
+  <title>Expense Transactions Upload</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
-    /* Keep your styling consistent */
     body {
       font-family: Arial, sans-serif;
-      background-color: #f7f7f7;
-      margin: 0;
-      padding: 0;
+      background: #f7f7f7;
+      margin: 0; padding: 0;
     }
-
     .header {
+      background: #fff;
+      padding: 12px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 12px 20px;
-      background-color: #fff;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-
-    .header-left {
+    .header-left a {
+      text-decoration: none;
+      color: #007bff;
       font-weight: bold;
+      font-size: 18px;
     }
-
     .header-right {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
-
     #userInitials {
       background: #007bff;
       color: white;
@@ -40,345 +37,314 @@
       width: 32px;
       height: 32px;
       display: flex;
-      align-items: center;
       justify-content: center;
+      align-items: center;
       font-weight: bold;
+      font-size: 18px;
     }
-
     #username {
       font-weight: bold;
+      font-size: 16px;
     }
-
     #logoutBtn {
-      background-color: #dc3545;
+      background: #dc3545;
       color: white;
       border: none;
       border-radius: 4px;
       padding: 6px 12px;
       cursor: pointer;
     }
-
     #logoutBtn:hover {
-      background-color: #a71d2a;
+      background: #a71d2a;
     }
-
     .container {
       max-width: 1200px;
       margin: 30px auto;
-      background-color: #fff;
-      padding: 20px 30px 40px;
+      background: white;
+      padding: 20px 30px 40px 30px;
       border-radius: 8px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.1);
     }
-
     h2 {
       text-align: center;
       margin-bottom: 20px;
     }
-
+    #csvInput {
+      margin-bottom: 20px;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 20px;
+      font-size: 14px;
     }
-
     th, td {
-      padding: 10px;
       border: 1px solid #ccc;
+      padding: 8px 10px;
       text-align: left;
-      font-size: 0.9rem;
     }
-
     th {
-      background-color: #f1f1f1;
-      font-weight: bold;
+      background: #f1f1f1;
     }
-
-    .pagination {
-      margin-top: 15px;
-      text-align: center;
-    }
-
-    .pagination button {
-      background-color: #007bff;
-      border: none;
-      color: white;
-      padding: 8px 12px;
-      margin: 0 3px;
-      cursor: pointer;
-      border-radius: 4px;
-      font-weight: bold;
-    }
-
-    .pagination button:disabled {
-      background-color: #cccccc;
-      cursor: default;
-    }
-
-    /* Attachment link styling */
-    .attachment-link {
+    td.attachment-cell a {
       color: #007bff;
       text-decoration: none;
     }
-
-    .attachment-link:hover {
+    td.attachment-cell a:hover {
       text-decoration: underline;
+    }
+    .loading {
+      text-align: center;
+      margin: 20px 0;
+      font-weight: bold;
+      color: #007bff;
     }
   </style>
 </head>
 <body>
 
-<!-- Top Header -->
-<div class="header">
-  <div class="header-left">
-    <a href="home.html" style="text-decoration:none; color:#007bff; font-weight:bold;">
-      <i class="fa fa-home"></i> Home
-    </a>
-    <span style="margin-left: 20px;" id="datetime">Loading time...</span>
+  <div class="header">
+    <div class="header-left">
+      <a href="home.html"><i class="fa fa-home"></i> Home</a>
+    </div>
+    <div class="header-right">
+      <div id="userInitials">U</div>
+      <div id="username">User</div>
+      <button id="logoutBtn">Logout</button>
+    </div>
   </div>
-  <div class="header-right">
-    <div id="userInitials">U</div>
-    <span id="username">User</span>
-    <button id="logoutBtn">Logout</button>
+
+  <div class="container">
+    <h2>Upload Expense Transactions CSV</h2>
+
+    <input type="file" id="csvInput" accept=".csv" />
+
+    <div id="loadingMsg" class="loading" style="display:none;">Loading...</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>SINO</th>
+          <th>DATE</th>
+          <th>TIME</th>
+          <th>ACCOUNT HEADER</th>
+          <th>MODE</th>
+          <th>BANK NAME</th>
+          <th>INCOME</th>
+          <th>EXPENSES</th>
+          <th>DESCRIPTION</th>
+          <th>BALANCE</th>
+          <th>ATTACHMENT</th>
+        </tr>
+      </thead>
+      <tbody id="transactionsTableBody">
+        <tr><td colspan="11" style="text-align:center; color:#777;">No transactions loaded.</td></tr>
+      </tbody>
+    </table>
   </div>
-</div>
 
-<!-- Main Content -->
-<div class="container">
-  <h2>User Transactions</h2>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      query,
+      where,
+      getDocs,
+      deleteDoc,
+      doc,
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      signOut,
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-  <table>
-    <thead>
-      <tr>
-        <th>SINO</th>
-        <th>DATE</th>
-        <th>TIME</th>
-        <th>ACCOUNT HEADER</th>
-        <th>MODE</th>
-        <th>BANK NAME</th>
-        <th>INCOME</th>
-        <th>EXPENSES</th>
-        <th>DESCRIPTION</th>
-        <th>BALANCE</th>
-        <th>ATTACHMENT</th>
-      </tr>
-    </thead>
-    <tbody id="transactionsTableBody"></tbody>
-  </table>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
 
-  <div class="pagination" id="paginationControls">
-    <button id="prevPage" disabled>Previous</button>
-    <span id="pageInfo"></span>
-    <button id="nextPage" disabled>Next</button>
-  </div>
-</div>
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
 
-<!-- Firebase SDK -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import {
-    getFirestore,
-    collection,
-    query,
-    where,
-    orderBy,
-    limit,
-    startAfter,
-    getDocs
-  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-  import {
-    getAuth,
-    onAuthStateChanged,
-    signOut,
-  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    const usernameElem = document.getElementById("username");
+    const initialsElem = document.getElementById("userInitials");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const csvInput = document.getElementById("csvInput");
+    const tableBody = document.getElementById("transactionsTableBody");
+    const loadingMsg = document.getElementById("loadingMsg");
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-    authDomain: "budget-app-1365f.firebaseapp.com",
-    projectId: "budget-app-1365f",
-    storageBucket: "budget-app-1365f.appspot.com",
-    messagingSenderId: "1036194450411",
-    appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-    measurementId: "G-YFFJL2H54X"
-  };
+    let currentUser = null;
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const auth = getAuth(app);
+    // Show logged-in user info or redirect if not logged in
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        currentUser = user;
+        const displayName = user.displayName || user.email || "User";
+        usernameElem.textContent = displayName;
+        initialsElem.textContent = displayName.charAt(0).toUpperCase();
 
-  const userInitialsElem = document.getElementById("userInitials");
-  const usernameElem = document.getElementById("username");
-  const logoutBtn = document.getElementById("logoutBtn");
-  const datetimeElem = document.getElementById("datetime");
+        await loadTransactions();
+      } else {
+        alert("Please login first.");
+        window.location.href = "index.html";
+      }
+    });
 
-  const transactionsTableBody = document.getElementById("transactionsTableBody");
-  const prevPageBtn = document.getElementById("prevPage");
-  const nextPageBtn = document.getElementById("nextPage");
-  const pageInfo = document.getElementById("pageInfo");
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "index.html";
+    });
 
-  let currentUser = null;
-  let transactions = [];
-  let currentPage = 1;
-  const pageSize = 10;
-  let totalPages = 1;
-
-  // Show date/time live
-  function updateDateTime() {
-    const now = new Date();
-    datetimeElem.textContent = now.toLocaleString();
-  }
-  setInterval(updateDateTime, 1000);
-  updateDateTime();
-
-  // Format date to YYYY-MM-DD
-  function formatDate(timestamp) {
-    if (!timestamp) return "";
-    const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return d.toLocaleDateString();
-  }
-
-  // Format time HH:mm:ss
-  function formatTime(timestamp) {
-    if (!timestamp) return "";
-    const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return d.toLocaleTimeString();
-  }
-
-  // Render transactions for the current page
-  function renderTransactions() {
-    transactionsTableBody.innerHTML = "";
-
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    const pageItems = transactions.slice(start, end);
-
-    if (pageItems.length === 0) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 11;
-      td.style.textAlign = "center";
-      td.textContent = "No transactions found.";
-      tr.appendChild(td);
-      transactionsTableBody.appendChild(tr);
-      pageInfo.textContent = "";
-      prevPageBtn.disabled = true;
-      nextPageBtn.disabled = true;
-      return;
+    // CSV Parsing helper (simple, assuming no commas inside fields)
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      const headers = lines[0].split(",").map(h => h.trim());
+      const rows = lines.slice(1);
+      return rows.map(line => {
+        const values = line.split(",").map(v => v.trim());
+        let obj = {};
+        headers.forEach((h,i) => obj[h] = values[i] || "");
+        return obj;
+      });
     }
 
-    pageItems.forEach((txn, index) => {
-      const tr = document.createElement("tr");
+    csvInput.addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
 
-      const attachmentCell = document.createElement("td");
-      if (txn.attachmentUrl) {
-        const link = document.createElement("a");
-        link.href = txn.attachmentUrl;
-        link.target = "_blank";
-        link.textContent = "View";
-        link.className = "attachment-link";
-        attachmentCell.appendChild(link);
-      } else {
-        attachmentCell.textContent = "—";
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        alert("Please upload a valid CSV file.");
+        return;
       }
 
-      tr.innerHTML = `
-        <td>${start + index + 1}</td>
-        <td>${txn.date || ""}</td>
-        <td>${txn.time || ""}</td>
-        <td>${txn.accountHeader || ""}</td>
-        <td>${txn.mode || ""}</td>
-        <td>${txn.bankName || ""}</td>
-        <td>${txn.income || ""}</td>
-        <td>${txn.expenses || ""}</td>
-        <td>${txn.description || ""}</td>
-        <td>${txn.balance || ""}</td>
-      `;
-      tr.appendChild(attachmentCell);
+      loadingMsg.style.display = "block";
 
-      transactionsTableBody.appendChild(tr);
+      const text = await file.text();
+      let parsedData;
+      try {
+        parsedData = parseCSV(text);
+      } catch (e) {
+        alert("Error parsing CSV: " + e.message);
+        loadingMsg.style.display = "none";
+        return;
+      }
+
+      // Validate expected columns exist
+      const requiredCols = [
+        "SINO", "DATE", "TIME", "ACCOUNT HEADER", "MODE", "BANK NAME",
+        "INCOME", "EXPENSES", "DESCRIPTION", "BALANCE", "ATTACHEMENT"
+      ];
+
+      for (const col of requiredCols) {
+        if (!Object.keys(parsedData[0]).includes(col)) {
+          alert(`Missing column in CSV: "${col}"`);
+          loadingMsg.style.display = "none";
+          return;
+        }
+      }
+
+      // Save each row as a doc in Firestore, in "transactions" collection with userId field
+      try {
+        // Optional: clear existing transactions for user before uploading new ones
+        await clearUserTransactions();
+
+        for (const row of parsedData) {
+          // Normalize numbers (income, expenses, balance)
+          row.INCOME = parseFloat(row.INCOME) || 0;
+          row.EXPENSES = parseFloat(row.EXPENSES) || 0;
+          row.BALANCE = parseFloat(row.BALANCE) || 0;
+
+          await addDoc(collection(db, "transactions"), {
+            userId: currentUser.uid,
+            SINO: row.SINO,
+            DATE: row.DATE,
+            TIME: row.TIME,
+            ACCOUNT_HEADER: row["ACCOUNT HEADER"],
+            MODE: row.MODE,
+            BANK_NAME: row["BANK NAME"],
+            INCOME: row.INCOME,
+            EXPENSES: row.EXPENSES,
+            DESCRIPTION: row.DESCRIPTION,
+            BALANCE: row.BALANCE,
+            ATTACHEMENT: row.ATTACHEMENT
+          });
+        }
+        alert("CSV uploaded successfully!");
+        csvInput.value = "";
+        await loadTransactions();
+      } catch (err) {
+        alert("Error saving data: " + err.message);
+      } finally {
+        loadingMsg.style.display = "none";
+      }
     });
 
-    pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
-    prevPageBtn.disabled = currentPage === 1;
-    nextPageBtn.disabled = currentPage === totalPages;
-  }
-
-  // Pagination handlers
-  prevPageBtn.addEventListener("click", () => {
-    if (currentPage > 1) {
-      currentPage--;
-      renderTransactions();
+    // Clear all transactions for current user (optional)
+    async function clearUserTransactions() {
+      const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
+      const snapshot = await getDocs(q);
+      const batchDeletes = snapshot.docs.map(docSnap => deleteDoc(doc(db, "transactions", docSnap.id)));
+      await Promise.all(batchDeletes);
     }
-  });
 
-  nextPageBtn.addEventListener("click", () => {
-    if (currentPage < totalPages) {
-      currentPage++;
-      renderTransactions();
+    // Load and display transactions
+    async function loadTransactions() {
+      tableBody.innerHTML = "";
+      loadingMsg.style.display = "block";
+
+      try {
+        const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+          tableBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#777;">No transactions found.</td></tr>`;
+          return;
+        }
+
+        snapshot.forEach(docSnap => {
+          const d = docSnap.data();
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${escapeHtml(d.SINO)}</td>
+            <td>${escapeHtml(d.DATE)}</td>
+            <td>${escapeHtml(d.TIME)}</td>
+            <td>${escapeHtml(d.ACCOUNT_HEADER)}</td>
+            <td>${escapeHtml(d.MODE)}</td>
+            <td>${escapeHtml(d.BANK_NAME)}</td>
+            <td>${d.INCOME.toFixed(2)}</td>
+            <td>${d.EXPENSES.toFixed(2)}</td>
+            <td>${escapeHtml(d.DESCRIPTION)}</td>
+            <td>${d.BALANCE.toFixed(2)}</td>
+            <td class="attachment-cell">${d.ATTACHEMENT ? `<a href="${escapeHtml(d.ATTACHEMENT)}" target="_blank">View</a>` : "-"}</td>
+          `;
+          tableBody.appendChild(tr);
+        });
+      } catch (err) {
+        alert("Error loading transactions: " + err.message);
+      } finally {
+        loadingMsg.style.display = "none";
+      }
     }
-  });
 
-  // Load user transactions from Firestore
-  async function loadTransactions(userId) {
-    const q = query(
-      collection(db, "transactions"),
-      where("userId", "==", userId),
-      orderBy("date", "desc"),
-      orderBy("time", "desc")
-    );
-    const querySnapshot = await getDocs(q);
-    transactions = [];
-
-    querySnapshot.forEach(doc => {
-      const data = doc.data();
-      transactions.push({
-        id: doc.id,
-        date: data.date || "",
-        time: data.time || "",
-        accountHeader: data.accountHeader || "",
-        mode: data.mode || "",
-        bankName: data.bankName || "",
-        income: data.income || "",
-        expenses: data.expenses || "",
-        description: data.description || "",
-        balance: data.balance || "",
-        attachmentUrl: data.attachmentUrl || ""
-      });
-    });
-
-    totalPages = Math.ceil(transactions.length / pageSize) || 1;
-    currentPage = 1;
-    renderTransactions();
-  }
-
-  // Show user info
-  function displayUser(user) {
-    const displayName = user.displayName || user.email || "User";
-    usernameElem.textContent = displayName;
-    const initials = displayName.split(" ").map(n => n[0]).join("").toUpperCase();
-    userInitialsElem.textContent = initials || "U";
-  }
-
-  // Logout handler
-  logoutBtn.addEventListener("click", () => {
-    signOut(auth)
-      .then(() => {
-        window.location.href = "login.html";
-      })
-      .catch(console.error);
-  });
-
-  // Auth state listener
-  onAuthStateChanged(auth, user => {
-    if (user) {
-      currentUser = user;
-      displayUser(user);
-      loadTransactions(user.uid);
-    } else {
-      // No user signed in, redirect to login
-      window.location.href = "login.html";
+    // Simple HTML escaping for safety
+    function escapeHtml(text) {
+      if (!text) return "";
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
-  });
-</script>
+  </script>
 
 </body>
 </html>
