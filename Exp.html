@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <meta charset="UTF‑8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Expense Tracker</title>
@@ -206,6 +207,18 @@
       <p>Loading, please wait…</p></div>
   </div>
 
+<div id="confirmDeleteModal" class="modal">
+  <div class="modal-content" style="max-width: 400px;">
+    <span class="close" id="closeConfirmDelete">&times;</span>
+    <h3 style="margin-bottom: 10px;">Confirm Delete</h3>
+    <p>Are you sure you want to delete this transaction?</p>
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+      <button id="cancelDeleteBtn" style="background:#6c757d;">Cancel</button>
+      <button id="confirmDeleteBtn" style="background:#dc3545;">Delete</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, addDoc, query, getDocs, writeBatch, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -230,6 +243,15 @@ const incomeExpenseFilter = document.getElementById("incomeExpenseFilter"), desc
 const modeFilter = document.getElementById("modeFilter"), bankFilter = document.getElementById("bankFilter");
 const applyFiltersBtn = document.getElementById("applyFiltersBtn");
 const addBtn = document.getElementById("addTransactionBtn"), modal = document.getElementById("transactionModal");
+addBtn.onclick = () => {
+  document.getElementById("modalTitle").innerText = "Add Transaction";
+  modal.classList.remove("edit-mode");
+  modal.classList.add("create-mode");
+  modal.style.display = "flex";
+  
+  form.reset(); // clear the form
+  document.getElementById("txId").value = ""; // make sure ID is cleared
+};
 const closeModal = () => modal.style.display = "none";
 const form = document.getElementById("transactionForm");
 let currentUser=null, allTransactions = [], filteredTransactions = [];
@@ -349,30 +371,31 @@ form.addEventListener("submit", async e => {
   }
 });
 
-async function deleteTransaction(id){
-  if(!confirm("Are you sure you want to delete this transaction?")) return;
-  try{
-    await deleteDoc(doc(db,"users",currentUser.uid,"transactions",id));
-    await loadTransactions();
-  } catch(err){ alert("Error deleting: "+err.message); }
+async function deleteTransaction(id) {
+const result = await Swal.fire({
+  title: 'Are you sure?',
+  text: "This transaction will be permanently deleted.",
+  icon: 'warning',
+  showCancelButton: true,
+  confirmButtonColor: '#dc3545',
+  cancelButtonColor: '#6c757d',
+  confirmButtonText: 'Yes, delete it!'
+});
+
+  if (result.isConfirmed) {
+    try {
+      loadingModal.style.display = "flex";
+      await deleteDoc(doc(db, "users", currentUser.uid, "transactions", id));
+      await loadTransactions();
+      Swal.fire('Deleted!', 'Transaction has been deleted.', 'success');
+    } catch (err) {
+      Swal.fire('Error!', err.message, 'error');
+    } finally {
+      loadingModal.style.display = "none";
+    }
+  }
 }
 
-window.editTransaction = (tx)=>{
-  document.getElementById("modalTitle").innerText="Edit Transaction";
-  modal.style.display="flex";
-  document.getElementById("txId").value = tx.id;
-  formSINO.value = tx.SINO||"";
-  formDATE.value = tx.DATE||"";
-  formTIME.value = tx.TIME||"";
-  formHEADER.value = tx.ACCOUNT_HEADER||"";
-  formMODE.value = tx.MODE||"";
-  formBANK.value = tx.BANK_NAME||"";
-  formINCOME.value = tx.INCOME||"";
-  formEXPENSE.value = tx.EXPENSE||"";
-  formDESC.value = tx.DESCRIPTION||"";
-  formBALANCE.value = tx.BALANCE||"";
-  formATTACH.value = tx.ATTACHMENT||"";
-};
 
 async function loadTransactions() {
   loadingModal.style.display="flex";
@@ -438,36 +461,40 @@ function buildTable(){
   if(pageItems.length === 0){
     tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
   } else {
-    pageItems.forEach(d=>{
+   pageItems.forEach(d =>{
       const incomeCell = d.INCOME>0 ? `<span style="color:green;">${d.INCOME.toFixed(2)}</span>`:"";
       const expenseCell = d.EXPENSE>0 ? `<span style="color:red;">${d.EXPENSE.toFixed(2)}</span>`:"";
       const balanceCell = d.BALANCE? d.BALANCE.toFixed(2):"";
       const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${escapeHtml(d.SINO)}</td>
-        <td>${escapeHtml(d.DATE)}</td>
-        <td>${escapeHtml(d.TIME)}</td>
-        <td>${escapeHtml(d.ACCOUNT_HEADER)}</td>
-        <td>${escapeHtml(d.MODE)}</td>
-        <td>${escapeHtml(d.BANK_NAME)}</td>
-        <td>${incomeCell}</td><td>${expenseCell}</td>
-        <td>${escapeHtml(d.DESCRIPTION)}</td>
-        <td>${balanceCell}</td>
-        <td class="attachment-cell">${d.ATTACHMENT?`<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank">View</a>`:"-"}</td>
-       <td>
-  <button class="btn-edit" onclick='editTransaction(${JSON.stringify(d)})'>
-    <i class="fa fa-edit"></i> Edit
-  </button>
-  <button class="btn-delete" onclick='deleteTransaction("${d.id}")'>
-    <i class="fa fa-trash"></i> Delete
-  </button>
-</td>
+row.innerHTML = `
+  <td>${escapeHtml(d.SINO)}</td>
+  <td>${escapeHtml(d.DATE)}</td>
+  <td>${escapeHtml(d.TIME)}</td>
+  <td>${escapeHtml(d.ACCOUNT_HEADER)}</td>
+  <td>${escapeHtml(d.MODE)}</td>
+  <td>${escapeHtml(d.BANK_NAME)}</td>
+  <td>${incomeCell}</td>
+  <td>${expenseCell}</td>
+  <td>${escapeHtml(d.DESCRIPTION)}</td>
+  <td>${balanceCell}</td>
+  <td class="attachment-cell">${d.ATTACHMENT ? `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a>` : ""}</td>
+  <td>
+    <button class="btn-edit" onclick='editTransaction(${JSON.stringify(d)})'>Edit</button>
+<button class="btn-delete" onclick='deleteTransaction("${d.id}")'>Delete</button>
+
+  </td>
 `;
+
       tableBody.appendChild(row);
     });
   }
   renderPagination();
 }
+
+
+
+
+
 
 function renderPagination() {
   const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage) || 1;
@@ -525,8 +552,56 @@ function renderPagination() {
 }
 
 
-function escapeHtml(t){ if(!t)return""; return t.replace(/&/g,"&amp;").replace(/</g,"&lt;")
-  .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
+
+function escapeHtml(text) {
+  if (!text) return "";
+  return text.replace(/[&<>"']/g, function(m) {
+    return ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[m];
+  });
+}
+
+let transactionToDelete = null;
+
+const confirmDeleteModal = document.getElementById("confirmDeleteModal");
+const closeConfirmDelete = document.getElementById("closeConfirmDelete");
+const cancelDeleteBtn = document.getElementById("cancelDeleteBtn");
+const confirmDeleteBtn = document.getElementById("confirmDeleteBtn");
+
+function showDeleteConfirm(id) {
+  transactionToDelete = id;
+  confirmDeleteModal.style.display = "flex";
+}
+
+closeConfirmDelete.onclick = () => confirmDeleteModal.style.display = "none";
+cancelDeleteBtn.onclick = () => confirmDeleteModal.style.display = "none";
+window.onclick = (e) => {
+  if (e.target === confirmDeleteModal) confirmDeleteModal.style.display = "none";
+};
+
+confirmDeleteBtn.onclick = async () => {
+  if (!transactionToDelete) return;
+  confirmDeleteModal.style.display = "none";
+  try {
+    loadingModal.style.display = "flex";
+    await deleteDoc(doc(db, "users", currentUser.uid, "transactions", transactionToDelete));
+    await loadTransactions();
+  } catch (err) {
+    alert("Error deleting: " + err.message);
+  } finally {
+    loadingModal.style.display = "none";
+    transactionToDelete = null;
+  }
+};
+
+
+
+
 </script>
 
 </body>
