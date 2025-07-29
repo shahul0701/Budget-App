@@ -46,7 +46,7 @@
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         currentUser = user;
-        document.getElementById("user-name").textContent = user.displayName || "User";
+        document.getElementById("user-name").textContent = user.displayName || user.email || "User";
         document.getElementById("user-photo").src = user.photoURL || "https://via.placeholder.com/40";
         await loadEntries(user.uid);
         applyFilters(); // Apply default filters
@@ -166,19 +166,28 @@
       }
     }
 
-    // Show the upload modal
+    // Show the add entry modal
     window.uploadEntry = () => {
       document.getElementById("uploadModal").style.display = "block";
     };
 
-    // Close the upload modal
-    function closeModal() {
-      document.getElementById("uploadModal").style.display = "none";
-      document.getElementById("uploadForm").reset();
+    // Show the CSV upload modal
+    window.openCsvModal = () => {
+      document.getElementById("csvUploadModal").style.display = "block";
+    };
+
+    // Close modals
+    function closeModal(id) {
+      document.getElementById(id).style.display = "none";
+      if (id === "uploadModal") {
+        document.getElementById("uploadForm").reset();
+      } else if (id === "csvUploadModal") {
+        document.getElementById("csvUploadForm").reset();
+      }
     }
     window.closeModal = closeModal;
 
-    // Upload form submission handler
+    // Upload form submission handler for single entry
     async function handleUpload(event) {
       event.preventDefault();
 
@@ -234,7 +243,7 @@
           createdAt: serverTimestamp()
         });
         alert("Entry added successfully!");
-        closeModal();
+        closeModal("uploadModal");
         await loadEntries(currentUser.uid);
         applyFilters();
       } catch (err) {
@@ -243,11 +252,113 @@
     }
     window.handleUpload = handleUpload;
 
+    // Handle CSV upload form submit
+    async function handleCSVUpload(event) {
+      event.preventDefault();
+
+      if (!currentUser) {
+        alert("User not logged in");
+        return;
+      }
+
+      const form = event.target;
+      const file = form.csvfile.files[0];
+      if (!file) {
+        alert("Please select a CSV file.");
+        return;
+      }
+
+      const text = await file.text();
+
+      // Parse CSV (simple, assuming header row)
+      const lines = text.trim().split(/\r?\n/);
+      if (lines.length < 2) {
+        alert("CSV file is empty or has no data.");
+        return;
+      }
+
+      // Expected headers:
+      // type,amount,date,time,account,mode,bank,note
+      // Example:
+      // income,1000,2025-07-28,14:30,My Account,Cash,My Bank,Salary for July
+
+      const header = lines[0].toLowerCase().split(",");
+      const expectedHeaders = ["type","amount","date","time","account","mode","bank","note"];
+
+      // Check if headers are correct (order insensitive)
+      const missingHeaders = expectedHeaders.filter(h => !header.includes(h));
+      if (missingHeaders.length > 0) {
+        alert("Missing headers in CSV: " + missingHeaders.join(", "));
+        return;
+      }
+
+      // Map header indexes for flexibility
+      const idxMap = {};
+      expectedHeaders.forEach(h => {
+        idxMap[h] = header.indexOf(h);
+      });
+
+      let addedCount = 0;
+      let failedCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const row = lines[i].split(",");
+
+        // Read values using idxMap
+        const type = (row[idxMap.type] || "").trim().toLowerCase();
+        const amountStr = (row[idxMap.amount] || "").trim();
+        const dateStr = (row[idxMap.date] || "").trim();
+        const timeStr = (row[idxMap.time] || "").trim();
+        const account = (row[idxMap.account] || "").trim();
+        const mode = (row[idxMap.mode] || "").trim();
+        const bank = (row[idxMap.bank] || "").trim();
+        const note = (row[idxMap.note] || "").trim();
+
+        const amount = parseFloat(amountStr);
+        if (!["income", "expense"].includes(type) || isNaN(amount) || amount <= 0 || !dateStr || !timeStr) {
+          failedCount++;
+          continue; // skip invalid rows
+        }
+
+        const date = new Date(dateStr + "T" + timeStr);
+        if (isNaN(date.getTime())) {
+          failedCount++;
+          continue;
+        }
+
+        try {
+          await addDoc(collection(db, "users", currentUser.uid, "entries"), {
+            type,
+            amount,
+            note,
+            account,
+            mode,
+            bank,
+            date: date.toISOString(),
+            attachment: "",
+            createdAt: serverTimestamp()
+          });
+          addedCount++;
+        } catch {
+          failedCount++;
+        }
+      }
+
+      alert(`CSV upload completed.\nAdded: ${addedCount}\nFailed: ${failedCount}`);
+      closeModal("csvUploadModal");
+      await loadEntries(currentUser.uid);
+      applyFilters();
+    }
+    window.handleCSVUpload = handleCSVUpload;
+
     // Close modal if clicked outside the modal content
     window.onclick = function(event) {
-      const modal = document.getElementById("uploadModal");
-      if (event.target === modal) {
-        closeModal();
+      const uploadModal = document.getElementById("uploadModal");
+      const csvModal = document.getElementById("csvUploadModal");
+      if (event.target === uploadModal) {
+        closeModal("uploadModal");
+      } else if (event.target === csvModal) {
+        closeModal("csvUploadModal");
       }
     };
   </script>
@@ -298,9 +409,10 @@
     input[type="text"],
     input[type="number"],
     input[type="date"],
-    input[type="time"] {
+    input[type="time"],
+    input[type="file"] {
       padding: 5px;
-      margin: 0 5px;
+      margin: 0 5px 5px 0;
     }
 
     table {
@@ -336,7 +448,7 @@
     }
 
     /* Modal styles */
-    #uploadModal {
+    #uploadModal, #csvUploadModal {
       display: none;
       position: fixed;
       z-index: 999;
@@ -349,7 +461,7 @@
       background-color: rgba(0, 0, 0, 0.4);
     }
 
-    #uploadModal .modal-content {
+    #uploadModal .modal-content, #csvUploadModal .modal-content {
       background-color: #fefefe;
       margin: auto;
       padding: 20px;
@@ -359,41 +471,51 @@
       position: relative;
     }
 
-    #uploadModal h2 {
+    #uploadModal h2, #csvUploadModal h2 {
       margin-top: 0;
       margin-bottom: 10px;
       color: #007BFF;
     }
 
-    #uploadModal label {
+    #uploadModal label, #csvUploadModal label {
       display: block;
       margin-top: 10px;
       font-weight: 600;
     }
 
-    #uploadModal input,
-    #uploadModal select,
-    #uploadModal textarea {
+    #uploadModal input, #uploadModal select, #csvUploadModal input {
       width: 100%;
-      padding: 6px;
-      margin-top: 5px;
       box-sizing: border-box;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      resize: vertical;
+      margin-top: 5px;
     }
 
-    #uploadModal textarea {
-      height: 60px;
-    }
-
-    #uploadModal .buttons {
+    #uploadModal .modal-actions, #csvUploadModal .modal-actions {
       margin-top: 15px;
       text-align: right;
     }
 
-    #uploadModal .buttons button {
-      margin-left: 10px;
+    #uploadModal .close, #csvUploadModal .close {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      font-size: 22px;
+      font-weight: bold;
+      color: #aaa;
+      cursor: pointer;
+    }
+
+    #uploadModal .close:hover, #csvUploadModal .close:hover {
+      color: #000;
+    }
+
+    #csvInstructions {
+      font-size: 0.9em;
+      color: #333;
+      background: #eef5ff;
+      padding: 8px;
+      border-radius: 5px;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
     }
   </style>
 </head>
@@ -401,101 +523,116 @@
 
   <div class="header">
     <div class="user-info">
-      <img id="user-photo" src="" alt="User Photo" />
-      <span id="user-name"></span>
+      <img id="user-photo" src="https://via.placeholder.com/40" alt="User" />
+      <div id="user-name">User</div>
     </div>
     <div class="buttons">
-      <button onclick="location.href='home.html'">Home</button>
-      <button onclick="uploadEntry()">Add More</button>
+      <button onclick="uploadEntry()">Add Entry</button>
+      <button onclick="openCsvModal()">Upload CSV</button>
     </div>
   </div>
 
   <div class="filters">
-    <div>
-      <label>Filter by Date:</label>
-      <select id="dateFilter" onchange="applyFilters()">
-        <option value="all">All</option>
-        <option value="week">This Week</option>
-        <option value="month">This Month</option>
-        <option value="year">This Year</option>
-      </select>
+    <select id="typeFilter" onchange="applyFilters()">
+      <option value="all">All Types</option>
+      <option value="income">Income</option>
+      <option value="expense">Expense</option>
+    </select>
 
-      <label>Type:</label>
-      <select id="typeFilter" onchange="applyFilters()">
-        <option value="all">All</option>
-        <option value="income">Income</option>
-        <option value="expense">Expense</option>
-      </select>
+    <input type="text" id="searchFilter" placeholder="Search notes or account" oninput="applyFilters()" />
 
-      <label>Search:</label>
-      <input type="text" id="searchFilter" placeholder="e.g. petrol" onkeyup="applyFilters()" />
-    </div>
+    <select id="dateFilter" onchange="applyFilters()">
+      <option value="all">All Time</option>
+      <option value="week">Past Week</option>
+      <option value="month">This Month</option>
+      <option value="year">This Year</option>
+    </select>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th>SINO</th>
-        <th>DATE</th>
-        <th>TIME</th>
-        <th>ACCOUNT</th>
-        <th>MODE OF PAYMENT</th>
-        <th>BANK NAME</th>
-        <th>INCOME</th>
-        <th>EXPENSES</th>
-        <th>DESCRIPTION</th>
-        <th>BALANCE</th>
-        <th>ATTACHMENT</th>
+        <th>#</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Account</th>
+        <th>Mode</th>
+        <th>Bank</th>
+        <th>Income</th>
+        <th>Expense</th>
+        <th>Note</th>
+        <th>Balance</th>
+        <th>Attachment</th>
       </tr>
     </thead>
-    <tbody id="entry-table-body">
-      <!-- Entries here -->
-    </tbody>
+    <tbody id="entry-table-body"></tbody>
   </table>
 
   <div id="pagination"></div>
 
-  <!-- Upload Modal -->
+  <!-- Add Entry Modal -->
   <div id="uploadModal">
     <div class="modal-content">
-      <h2>Add New Entry</h2>
+      <span class="close" onclick="closeModal('uploadModal')">&times;</span>
+      <h2>Add Entry</h2>
       <form id="uploadForm" onsubmit="handleUpload(event)">
-        <label for="type">Type:</label>
+        <label for="type">Type</label>
         <select id="type" name="type" required>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
         </select>
 
-        <label for="amount">Amount:</label>
-        <input type="number" step="0.01" id="amount" name="amount" required min="0.01" />
+        <label for="amount">Amount</label>
+        <input type="number" name="amount" id="amount" step="0.01" min="0" required />
 
-        <label for="date">Date:</label>
-        <input type="date" id="date" name="date" required />
+        <label for="date">Date</label>
+        <input type="date" name="date" id="date" required />
 
-        <label for="time">Time:</label>
-        <input type="time" id="time" name="time" required />
+        <label for="time">Time</label>
+        <input type="time" name="time" id="time" required />
 
-        <label for="account">Account:</label>
-        <input type="text" id="account" name="account" placeholder="Account name" />
+        <label for="account">Account</label>
+        <input type="text" name="account" id="account" />
 
-        <label for="mode">Mode of Payment:</label>
-        <input type="text" id="mode" name="mode" placeholder="Cash, Card, etc." />
+        <label for="mode">Mode</label>
+        <input type="text" name="mode" id="mode" />
 
-        <label for="bank">Bank Name:</label>
-        <input type="text" id="bank" name="bank" placeholder="Bank name" />
+        <label for="bank">Bank</label>
+        <input type="text" name="bank" id="bank" />
 
-        <label for="note">Description:</label>
-        <textarea id="note" name="note" placeholder="Note or description"></textarea>
+        <label for="note">Note</label>
+        <input type="text" name="note" id="note" />
 
-        <label for="attachment">Attachment (optional):</label>
-        <input type="file" id="attachment" name="attachment" accept="image/*,application/pdf" />
+        <label for="attachment">Attachment (optional)</label>
+        <input type="file" name="attachment" id="attachment" accept="image/*,application/pdf" />
 
-        <div class="buttons">
-          <button type="button" onclick="closeModal()">Cancel</button>
-          <button type="submit">Add Entry</button>
+        <div class="modal-actions">
+          <button type="submit">Save</button>
+          <button type="button" onclick="closeModal('uploadModal')">Cancel</button>
         </div>
       </form>
     </div>
   </div>
+
+  <!-- CSV Upload Modal -->
+  <div id="csvUploadModal">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal('csvUploadModal')">&times;</span>
+      <h2>Upload CSV</h2>
+      <div id="csvInstructions">
+        CSV Format (Headers): type,amount,date,time,account,mode,bank,note
+        Example:
+        income,1000,2025-07-28,14:30,My Account,Cash,My Bank,Salary for July
+      </div>
+      <form id="csvUploadForm" onsubmit="handleCSVUpload(event)">
+        <input type="file" name="csvfile" accept=".csv" required />
+        <div class="modal-actions">
+          <button type="submit">Upload</button>
+          <button type="button" onclick="closeModal('csvUploadModal')">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
 </body>
 </html>
