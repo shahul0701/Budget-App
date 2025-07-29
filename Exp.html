@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Expense Ledger</title>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+    import {
+      getFirestore,
+      collection,
+      query,
+      orderBy,
+      getDocs,
+      addDoc,
+      serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+    import {
+      getStorage,
+      ref,
+      uploadBytes,
+      getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+
+    let allEntries = [];
+    let filteredEntries = [];
+    let currentPage = 1;
+    const pageSize = 10;
+    let currentUser = null;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        currentUser = user;
+        document.getElementById("user-name").textContent = user.displayName || "User";
+        document.getElementById("user-photo").src = user.photoURL || "https://via.placeholder.com/40";
+        await loadEntries(user.uid);
+        applyFilters(); // Apply default filters
+      } else {
+        window.location.href = "login.html";
+      }
+    });
+
+    async function loadEntries(uid) {
+      const entriesRef = collection(db, "users", uid, "entries");
+      const q = query(entriesRef, orderBy("date", "desc"));
+      const querySnapshot = await getDocs(q);
+      allEntries = [];
+      querySnapshot.forEach(doc => {
+        allEntries.push({ id: doc.id, ...doc.data() });
+      });
+    }
+
+    function applyFilters() {
+      const type = document.getElementById("typeFilter").value;
+      const search = document.getElementById("searchFilter").value.toLowerCase();
+      const dateRange = document.getElementById("dateFilter").value;
+
+      const now = new Date();
+      let startDate = new Date(0);
+      let endDate = new Date();
+
+      if (dateRange === "week") {
+        startDate = new Date();
+        startDate.setDate(now.getDate() - 7);
+      } else if (dateRange === "month") {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      } else if (dateRange === "year") {
+        startDate = new Date(now.getFullYear(), 0, 1);
+      } else if (dateRange === "all") {
+        startDate = new Date(0); // from epoch start
+      }
+
+      filteredEntries = allEntries.filter(entry => {
+        const entryDate = new Date(entry.date);
+        const matchesDate = entryDate >= startDate && entryDate <= endDate;
+        const matchesType = type === "all" || entry.type === type;
+        const matchesSearch = search === "" || (entry.note || "").toLowerCase().includes(search) || (entry.account || "").toLowerCase().includes(search);
+        return matchesDate && matchesType && matchesSearch;
+      });
+
+      currentPage = 1;
+      renderTable();
+      renderPagination();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("entry-table-body");
+      tbody.innerHTML = "";
+
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize;
+      const entriesToShow = filteredEntries.slice(start, end);
+
+      let index = start + 1;
+      let runningBalance = 0;
+
+      entriesToShow.forEach(entry => {
+        if (entry.type === "income") {
+          runningBalance += entry.amount;
+        } else {
+          runningBalance -= entry.amount;
+        }
+
+        const date = new Date(entry.date);
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${index++}</td>
+          <td>${date.toLocaleDateString()}</td>
+          <td>${date.toLocaleTimeString()}</td>
+          <td>${entry.account || ''}</td>
+          <td>${entry.mode || ''}</td>
+          <td>${entry.bank || ''}</td>
+          <td>${entry.type === "income" ? entry.amount.toFixed(2) : ''}</td>
+          <td>${entry.type === "expense" ? entry.amount.toFixed(2) : ''}</td>
+          <td>${entry.note || ''}</td>
+          <td>${runningBalance.toFixed(2)}</td>
+          <td>${entry.attachment ? `<a href="${entry.attachment}" target="_blank">View</a>` : ''}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function renderPagination() {
+      const totalPages = Math.ceil(filteredEntries.length / pageSize);
+      const pagination = document.getElementById("pagination");
+      pagination.innerHTML = "";
+
+      const startPage = Math.max(1, currentPage - 1);
+      const endPage = Math.min(totalPages, startPage + 2);
+
+      if (currentPage > 1) {
+        const prev = document.createElement("button");
+        prev.textContent = "« Prev";
+        prev.onclick = () => { currentPage--; renderTable(); renderPagination(); };
+        pagination.appendChild(prev);
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = i;
+        if (i === currentPage) btn.style.fontWeight = "bold";
+        btn.onclick = () => { currentPage = i; renderTable(); renderPagination(); };
+        pagination.appendChild(btn);
+      }
+
+      if (currentPage < totalPages) {
+        const next = document.createElement("button");
+        next.textContent = "Next »";
+        next.onclick = () => { currentPage++; renderTable(); renderPagination(); };
+        pagination.appendChild(next);
+      }
+    }
+
+    // Show the upload modal
+    window.uploadEntry = () => {
+      document.getElementById("uploadModal").style.display = "block";
+    };
+
+    // Close the upload modal
+    function closeModal() {
+      document.getElementById("uploadModal").style.display = "none";
+      document.getElementById("uploadForm").reset();
+    }
+    window.closeModal = closeModal;
+
+    // Upload form submission handler
+    async function handleUpload(event) {
+      event.preventDefault();
+
+      if (!currentUser) {
+        alert("User not logged in");
+        return;
+      }
+
+      const form = event.target;
+      const type = form.type.value;
+      const amount = parseFloat(form.amount.value);
+      if (isNaN(amount) || amount <= 0) {
+        alert("Please enter a valid positive amount");
+        return;
+      }
+      const note = form.note.value.trim();
+      const account = form.account.value.trim();
+      const mode = form.mode.value.trim();
+      const bank = form.bank.value.trim();
+      const dateStr = form.date.value;
+      const timeStr = form.time.value;
+      if (!dateStr || !timeStr) {
+        alert("Please select both date and time");
+        return;
+      }
+      const date = new Date(dateStr + "T" + timeStr);
+      const file = form.attachment.files[0];
+
+      // Upload attachment if present
+      let attachmentURL = "";
+      if (file) {
+        try {
+          const storageRef = ref(storage, `users/${currentUser.uid}/attachments/${Date.now()}_${file.name}`);
+          const snapshot = await uploadBytes(storageRef, file);
+          attachmentURL = await getDownloadURL(snapshot.ref);
+        } catch (err) {
+          alert("Attachment upload failed: " + err.message);
+          return;
+        }
+      }
+
+      // Save entry to Firestore
+      try {
+        await addDoc(collection(db, "users", currentUser.uid, "entries"), {
+          type,
+          amount,
+          note,
+          account,
+          mode,
+          bank,
+          date: date.toISOString(),
+          attachment: attachmentURL,
+          createdAt: serverTimestamp()
+        });
+        alert("Entry added successfully!");
+        closeModal();
+        await loadEntries(currentUser.uid);
+        applyFilters();
+      } catch (err) {
+        alert("Failed to save entry: " + err.message);
+      }
+    }
+    window.handleUpload = handleUpload;
+
+    // Close modal if clicked outside the modal content
+    window.onclick = function(event) {
+      const modal = document.getElementById("uploadModal");
+      if (event.target === modal) {
+        closeModal();
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f4f6f8;
+      padding: 20px;
+    }
+
+    .header,
+    .filters {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+    }
+
+    .user-info img {
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      margin-right: 10px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      padding: 6px 12px;
+      background: #2c7be5;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    select,
+    input[type="text"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"] {
+      padding: 5px;
+      margin: 0 5px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background-color: white;
+    }
+
+    th,
+    td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #007BFF;
+      color: white;
+    }
+
+    tr:nth-child(even) {
+      background-color: #f2f2f2;
+    }
+
+    #pagination {
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    #pagination button {
+      margin: 0 3px;
+      padding: 5px 10px;
+    }
+
+    /* Modal styles */
+    #uploadModal {
+      display: none;
+      position: fixed;
+      z-index: 999;
+      padding-top: 80px;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0, 0, 0, 0.4);
+    }
+
+    #uploadModal .modal-content {
+      background-color: #fefefe;
+      margin: auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 400px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      position: relative;
+    }
+
+    #uploadModal h2 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      color: #007BFF;
+    }
+
+    #uploadModal label {
+      display: block;
+      margin-top: 10px;
+      font-weight: 600;
+    }
+
+    #uploadModal input,
+    #uploadModal select,
+    #uploadModal textarea {
+      width: 100%;
+      padding: 6px;
+      margin-top: 5px;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      resize: vertical;
+    }
+
+    #uploadModal textarea {
+      height: 60px;
+    }
+
+    #uploadModal .buttons {
+      margin-top: 15px;
+      text-align: right;
+    }
+
+    #uploadModal .buttons button {
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="user-info">
+      <img id="user-photo" src="" alt="User Photo" />
+      <span id="user-name"></span>
+    </div>
+    <div class="buttons">
+      <button onclick="location.href='home.html'">Home</button>
+      <button onclick="uploadEntry()">Add More</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div>
+      <label>Filter by Date:</label>
+      <select id="dateFilter" onchange="applyFilters()">
+        <option value="all">All</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+        <option value="year">This Year</option>
+      </select>
+
+      <label>Type:</label>
+      <select id="typeFilter" onchange="applyFilters()">
+        <option value="all">All</option>
+        <option value="income">Income</option>
+        <option value="expense">Expense</option>
+      </select>
+
+      <label>Search:</label>
+      <input type="text" id="searchFilter" placeholder="e.g. petrol" onkeyup="applyFilters()" />
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>SINO</th>
+        <th>DATE</th>
+        <th>TIME</th>
+        <th>ACCOUNT</th>
+        <th>MODE OF PAYMENT</th>
+        <th>BANK NAME</th>
+        <th>INCOME</th>
+        <th>EXPENSES</th>
+        <th>DESCRIPTION</th>
+        <th>BALANCE</th>
+        <th>ATTACHMENT</th>
+      </tr>
+    </thead>
+    <tbody id="entry-table-body">
+      <!-- Entries here -->
+    </tbody>
+  </table>
+
+  <div id="pagination"></div>
+
+  <!-- Upload Modal -->
+  <div id="uploadModal">
+    <div class="modal-content">
+      <h2>Add New Entry</h2>
+      <form id="uploadForm" onsubmit="handleUpload(event)">
+        <label for="type">Type:</label>
+        <select id="type" name="type" required>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+
+        <label for="amount">Amount:</label>
+        <input type="number" step="0.01" id="amount" name="amount" required min="0.01" />
+
+        <label for="date">Date:</label>
+        <input type="date" id="date" name="date" required />
+
+        <label for="time">Time:</label>
+        <input type="time" id="time" name="time" required />
+
+        <label for="account">Account:</label>
+        <input type="text" id="account" name="account" placeholder="Account name" />
+
+        <label for="mode">Mode of Payment:</label>
+        <input type="text" id="mode" name="mode" placeholder="Cash, Card, etc." />
+
+        <label for="bank">Bank Name:</label>
+        <input type="text" id="bank" name="bank" placeholder="Bank name" />
+
+        <label for="note">Description:</label>
+        <textarea id="note" name="note" placeholder="Note or description"></textarea>
+
+        <label for="attachment">Attachment (optional):</label>
+        <input type="file" id="attachment" name="attachment" accept="image/*,application/pdf" />
+
+        <div class="buttons">
+          <button type="button" onclick="closeModal()">Cancel</button>
+          <button type="submit">Add Entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
