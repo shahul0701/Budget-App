@@ -66,6 +66,63 @@
       border:none; border-radius:4px; font-size:16px; cursor:pointer; }
     .modal-content button:hover { background:#0056b3; }
     .close { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; }
+
+    .loading-modal {
+  display: none;
+  position: fixed;
+  z-index: 2000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.6);
+  justify-content: center;
+  align-items: center;
+}
+
+.loading-content {
+  text-align: center;
+  background: white;
+  padding: 30px 40px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  color: #007bff;
+  font-size: 18px;
+}
+
+.btn-edit {
+  background: #eccc6c;
+  color: #000;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-edit:hover {
+  background: #eccc6c;
+}
+
+.btn-delete {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-delete:hover {
+  background: #c82333;
+}
+
+.create-mode .modal-content {
+  border-left: 6px solid #28a745; /* Green for add */
+}
+
+.edit-mode .modal-content {
+  border-left: 6px solid #ffc107; /* Yellow for edit */
+}
+
+
   </style>
 </head>
 <body>
@@ -138,7 +195,7 @@
         <label>EXPENSE: <input type="number" step="0.01" id="formEXPENSE" /></label>
         <label>DESCRIPTION: <input type="text" id="formDESC" /></label>
         <label>BALANCE: <input type="number" step="0.01" id="formBALANCE" /></label>
-        <label>ATTACHMENT URL: <input type="url" id="formATTACH" /></label>
+        <label>ATTACHMENT FILE: <input type="file" id="formATTACH" accept="image/*,application/pdf" /></label>
         <button type="submit">Save</button>
       </form>
     </div>
@@ -223,31 +280,73 @@ dateFilter.addEventListener("change", ()=>{
 });
 applyFiltersBtn.addEventListener("click", applyFilters);
 
-addBtn.addEventListener("click", ()=> {
-  form.reset(); document.getElementById("txId").value="";
-  document.getElementById("modalTitle").innerText="Add Transaction"; modal.style.display="flex";
-});
+window.editTransaction = (tx) => {
+  document.getElementById("modalTitle").innerText = "Edit Transaction";
+  modal.classList.remove("create-mode");
+  modal.classList.add("edit-mode");
+  modal.style.display = "flex";
+
+  document.getElementById("txId").value = tx.id;
+  formSINO.value = tx.SINO || "";
+  formDATE.value = tx.DATE || "";
+  formTIME.value = tx.TIME || "";
+  formHEADER.value = tx.ACCOUNT_HEADER || "";
+  formMODE.value = tx.MODE || "";
+  formBANK.value = tx.BANK_NAME || "";
+  formINCOME.value = tx.INCOME || "";
+  formEXPENSE.value = tx.EXPENSE || "";
+  formDESC.value = tx.DESCRIPTION || "";
+  formBALANCE.value = tx.BALANCE || "";
+  formATTACH.value = tx.ATTACHMENT || "";
+};
+
 document.querySelector(".close").addEventListener("click", closeModal);
 window.addEventListener("click", e=>{ if(e.target===modal) closeModal(); });
 
-form.addEventListener("submit", async e=>{
+form.addEventListener("submit", async e => {
   e.preventDefault();
   const txId = document.getElementById("txId").value;
+  const file = formATTACH.files[0];
   const data = {
-    SINO:formSINO.value, DATE:formDATE.value, TIME:formTIME.value,
-    ACCOUNT_HEADER:formHEADER.value, MODE:formMODE.value, BANK_NAME:formBANK.value,
-    INCOME:parseFloat(formINCOME.value)||0, EXPENSE:parseFloat(formEXPENSE.value)||0,
-    DESCRIPTION:formDESC.value, BALANCE:parseFloat(formBALANCE.value)||0,
-    ATTACHMENT:formATTACH.value
+    SINO: formSINO.value,
+    DATE: formDATE.value,
+    TIME: formTIME.value,
+    ACCOUNT_HEADER: formHEADER.value,
+    MODE: formMODE.value,
+    BANK_NAME: formBANK.value,
+    INCOME: parseFloat(formINCOME.value) || 0,
+    EXPENSE: parseFloat(formEXPENSE.value) || 0,
+    DESCRIPTION: formDESC.value,
+    BALANCE: parseFloat(formBALANCE.value) || 0,
+    ATTACHMENT: ""
   };
+
   try {
-    if(txId){
-      await updateDoc(doc(db,"users",currentUser.uid,"transactions",txId), data);
-    } else {
-      await addDoc(collection(db,"users",currentUser.uid,"transactions"), data);
+    loadingModal.style.display = "flex";
+
+    // Upload attachment if exists
+    if (file) {
+      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
+      const storage = getStorage();
+      const storageRef = ref(storage, `attachments/${currentUser.uid}/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      data.ATTACHMENT = url;
     }
-    closeModal(); await loadTransactions();
-  } catch(err){ alert("Error saving transaction: "+err.message); }
+
+    if (txId) {
+      await updateDoc(doc(db, "users", currentUser.uid, "transactions", txId), data);
+    } else {
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), data);
+    }
+
+    closeModal();
+    await loadTransactions();
+  } catch (err) {
+    alert("Error saving transaction: " + err.message);
+  } finally {
+    loadingModal.style.display = "none";
+  }
 });
 
 async function deleteTransaction(id){
@@ -355,29 +454,76 @@ function buildTable(){
         <td>${escapeHtml(d.DESCRIPTION)}</td>
         <td>${balanceCell}</td>
         <td class="attachment-cell">${d.ATTACHMENT?`<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank">View</a>`:"-"}</td>
-        <td>
-          <button onclick='editTransaction(${JSON.stringify(d)})'>Edit</button>
-          <button onclick='deleteTransaction("${d.id}")'>Delete</button>
-        </td>`;
+       <td>
+  <button class="btn-edit" onclick='editTransaction(${JSON.stringify(d)})'>
+    <i class="fa fa-edit"></i> Edit
+  </button>
+  <button class="btn-delete" onclick='deleteTransaction("${d.id}")'>
+    <i class="fa fa-trash"></i> Delete
+  </button>
+</td>
+`;
       tableBody.appendChild(row);
     });
   }
   renderPagination();
 }
 
-function renderPagination(){
+function renderPagination() {
   const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage) || 1;
   const container = document.getElementById("pagination");
   container.innerHTML = "";
-  for(let i=1;i<=totalPages;i++){
+
+  if (totalPages <= 1) return;
+
+  const createButton = (text, page, disabled = false, active = false) => {
     const btn = document.createElement("button");
-    btn.textContent = i;
-    btn.className = i===currentPage ? "active": "";
-    btn.disabled = i===currentPage;
-    btn.onclick = ()=>{ currentPage = i; buildTable(); };
+    btn.textContent = text;
+    if (active) btn.classList.add("active");
+    if (disabled) {
+      btn.classList.add("disabled");
+      btn.disabled = true;
+    } else {
+      btn.onclick = () => {
+        currentPage = page;
+        buildTable();
+      };
+    }
     container.appendChild(btn);
+  };
+
+  const addEllipsis = () => {
+    const span = document.createElement("span");
+    span.textContent = "...";
+    span.style.margin = "0 5px";
+    span.style.color = "#666";
+    container.appendChild(span);
+  };
+
+  const pageRange = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pageRange.push(i);
+  } else {
+    pageRange.push(1);
+
+    if (currentPage > 4) addEllipsis();
+
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+    for (let i = start; i <= end; i++) pageRange.push(i);
+
+    if (currentPage < totalPages - 3) addEllipsis();
+
+    pageRange.push(totalPages);
   }
+
+  pageRange.forEach(p => {
+    if (typeof p === "number") {
+      createButton(p, p, false, p === currentPage);
+    }
+  });
 }
+
 
 function escapeHtml(t){ if(!t)return""; return t.replace(/&/g,"&amp;").replace(/</g,"&lt;")
   .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
