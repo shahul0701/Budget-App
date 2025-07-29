@@ -125,6 +125,7 @@
   import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
+  // Firebase configuration
   const firebaseConfig = {
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
     authDomain: "budget-app-1365f.firebaseapp.com",
@@ -135,6 +136,7 @@
     measurementId: "G-YFFJL2H54X"
   };
 
+  // Initialize Firebase
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const auth = getAuth(app);
@@ -191,25 +193,29 @@
     location.href = 'index.html';
   });
 
-  // Load Chart of Accounts (COA)
+  // Load Chart of Accounts (COA) for user
   async function loadCOA() {
     accountHeaderSelect.innerHTML = '<option value="">Select Header</option>';
     bankNameSelect.innerHTML = '<option value="">Select Bank</option>';
     const q = query(collection(db, 'chartOfAccounts'), where('userId', '==', currentUser.uid));
     const snap = await getDocs(q);
     coaEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Distinct headers and banks
     const headers = new Set();
     const banks = new Set();
     coaEntries.forEach(e => {
       headers.add(e.name);
       if (e.category === 'Bank') banks.add(e.name);
     });
+
     headers.forEach(h => {
       const opt = document.createElement('option');
       opt.value = h;
       opt.textContent = h;
       accountHeaderSelect.appendChild(opt);
     });
+
     banks.forEach(b => {
       const opt = document.createElement('option');
       opt.value = b;
@@ -218,9 +224,12 @@
     });
   }
 
-  // Show/hide bank name based on mode
+  // Show/hide bank name dropdown if mode is Bank
   entryMode.addEventListener('change', () => {
     bankNameGroup.style.display = entryMode.value === 'Bank' ? 'block' : 'none';
+    if (entryMode.value !== 'Bank') {
+      bankNameSelect.value = '';
+    }
   });
 
   // Reset form to default state
@@ -233,15 +242,14 @@
   }
   cancelEditBtn.addEventListener('click', resetForm);
 
-  // Validate date string (YYYY-MM-DD)
+  // Validate date string YYYY-MM-DD
   function isValidDate(dateStr) {
-    // Basic check for YYYY-MM-DD format
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return false;
     return dateStr === date.toISOString().slice(0,10);
   }
 
-  // Add or update entry handler
+  // Add or update entry on submit
   entryForm.addEventListener('submit', async e => {
     e.preventDefault();
     if (!currentUser) return alert('Not authenticated');
@@ -285,7 +293,7 @@
     }
   });
 
-  // Load entries and display in table
+  // Load entries from Firestore and display
   async function loadEntries() {
     entriesTable.innerHTML = '';
     const q = query(collection(db, 'expensesIncome'), where('userId', '==', currentUser.uid));
@@ -314,131 +322,115 @@
     });
   }
 
-  // Edit an entry: populate form
-  window.editEntry = async function (id) {
-    const docSnap = await getDoc(doc(db, 'expensesIncome', id));
+  // Edit entry
+  window.editEntry = async function(id) {
+    const docRef = doc(db, 'expensesIncome', id);
+    const docSnap = await getDoc(docRef);
     if (!docSnap.exists()) return alert('Entry not found');
-    const d = docSnap.data();
+
+    const data = docSnap.data();
     entryIdInput.value = id;
-    entryTypeSelect.value = d.type;
-    accountHeaderSelect.value = d.accountHeader;
-    entryMode.value = d.mode;
-    entryMode.dispatchEvent(new Event('change'));
-    if (d.mode === 'Bank') bankNameSelect.value = d.bankName;
-    entryAmountInput.value = d.amount;
-    entryDateInput.value = d.date;
-    entryDescriptionInput.value = d.description || '';
+    entryTypeSelect.value = data.type;
+    accountHeaderSelect.value = data.accountHeader;
+    entryMode.value = data.mode;
+    if (data.mode === 'Bank') {
+      bankNameGroup.style.display = 'block';
+      bankNameSelect.value = data.bankName || '';
+    } else {
+      bankNameGroup.style.display = 'none';
+      bankNameSelect.value = '';
+    }
+    entryAmountInput.value = data.amount;
+    entryDateInput.value = data.date;
+    entryDescriptionInput.value = data.description || '';
     submitBtn.textContent = 'Update Entry';
     cancelEditBtn.style.display = 'inline-block';
-  }
+    window.scrollTo({top:0, behavior:'smooth'});
+  };
 
-  // Delete an entry
-  window.deleteEntry = async function (id) {
-    if (!confirm('Delete this entry?')) return;
+  // Delete entry
+  window.deleteEntry = async function(id) {
+    if (!confirm('Are you sure you want to delete this entry?')) return;
     try {
       await deleteDoc(doc(db, 'expensesIncome', id));
-      loadEntries();
+      alert('Entry deleted');
+      await loadEntries();
     } catch (err) {
-      alert('Delete failed: ' + err.message);
+      alert('Error deleting entry: ' + err.message);
     }
-  }
+  };
 
-  // CSV parsing helper - supports simple CSV (does not support complex quoting)
-  function parseCsv(text){
-    // Split by new lines
-    const lines = text.trim().split(/\r?\n/);
-    if(lines.length < 2) {
-      alert('CSV is empty or missing data rows');
-      return [];
-    }
+  // CSV parsing & upload
+  function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) throw new Error('CSV must have a header and at least one data line.');
 
-    // Parse headers (case insensitive and trim)
-    const header = lines[0].split(',').map(h => h.trim().toUpperCase());
-    const idx = name => header.indexOf(name.toUpperCase());
-
-    // Get indexes for required columns
-    const iDate = idx('DATE');
-    const iAccount = idx('ACCOUNT HEADER');
-    const iInc = idx('INCOME');
-    const iExp = idx('EXPENSES');
-    const iMode = idx('MODE');
-    const iDesc = idx('DESCRIPTION');
-    const iBank = idx('BANK NAME');
-
-    if (iDate < 0 || iAccount < 0 || iInc < 0 || iExp < 0 || iMode < 0) {
-      alert('CSV missing required headers: DATE, ACCOUNT HEADER, INCOME, EXPENSES, MODE');
-      return [];
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    // Expected CSV headers:
+    // type,accountheader,mode,bankname,amount,date,description
+    const requiredHeaders = ['type', 'accountheader', 'mode', 'amount', 'date'];
+    for (const rh of requiredHeaders) {
+      if (!header.includes(rh)) throw new Error(`CSV missing required header: ${rh}`);
     }
 
-    // Parse rows
     const data = [];
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map(c => c.trim());
-      if (cols.length < header.length) continue; // skip malformed row
-
-      const dateStr = cols[iDate];
-      if(!isValidDate(dateStr)) {
-        alert(`Invalid date format in row ${i + 1}: ${dateStr}`);
-        continue;
+      const line = lines[i].split(',');
+      if (line.length !== header.length) continue; // skip malformed
+      const obj = {};
+      for (let j = 0; j < header.length; j++) {
+        obj[header[j]] = line[j].trim();
       }
-
-      const incomeVal = parseFloat(cols[iInc]) || 0;
-      const expenseVal = parseFloat(cols[iExp]) || 0;
-      const type = incomeVal > 0 ? 'Income' : (expenseVal > 0 ? 'Expense' : null);
-      if(!type) continue;
-
-      data.push({
-        date: dateStr,
-        accountHeader: cols[iAccount],
-        type,
-        amount: incomeVal > 0 ? incomeVal : expenseVal,
-        mode: cols[iMode],
-        bankName: iBank >= 0 ? cols[iBank] : '',
-        description: iDesc >= 0 ? cols[iDesc] : ''
-      });
+      // Validate required fields
+      if (!obj.type || !obj.accountheader || !obj.mode || !obj.amount || !obj.date) continue;
+      data.push(obj);
     }
     return data;
   }
 
-  // Handle CSV upload button click
   uploadCSVBtn.addEventListener('click', async () => {
     if (!csvFileInput.files.length) {
-      alert('Please select a CSV file first');
-      return;
+      return alert('Please select a CSV file first.');
     }
     const file = csvFileInput.files[0];
-    if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-      alert('Please upload a valid CSV file');
-      return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      return alert('Please upload a valid CSV file.');
     }
-    const text = await file.text();
-    const parsedEntries = parseCsv(text);
-    if(parsedEntries.length === 0) return;
+    try {
+      const text = await file.text();
+      const entries = parseCSV(text);
 
-    submitBtn.disabled = true;
-    uploadCSVBtn.disabled = true;
-    let successCount = 0;
-    let failCount = 0;
-    for (const entry of parsedEntries) {
-      try {
+      // Add entries to Firestore
+      for (const entry of entries) {
+        // Normalize and validate fields
+        const type = entry.type.charAt(0).toUpperCase() + entry.type.slice(1).toLowerCase();
+        const mode = entry.mode.charAt(0).toUpperCase() + entry.mode.slice(1).toLowerCase();
+        const bankName = mode === 'Bank' ? (entry.bankname || '') : '';
+        const amount = parseFloat(entry.amount);
+        const date = entry.date;
+        if (!['Income', 'Expense'].includes(type) || !['Bank', 'Cash'].includes(mode) || isNaN(amount) || amount <= 0 || !isValidDate(date)) {
+          continue; // skip invalid rows
+        }
         await addDoc(collection(db, 'expensesIncome'), {
-          ...entry,
+          type,
+          accountHeader: entry.accountheader,
+          mode,
+          bankName,
+          amount,
+          date,
+          description: entry.description || '',
           userId: currentUser.uid,
           timestamp: serverTimestamp()
         });
-        successCount++;
-      } catch {
-        failCount++;
       }
+      alert('CSV upload completed.');
+      csvFileInput.value = '';
+      await loadEntries();
+    } catch (err) {
+      alert('Error uploading CSV: ' + err.message);
     }
-    submitBtn.disabled = false;
-    uploadCSVBtn.disabled = false;
-    alert(`CSV upload complete: ${successCount} entries added, ${failCount} failed.`);
-    csvFileInput.value = '';
-    loadEntries();
   });
 
 </script>
-
 </body>
 </html>
