@@ -560,43 +560,58 @@
         const data = parseCSV(text);
         if (!data.length) throw new Error("No valid data found in CSV.");
 
-        for (const item of data) {
-          // Normalize keys for CSV: type, accountHeader, mode, bankName, amount, date, description
-          const typeRaw = item.type || item.Type || "";
-          const type = typeRaw.trim().charAt(0).toUpperCase() + typeRaw.trim().slice(1).toLowerCase();
+for (const item of data) {
+  // Map your CSV headers to expected fields
 
-          if (!["Income", "Expense"].includes(type)) continue;
+  // Determine type and amount based on INCOME and EXPENSES columns
+  let type = "";
+  let amount = 0;
 
-          const accountHeader = (item.accountHeader || item.AccountHeader || "").trim();
-          if (!accountHeader) continue;
+  const incomeStr = item.INCOME || "";
+  const expenseStr = item.EXPENSES || "";
 
-          const modeRaw = (item.mode || item.Mode || "").trim();
-          const mode = modeRaw.charAt(0).toUpperCase() + modeRaw.slice(1).toLowerCase();
-          if (!["Bank", "Cash"].includes(mode)) continue;
+  if (incomeStr && incomeStr.trim() !== "") {
+    type = "Income";
+    amount = parseFloat(incomeStr);
+  } else if (expenseStr && expenseStr.trim() !== "") {
+    type = "Expense";
+    amount = parseFloat(expenseStr);
+  } else {
+    // skip entries without amount
+    continue;
+  }
 
-          const bankName = (item.bankName || item.BankName || "").trim();
-          if (mode === "Bank" && !bankName) continue;
+  if (isNaN(amount) || amount <= 0) continue;
 
-          const amount = parseFloat(item.amount || item.Amount);
-          if (isNaN(amount) || amount <= 0) continue;
+  const accountHeader = (item["ACCOUNT HEADER"] || "").trim();
+  if (!accountHeader) continue;
 
-          const date = (item.date || item.Date || "").trim();
-          if (!isValidDate(date)) continue;
+  const modeRaw = (item.MODE || "").trim();
+  const mode = modeRaw.charAt(0).toUpperCase() + modeRaw.slice(1).toLowerCase();
+  if (!["Bank", "Cash"].includes(mode)) continue;
 
-          const description = (item.description || item.Description || "").trim();
+  const bankName = (item["BANK NAME"] || "").trim();
+  if (mode === "Bank" && !bankName) continue;
 
-          await addDoc(collection(db, "entries"), {
-            type,
-            accountHeader,
-            mode,
-            bankName,
-            amount,
-            date,
-            description,
-            userId: currentUser.uid,
-            timestamp: serverTimestamp(),
-          });
-        }
+  // Compose date string from DATE and TIME if needed
+  const dateStr = (item.DATE || "").trim();
+  if (!isValidDate(dateStr)) continue;
+
+  const description = (item.DESCRIPTION || "").trim();
+
+  await addDoc(collection(db, "entries"), {
+    type,
+    accountHeader,
+    mode,
+    bankName,
+    amount,
+    date: dateStr,
+    description,
+    userId: currentUser.uid,
+    timestamp: serverTimestamp(),
+  });
+}
+
         alert("CSV uploaded successfully!");
         csvFileInput.value = "";
         await loadEntries();
