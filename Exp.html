@@ -1,22 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Upload Transaction CSV</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 14px; }
-    th { background: #eee; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  #user-info { margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+  th { background-color: #eee; }
+  .pagination { margin-top: 10px; text-align: center; }
+  .pagination button { margin: 0 5px; padding: 5px 10px; }
+</style>
 </head>
 <body>
 
-<h2>Upload Transactions CSV</h2>
-<input type="file" id="csvFileInput" accept=".csv" />
-<button id="uploadBtn">Upload & Save</button>
+<div id="user-info">
+  User: <span id="user-name">Loading...</span> | 
+  Date: <span id="date"></span> | 
+  Time: <span id="time"></span>
+</div>
 
-<table id="transactionsTable">
+<table id="data-table">
   <thead>
     <tr>
       <th>SINO</th>
@@ -35,11 +41,14 @@
   <tbody></tbody>
 </table>
 
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-  import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+<div class="pagination" id="pagination-controls"></div>
 
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-app.js";
+  import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-firestore.js";
+
+  // Firebase config from you
   const firebaseConfig = {
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
     authDomain: "budget-app-1365f.firebaseapp.com",
@@ -47,108 +56,141 @@
     storageBucket: "budget-app-1365f.appspot.com",
     messagingSenderId: "1036194450411",
     appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+    measurementId: "G-YFFJL2H54X"
   };
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const auth = getAuth(app);
 
-  let currentUser = null;
+  // Dummy session user (replace with your real session retrieval)
+  // For demo: Save user in sessionStorage: sessionStorage.setItem('user', 'JohnDoe');
+  const userName = sessionStorage.getItem('user') || 'Guest User';
 
-  // Parse CSV with your exact columns
-  function parseCSV(text) {
-    const lines = text.trim().split('\n');
-    const headers = lines[0].split(/\t|,/).map(h => h.trim().toUpperCase());
-    const data = [];
-    for (let i = 1; i < lines.length; i++) {
-      const row = lines[i].split(/\t|,/);
-      let obj = {};
-      headers.forEach((header, idx) => {
-        obj[header] = row[idx]?.trim() || '';
+  document.getElementById('user-name').textContent = userName;
+
+  // Live Date & Time
+  function updateDateTime() {
+    const now = new Date();
+    document.getElementById('date').textContent = now.toLocaleDateString();
+    document.getElementById('time').textContent = now.toLocaleTimeString();
+  }
+  updateDateTime();
+  setInterval(updateDateTime, 1000);
+
+  // Table and Pagination Setup
+  const tbody = document.querySelector('#data-table tbody');
+  const paginationControls = document.getElementById('pagination-controls');
+  const rowsPerPage = 5;  // Adjust as needed
+  let currentPage = 1;
+  let records = [];
+
+  // Load data from Firestore collection called 'transactions' (change if your collection name differs)
+  async function loadData() {
+    try {
+      const q = query(collection(db, "transactions"), orderBy("date", "desc"));
+      const querySnapshot = await getDocs(q);
+      records = querySnapshot.docs.map((doc, i) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          SINO: i + 1,
+          DATE: data.date || '',
+          TIME: data.time || '',
+          ACCOUNT_HEADER: data.accountHeader || '',
+          MODE: data.mode || '',
+          BANK_NAME: data.bankName || '',
+          INCOME: data.income || 0,
+          EXPENSES: data.expenses || 0,
+          DESCRIPTION: data.description || '',
+          BALANCE: data.balance || 0,
+          ATTACHMENT: data.attachment || ''
+        };
       });
-      data.push(obj);
+      renderTable();
+      renderPagination();
+    } catch (error) {
+      console.error("Error loading data: ", error);
+      tbody.innerHTML = `<tr><td colspan="11">Error loading data</td></tr>`;
     }
-    return data;
   }
 
-  async function loadTransactions() {
-    const tbody = document.querySelector("#transactionsTable tbody");
-    tbody.innerHTML = '';
-    if (!currentUser) return;
+  function renderTable() {
+    tbody.innerHTML = "";
+    const start = (currentPage - 1) * rowsPerPage;
+    const end = start + rowsPerPage;
+    const pageRecords = records.slice(start, end);
 
-    const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
-    const snapshot = await getDocs(q);
+    if (pageRecords.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="11">No records found</td></tr>';
+      return;
+    }
 
-    snapshot.forEach(docSnap => {
-      const d = docSnap.data();
+    for (const rec of pageRecords) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${d.SINO || ''}</td>
-        <td>${d.DATE || ''}</td>
-        <td>${d.TIME || ''}</td>
-        <td>${d["ACCOUNT HEADER"] || ''}</td>
-        <td>${d.MODE || ''}</td>
-        <td>${d["BANK NAME"] || ''}</td>
-        <td>${d.INCOME || ''}</td>
-        <td>${d.EXPENSES || ''}</td>
-        <td>${d.DESCRIPTION || ''}</td>
-        <td>${d.BALANCE || ''}</td>
-        <td>${d.ATTACHMENT || ''}</td>
+        <td>${rec.SINO}</td>
+        <td>${rec.DATE}</td>
+        <td>${rec.TIME}</td>
+        <td>${rec.ACCOUNT_HEADER}</td>
+        <td>${rec.MODE}</td>
+        <td>${rec.BANK_NAME}</td>
+        <td>${rec.INCOME}</td>
+        <td>${rec.EXPENSES}</td>
+        <td>${rec.DESCRIPTION}</td>
+        <td>${rec.BALANCE}</td>
+        <td>${rec.ATTACHMENT ? `<a href="${rec.ATTACHMENT}" target="_blank">View</a>` : ''}</td>
       `;
       tbody.appendChild(tr);
-    });
-  }
-
-  async function uploadCSVData(rows) {
-    if (!currentUser) {
-      alert("User not logged in.");
-      return;
-    }
-
-    for (const row of rows) {
-      await addDoc(collection(db, "transactions"), {
-        userId: currentUser.uid,
-        ...row,
-        createdAt: serverTimestamp(),
-      });
     }
   }
 
-  document.getElementById('uploadBtn').addEventListener('click', async () => {
-    const fileInput = document.getElementById('csvFileInput');
-    if (!fileInput.files.length) {
-      alert("Please select a CSV file.");
-      return;
+  function renderPagination() {
+    paginationControls.innerHTML = '';
+
+    const totalPages = Math.ceil(records.length / rowsPerPage);
+    if (totalPages <= 1) return; // No pagination needed
+
+    // Previous button
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = 'Prev';
+    prevBtn.disabled = currentPage === 1;
+    prevBtn.onclick = () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderTable();
+        renderPagination();
+      }
+    };
+    paginationControls.appendChild(prevBtn);
+
+    // Page numbers (simple display)
+    for (let i = 1; i <= totalPages; i++) {
+      const pageBtn = document.createElement('button');
+      pageBtn.textContent = i;
+      if (i === currentPage) pageBtn.disabled = true;
+      pageBtn.onclick = () => {
+        currentPage = i;
+        renderTable();
+        renderPagination();
+      };
+      paginationControls.appendChild(pageBtn);
     }
 
-    const file = fileInput.files[0];
-    const text = await file.text();
-    const data = parseCSV(text);
+    // Next button
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Next';
+    nextBtn.disabled = currentPage === totalPages;
+    nextBtn.onclick = () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderTable();
+        renderPagination();
+      }
+    };
+    paginationControls.appendChild(nextBtn);
+  }
 
-    if (!data.length) {
-      alert("No data found in CSV.");
-      return;
-    }
-
-    try {
-      await uploadCSVData(data);
-      alert("Transactions uploaded successfully!");
-      fileInput.value = "";
-      loadTransactions();
-    } catch (e) {
-      alert("Error uploading: " + e.message);
-    }
-  });
-
-  onAuthStateChanged(auth, user => {
-    if (user) {
-      currentUser = user;
-      loadTransactions();
-    } else {
-      signInAnonymously(auth).catch(console.error);
-    }
-  });
+  loadData();
 </script>
-
 </body>
 </html>
