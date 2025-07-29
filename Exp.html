@@ -149,9 +149,8 @@
       collection,
       addDoc,
       query,
-      where,
       getDocs,
-      deleteDoc,
+      writeBatch,
       doc,
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import {
@@ -251,10 +250,12 @@
         }
       }
 
-      // Save each row as a doc in Firestore, in "transactions" collection with userId field
       try {
-        // Optional: clear existing transactions for user before uploading new ones
+        // Clear existing transactions under current user
         await clearUserTransactions();
+
+        // Reference to user's transactions subcollection
+        const userTransactionsRef = collection(db, "users", currentUser.uid, "transactions");
 
         for (const row of parsedData) {
           // Normalize numbers (income, expenses, balance)
@@ -262,8 +263,7 @@
           row.EXPENSES = parseFloat(row.EXPENSES) || 0;
           row.BALANCE = parseFloat(row.BALANCE) || 0;
 
-          await addDoc(collection(db, "transactions"), {
-            userId: currentUser.uid,
+          await addDoc(userTransactionsRef, {
             SINO: row.SINO,
             DATE: row.DATE,
             TIME: row.TIME,
@@ -277,9 +277,11 @@
             ATTACHEMENT: row.ATTACHEMENT
           });
         }
+
         alert("CSV uploaded successfully!");
         csvInput.value = "";
         await loadTransactions();
+
       } catch (err) {
         alert("Error saving data: " + err.message);
       } finally {
@@ -287,22 +289,28 @@
       }
     });
 
-    // Clear all transactions for current user (optional)
+    // Clear all transactions for current user using batch delete
     async function clearUserTransactions() {
-      const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
-      const snapshot = await getDocs(q);
-      const batchDeletes = snapshot.docs.map(docSnap => deleteDoc(doc(db, "transactions", docSnap.id)));
-      await Promise.all(batchDeletes);
+      const userTransactionsRef = collection(db, "users", currentUser.uid, "transactions");
+      const snapshot = await getDocs(userTransactionsRef);
+
+      if (snapshot.empty) return;
+
+      const batch = writeBatch(db);
+      snapshot.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
     }
 
-    // Load and display transactions
+    // Load and display transactions from user's subcollection
     async function loadTransactions() {
       tableBody.innerHTML = "";
       loadingMsg.style.display = "block";
 
       try {
-        const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
-        const snapshot = await getDocs(q);
+        const userTransactionsRef = collection(db, "users", currentUser.uid, "transactions");
+        const snapshot = await getDocs(userTransactionsRef);
 
         if (snapshot.empty) {
           tableBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#777;">No transactions found.</td></tr>`;
