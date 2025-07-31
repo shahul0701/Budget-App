@@ -285,6 +285,14 @@
     border-collapse: collapse;
   }
 
+#transactionModal {
+  display: none;
+  position: fixed;
+  z-index: 2000;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
 
 
     </style>
@@ -342,8 +350,11 @@
   </div>
 
 
-      <div class="pagination" id="pagination"></div>
-    </div>
+ <div id="paginationControls" style="text-align:center; margin:10px;">
+  <button id="prevPageBtn">Previous</button>
+  <span id="paginationInfo"></span>
+  <button id="nextPageBtn">Next</button>
+</div>
 
     <button id="addTransactionBtn" title="Add Transaction"><i class="fa fa-plus"></i></button>
 
@@ -402,24 +413,21 @@
     </div>
   </div>
 
-  <script type="module">
+<script type="module">
+  // Firebase Initialization & Imports
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  query,
-  getDocs,
-  writeBatch,
-  doc,
-  updateDoc,
-  deleteDoc,
-  where // ✅ this was missing
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    query,
+    getDocs,
+    updateDoc,
+    deleteDoc,
+    doc,
+    where
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-  let txMap = {};
 
   const app = initializeApp({
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -430,37 +438,52 @@ import {
     appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
     measurementId: "G-YFFJL2H54X"
   });
-  const db = getFirestore(app), auth = getAuth(app);
 
-  const usernameElem = document.getElementById("username"), initialsElem = document.getElementById("userInitials"), logoutBtn = document.getElementById("logoutBtn");
-  const csvInput = document.getElementById("csvInput"), tableBody = document.getElementById("transactionsTableBody");
-  const loadingModal = document.getElementById("loadingModal"), dateFilter = document.getElementById("dateFilter");
-  const customDateRange = document.getElementById("customDateRange"), startDateInput = document.getElementById("startDate"), endDateInput = document.getElementById("endDate");
-  const incomeExpenseFilter = document.getElementById("incomeExpenseFilter"), descFilter = document.getElementById("descFilter");
-  const modeFilter = document.getElementById("modeFilter"), bankFilter = document.getElementById("bankFilter");
-  const applyFiltersBtn = document.getElementById("applyFiltersBtn");
-  const addBtn = document.getElementById("addTransactionBtn"), modal = document.getElementById("transactionModal");
-addBtn.onclick = async () => {
-  document.getElementById("modalTitle").innerText = "Add Transaction";
-  modal.classList.remove("edit-mode");
-  modal.classList.add("create-mode");
-  modal.style.display = "flex";
+  const db = getFirestore(app);
+  const auth = getAuth(app);
 
-  form.reset();
-  document.getElementById("txId").value = "";
+  // DOM references
+  const usernameElem = document.getElementById("username");
+  const initialsElem = document.getElementById("userInitials");
+  const logoutBtn = document.getElementById("logoutBtn");
 
-  // Auto-generate SINO
-  const lastSino = Math.max(0, ...allTransactions.map(tx => parseInt(tx.SINO) || 0));
-  document.getElementById("formSINO").value = lastSino + 1;
-  document.getElementById("formMODE").value = ""; // clear Mode on add new
-
-};
-
-
-  const closeModal = () => modal.style.display = "none";
+  const tableBody = document.getElementById("transactionsTableBody");
+  const loadingModal = document.getElementById("loadingModal");
+  const modal = document.getElementById("transactionModal");
   const form = document.getElementById("transactionForm");
-  let currentUser=null, allTransactions = [], filteredTransactions = [];
-  let currentPage = 1, rowsPerPage = 10;
+  const applyFiltersBtn = document.getElementById("applyFiltersBtn");
+
+  const dateFilter = document.getElementById("dateFilter");
+  const startDateInput = document.getElementById("startDate");
+  const endDateInput = document.getElementById("endDate");
+  const incomeExpenseFilter = document.getElementById("incomeExpenseFilter");
+  const descFilter = document.getElementById("descFilter");
+  const modeFilter = document.getElementById("modeFilter");
+  const bankFilter = document.getElementById("bankFilter");
+
+  const formSINO = document.getElementById("formSINO");
+  const formDATE = document.getElementById("formDATE");
+  const formTIME = document.getElementById("formTIME");
+  const formHEADER = document.getElementById("formHEADER");
+  const formMODE = document.getElementById("formMODE");
+  const formBANKNAME = document.getElementById("formBANKNAME");
+  const formINCOME = document.getElementById("formINCOME");
+  const formEXPENSE = document.getElementById("formEXPENSE");
+  const formDESC = document.getElementById("formDESC");
+  const formBALANCE = document.getElementById("formBALANCE");
+  const formATTACH = document.getElementById("formATTACH");
+  const txIdInput = document.getElementById("txId");
+
+  const prevPageBtn = document.getElementById("prevPageBtn");
+  const nextPageBtn = document.getElementById("nextPageBtn");
+  const paginationInfo = document.getElementById("paginationInfo");
+
+  let currentUser = null;
+  let allTransactions = [];
+  let filteredTransactions = [];
+  let txMap = {};
+  let currentPage = 1;
+  const rowsPerPage = 10;
 
   onAuthStateChanged(auth, async user => {
     if (user) {
@@ -468,515 +491,322 @@ addBtn.onclick = async () => {
       const name = user.displayName || user.email || "User";
       usernameElem.textContent = name;
       initialsElem.textContent = name.charAt(0).toUpperCase();
+
+      await loadAccounts();
       await loadTransactions();
-      await loadExpenseAccounts();
       await populateBankAccounts();
     } else {
-      alert("Please login first."); window.location.href="index.html";
+      alert("Please login first.");
+      window.location.href = "index.html";
     }
   });
-  logoutBtn.addEventListener("click", async ()=>{
-    await signOut(auth); window.location.href="index.html";
-  });
-async function populateBankAccounts() {
-  const bankFilterSelect = document.getElementById("bankFilter");
-  bankFilterSelect.innerHTML = `<option value="all">All</option>`;
 
-  try {
-    const querySnapshot = await getDocs(query(
-      collection(db, "chartOfAccounts"),
-      where("userId", "==", currentUser.uid),
-      where("type", "==", "Asset"),
-      where("category", "==", "Bank")
-    ));
-
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      const option = document.createElement("option");
-      option.value = data.name;
-      option.textContent = data.name;
-      bankFilterSelect.appendChild(option);
-    });
-
-    if (bankFilterSelect.options.length === 1) {
-      bankFilterSelect.innerHTML = `<option value="all">No Bank Accounts Found</option>`;
-    }
-  } catch (error) {
-    console.error("Error loading filter bank accounts:", error);
-    bankFilterSelect.innerHTML = `<option value="all">Failed to Load</option>`;
-  }
-}
-
-async function init() {
-  await loadCategories();
-  await loadAccounts();
-}
-
-  csvInput.addEventListener("change", async e=>{
-    const file=e.target.files[0];
-    if(!file||!file.name.toLowerCase().endsWith(".csv")) return alert("Please upload a valid CSV file.");
-    loadingModal.style.display="flex";
-    const text=await file.text(), parsed=parseCSV(text);
-    const requiredCols=["SINO","DATE","TIME","ACCOUNT HEADER","MODE","BANK NAME","INCOME","EXPENSE","DESCRIPTION","BALANCE","ATTACHMENT"];
-    for(let h of requiredCols) if(!parsed[0]?.[h]){ alert(`Missing column "${h}"`); loadingModal.style.display="none"; return; }
-    try {
-      await clearUserTransactions();
-      const txRef = collection(db,"users",currentUser.uid,"transactions");
-      for(let row of parsed){
-        await addDoc(txRef,{
-          SINO:row.SINO, DATE:row.DATE, TIME:row.TIME,
-          ACCOUNT_HEADER:row["ACCOUNT HEADER"], MODE:row.MODE, BANK_NAME:row["BANK NAME"],
-          INCOME:parseFloat(row.INCOME)||0, EXPENSE:parseFloat(row.EXPENSE)||0,
-          DESCRIPTION:row.DESCRIPTION, BALANCE:parseFloat(row.BALANCE)||0,
-          ATTACHMENT:row["ATTACHMENT"]||""
-        });
-      }
-      alert("CSV uploaded successfully!"); csvInput.value=""; await loadTransactions();
-    } catch(err){ alert("Error saving data: "+err.message); }
-    finally{ loadingModal.style.display="none"; }
+  logoutBtn.addEventListener("click", async () => {
+    await signOut(auth);
+    window.location.href = "index.html";
   });
 
-  dateFilter.addEventListener("change", ()=>{
-    customDateRange.style.display = dateFilter.value==="custom"?"inline-flex":"none";
-    if(dateFilter.value!=="custom"){ startDateInput.value=""; endDateInput.value=""; }
-  });
-  applyFiltersBtn.addEventListener("click", applyFilters);
-
-  window.editTransaction = (tx) => {
-    document.getElementById("modalTitle").innerText = "Edit Transaction";
-    modal.classList.remove("create-mode");
-    modal.classList.add("edit-mode");
-    modal.style.display = "flex";
-
-    document.getElementById("txId").value = tx.id;
-    formSINO.value = tx.SINO || "";
-    formDATE.value = tx.DATE || "";
-    formTIME.value = (tx.TIME || "").slice(0, 5);
-    formHEADER.value = tx.ACCOUNT_HEADER || "";
- 
-  formMODE.value = tx.MODE || "";
-
-    formINCOME.value = tx.INCOME || "";
-    formEXPENSE.value = tx.EXPENSE || "";
-    formDESC.value = tx.DESCRIPTION || "";
-    formBALANCE.value = tx.BALANCE || "";
-    formATTACH.value = tx.ATTACHMENT || "";
-     // Trigger mode change handler so bank dropdown is shown or hidden properly
-  formMODE.dispatchEvent(new Event('change'));
-
-  formBANKNAME.value = tx.BANK_NAME || "";
-};
-
-  document.querySelector(".close").addEventListener("click", closeModal);
-  window.addEventListener("click", e=>{ if(e.target===modal) closeModal(); });
-
-  form.addEventListener("submit", async e => {
-    e.preventDefault();
-    const txId = document.getElementById("txId").value;
-    const file = formATTACH.files[0];
-  const data = {
-    SINO: formSINO.value,
-    DATE: formDATE.value,
-    ACCOUNT_HEADER: formHEADER.value,
-    MODE: formMODE.value,
-   BANK_NAME: formBANKNAME.value,
-    INCOME: parseFloat(formINCOME.value) || 0,
-    EXPENSE: parseFloat(formEXPENSE.value) || 0,
-    DESCRIPTION: formDESC.value,
-    BALANCE: parseFloat(formBALANCE.value) || 0,
-  };
-
-    try {
-      loadingModal.style.display = "flex";
-
-async function loadExpenseAccounts() {
-  if (!currentUser) return;
-  try {
-    const q = query(
-      collection(db, "chartOfAccounts"),
-      where("userId", "==", currentUser.uid)
-    );
-    const snapshot = await getDocs(q);
-
-    const select = document.getElementById("formHEADER");
-    select.innerHTML = `<option value="">Select Account</option>`;
-
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const option = document.createElement("option");
-      option.value = data.name;
-      option.textContent = `${data.category} - ${data.name}`;
-      select.appendChild(option);
-    });
-  } catch (err) {
-    console.error("Error loading expense accounts:", err);
-    const select = document.getElementById("formHEADER");
-    select.innerHTML = `<option value="">Failed to Load</option>`;
-  }
-}
-
-
-async function loadBankAccounts() {
-  if (!currentUser) return;
-  try {
+  async function loadAccounts() {
 const q = query(
   collection(db, "chartOfAccounts"),
   where("userId", "==", currentUser.uid)
 );
-
     const snapshot = await getDocs(q);
-
-    const select = document.getElementById("formBANKNAME");
-    select.innerHTML = `<option value="">Select Bank</option>`;
-
+    formHEADER.innerHTML = '<option value="">Select Account</option>';
     snapshot.forEach(doc => {
       const data = doc.data();
       const option = document.createElement("option");
       option.value = data.name;
       option.textContent = data.name;
-      select.appendChild(option);
+      formHEADER.appendChild(option);
     });
-  } catch (err) {
-    console.error("Error loading bank accounts:", err);
-    const select = document.getElementById("formBANKNAME");
-    select.innerHTML = `<option value="">Failed to Load</option>`;
   }
-}
 
-
-
-
-
-
-
-
-
-
-    // Upload attachment if exists
-if (file) {
-  // Replace these with your Cloudinary info
-  const cloudName = "dpwdsyvz8";
-  const unsignedUploadPreset = "my_app_uploads";
-
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", unsignedUploadPreset);
-
-  // Upload to Cloudinary
-  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
-    method: "POST",
-    body: formData
-  });
-
-  if (!response.ok) throw new Error("Failed to upload attachment to Cloudinary");
-
-  const json = await response.json();
-  data.ATTACHMENT = json.secure_url; // Cloudinary URL
-} else if (txId) {
-  // Keep existing attachment if editing and no new file uploaded
-  const existing = allTransactions.find(t => t.id === txId);
-  if (existing?.ATTACHMENT) {
-    data.ATTACHMENT = existing.ATTACHMENT;
-  }
-}
-
-    if (txId) {
-      await updateDoc(doc(db, "users", currentUser.uid, "transactions", txId), data);
-    } else {
-      await addDoc(collection(db, "users", currentUser.uid, "transactions"), data);
-    }
-
-    closeModal();
-    await loadTransactions();
-  } catch (err) {
-    alert("Error saving transaction: " + err.message);
-  } finally {
-    loadingModal.style.display = "none";
-  }
-});
-
-async function deleteTransaction(id) {
-const result = await Swal.fire({
-  title: 'Are you sure?',
-  text: "This transaction will be permanently deleted.",
-  icon: 'warning',
-  showCancelButton: true,
-  confirmButtonColor: '#dc3545',
-  cancelButtonColor: '#6c757d',
-  confirmButtonText: 'Yes, delete it!'
-});
-
-  if (result.isConfirmed) {
+  async function populateBankAccounts() {
+    bankFilter.innerHTML = `<option value="all">All</option>`;
     try {
-      loadingModal.style.display = "flex";
-      await deleteDoc(doc(db, "users", currentUser.uid, "transactions", id));
-      await loadTransactions();
-      Swal.fire('Deleted!', 'Transaction has been deleted.', 'success');
+      const q = query(
+        collection(db, "chartOfAccounts"),
+        where("userId", "==", currentUser.uid),
+        where("type", "==", "Asset"),
+        where("category", "==", "Bank")
+      );
+      const snapshot = await getDocs(q);
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const option = document.createElement("option");
+        option.value = data.name;
+        option.textContent = data.name;
+        bankFilter.appendChild(option);
+      });
+      if (bankFilter.options.length === 1) {
+        bankFilter.innerHTML = `<option value="all">No Bank Accounts Found</option>`;
+      }
     } catch (err) {
-      Swal.fire('Error!', err.message, 'error');
+      console.error("Error loading bank accounts:", err);
+      bankFilter.innerHTML = `<option value="all">Failed to Load</option>`;
+    }
+  }
+
+  async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+      const snap = await getDocs(collection(db, "users", currentUser.uid, "transactions"));
+      allTransactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allTransactions.sort((a, b) => (parseInt(b.SINO) || 0) - (parseInt(a.SINO) || 0));
+      populateFiltersOptions(allTransactions);
+      applyFilters();
+    } catch (err) {
+      alert("Error loading transactions: " + err.message);
     } finally {
       loadingModal.style.display = "none";
     }
   }
-}
 
+  function populateFiltersOptions(data) {
+    const modes = new Set();
+    const banks = new Set();
+    data.forEach(t => {
+      if (t.MODE) modes.add(t.MODE);
+      if (t.BANK_NAME) banks.add(t.BANK_NAME);
+    });
+    modeFilter.innerHTML = `<option value="all">All</option>` + [...modes].sort().map(m => `<option>${m}</option>`).join("");
+    bankFilter.innerHTML = `<option value="all">All</option>` + [...banks].sort().map(b => `<option>${b}</option>`).join("");
+  }
 
-async function loadTransactions() {
-  loadingModal.style.display="flex";
-  try {
-    const snap = await getDocs(collection(db,"users",currentUser.uid,"transactions"));
-    allTransactions = snap.docs.map(d=>({ id:d.id,...d.data() }));
-    allTransactions.sort((a,b)=>(parseInt(b.SINO)||0)-(parseInt(a.SINO)||0));
-    populateOptions(allTransactions);
-    applyFilters(); // will also trigger pagination
-  } catch(err){ alert("Error loading transactions: "+err.message); }
-  finally { loadingModal.style.display="none"; }
-}
+  function applyFilters() {
+    filteredTransactions = allTransactions.slice();
+    const now = new Date();
 
-function populateOptions(data){
-  const modes=new Set(), banks=new Set();
-  data.forEach(t=>{ if(t.MODE) modes.add(t.MODE); if(t.BANK_NAME) banks.add(t.BANK_NAME); });
-  modeFilter.innerHTML = `<option value="all">All</option>` + [...modes].sort().map(v=>`<option>${v}</option>`).join("");
-  bankFilter.innerHTML = `<option value="all">All</option>` + [...banks].sort().map(v=>`<option>${v}</option>`).join("");
-}
+    const isInRange = (dateStr, start, end) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d >= start && d <= end;
+    };
 
-function applyFilters(){
-  filteredTransactions = allTransactions.slice();
-  const now = new Date();
-  const isIn = (str,s,e)=> str && new Date(str)>=s && new Date(str)<=e;
-
-  switch(dateFilter.value){
-    case "week": { const s=new Date(now); s.setHours(0,0,0,0); s.setDate(now.getDate()-now.getDay());
-      filteredTransactions = filteredTransactions.filter(t=>isIn(t.DATE,s,now)); break; }
-    case "month": { const s=new Date(now.getFullYear(),now.getMonth(),1);
-      filteredTransactions = filteredTransactions.filter(t=>isIn(t.DATE,s,now)); break; }
-    case "year": { const s=new Date(now.getFullYear(),0,1);
-      filteredTransactions = filteredTransactions.filter(t=>isIn(t.DATE,s,now)); break; }
-    case "custom":
-      if(startDateInput.value && endDateInput.value){
-        let s=new Date(startDateInput.value), e=new Date(endDateInput.value);
-        e.setHours(23,59,59,999);
-        filteredTransactions = filteredTransactions.filter(t=>isIn(t.DATE,s,e));
+    switch (dateFilter.value) {
+      case "week": {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(now.getDate() - now.getDay());
+        filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+        break;
       }
-      break;
+      case "month": {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+        break;
+      }
+      case "year": {
+        const start = new Date(now.getFullYear(), 0, 1);
+        filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+        break;
+      }
+      case "custom":
+        if (startDateInput.value && endDateInput.value) {
+          const start = new Date(startDateInput.value);
+          const end = new Date(endDateInput.value);
+          end.setHours(23, 59, 59, 999);
+          filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, end));
+        }
+        break;
+    }
+
+    if (incomeExpenseFilter.value === "income")
+      filteredTransactions = filteredTransactions.filter(t => t.INCOME > 0);
+    else if (incomeExpenseFilter.value === "expense")
+      filteredTransactions = filteredTransactions.filter(t => t.EXPENSE > 0);
+
+    if (descFilter.value.trim()) {
+      const search = descFilter.value.trim().toLowerCase();
+      filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION || "").toLowerCase().includes(search));
+    }
+
+    if (modeFilter.value !== "all")
+      filteredTransactions = filteredTransactions.filter(t => t.MODE === modeFilter.value);
+
+    if (bankFilter.value !== "all")
+      filteredTransactions = filteredTransactions.filter(t => t.BANK_NAME === bankFilter.value);
+
+    currentPage = 1;
+    buildTable();
   }
 
-  if(incomeExpenseFilter.value==="income")
-    filteredTransactions = filteredTransactions.filter(t=>t.INCOME>0);
-  else if(incomeExpenseFilter.value==="expense")
-    filteredTransactions = filteredTransactions.filter(t=>t.EXPENSE>0);
+  function buildTable() {
+    txMap = {};
+    const start = (currentPage - 1) * rowsPerPage;
+    const end = start + rowsPerPage;
+    const pageItems = filteredTransactions.slice(start, end);
+    tableBody.innerHTML = "";
 
-  if(descFilter.value.trim()){
-    const search = descFilter.value.trim().toLowerCase();
-    filteredTransactions = filteredTransactions.filter(t=> (t.DESCRIPTION||"").toLowerCase().includes(search));
+    if (pageItems.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
+      return;
+    }
+
+    pageItems.forEach(d => {
+      txMap[d.id] = d;
+      const incomeCell = d.INCOME > 0 ? `<span style="color:green;">${d.INCOME.toFixed(2)}</span>` : "";
+      const expenseCell = d.EXPENSE > 0 ? `<span style="color:red;">${d.EXPENSE.toFixed(2)}</span>` : "";
+      const balanceCell = d.BALANCE ? d.BALANCE.toFixed(2) : "";
+      const row = document.createElement("tr");
+
+      row.innerHTML = `
+        <td>${escapeHtml(d.SINO)}</td>
+        <td>${escapeHtml(d.DATE)}</td>
+        <td>${escapeHtml(d.TIME)}</td>
+        <td>${escapeHtml(d.ACCOUNT_HEADER)}</td>
+        <td>${escapeHtml(d.MODE)}</td>
+        <td>${escapeHtml(d.BANK_NAME)}</td>
+        <td>${incomeCell}</td>
+        <td>${expenseCell}</td>
+        <td>${escapeHtml(d.DESCRIPTION)}</td>
+        <td>${balanceCell}</td>
+        <td class="attachment-cell">${d.ATTACHMENT ? `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank">View</a>` : ""}</td>
+        <td>
+          <button class="edit-btn" data-id="${d.id}">Edit</button>
+          <button class="delete-btn" data-id="${d.id}">Delete</button>
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+
+    setupTableButtons();
+    updatePagination();
   }
-  if(modeFilter.value!=="all") filteredTransactions = filteredTransactions.filter(t=>t.MODE===modeFilter.value);
-  if(bankFilter.value!=="all") filteredTransactions = filteredTransactions.filter(t=>t.BANK_NAME===bankFilter.value);
 
-  currentPage = 1;
-  buildTable();
-}
-
-function buildTable() {
-  txMap = {}; // reset map
-  const start = (currentPage - 1) * rowsPerPage;
-  const end = start + rowsPerPage;
-  const pageItems = filteredTransactions.slice(start, end);
-  tableBody.innerHTML = "";
-
-  if (pageItems.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
-    return;
+  function updatePagination() {
+    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+    paginationInfo.textContent = `Page ${currentPage} of ${totalPages || 1}`;
+    prevPageBtn.disabled = currentPage <= 1;
+    nextPageBtn.disabled = currentPage >= totalPages;
   }
 
-  pageItems.forEach(d => {
-    txMap[d.id] = d;
-    const incomeCell = d.INCOME > 0 ? `<span style="color:green;">${d.INCOME.toFixed(2)}</span>` : "";
-    const expenseCell = d.EXPENSE > 0 ? `<span style="color:red;">${d.EXPENSE.toFixed(2)}</span>` : "";
-    const balanceCell = d.BALANCE ? d.BALANCE.toFixed(2) : "";
-    const row = document.createElement("tr");
+  prevPageBtn.onclick = () => {
+    if (currentPage > 1) {
+      currentPage--;
+      buildTable();
+    }
+  };
 
-    row.innerHTML = `
-      <td>${escapeHtml(d.SINO)}</td>
-      <td>${escapeHtml(d.DATE)}</td>
-      <td>${escapeHtml(d.TIME)}</td>
-      <td>${escapeHtml(d.ACCOUNT_HEADER)}</td>
-      <td>${escapeHtml(d.MODE)}</td>
-      <td>${escapeHtml(d.BANK_NAME)}</td>
-      <td>${incomeCell}</td>
-      <td>${expenseCell}</td>
-      <td>${escapeHtml(d.DESCRIPTION)}</td>
-      <td>${balanceCell}</td>
-      <td class="attachment-cell">${d.ATTACHMENT ? `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a>` : ""}</td>
-      <td>
-        <button class="btn-edit" onclick='editTransactionById("${d.id}")'>Edit</button>
-        <button class="btn-delete" onclick='showDeleteConfirm("${d.id}")'>Delete</button>
-      </td>
-    `;
+  nextPageBtn.onclick = () => {
+    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+    if (currentPage < totalPages) {
+      currentPage++;
+      buildTable();
+    }
+  };
 
-    tableBody.appendChild(row);
-  });
+  function escapeHtml(text = "") {
+    return text.toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
 
-  renderPagination();
-}
+  function setupTableButtons() {
+    document.querySelectorAll(".edit-btn").forEach(btn => {
+      btn.onclick = () => openEditModal(btn.dataset.id);
+    });
+    document.querySelectorAll(".delete-btn").forEach(btn => {
+      btn.onclick = () => deleteTransaction(btn.dataset.id);
+    });
+  }
 
+  async function deleteTransaction(id) {
+    if (!confirm("Delete this transaction?")) return;
+    try {
+      await deleteDoc(doc(db, "users", currentUser.uid, "transactions", id));
+      allTransactions = allTransactions.filter(t => t.id !== id);
+      applyFilters();
+    } catch (err) {
+      alert("Failed to delete: " + err.message);
+    }
+  }
 
-function editTransactionById(id) {
-  const tx = txMap[id];
-  if (tx) editTransaction(tx);
-}
-function renderPagination() {
-  const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage) || 1;
-  const container = document.getElementById("pagination");
-  container.innerHTML = "";
+  function openEditModal(id = null) {
+    modal.style.display = "block";
+    form.reset();
+    formATTACH.value = "";
+    txIdInput.value = "";
 
-  if (totalPages <= 1) return;
+    if (id) {
+      const tx = txMap[id];
+      if (!tx) return alert("Transaction not found.");
+      txIdInput.value = id;
 
-  const createButton = (text, page, disabled = false, active = false) => {
-    const btn = document.createElement("button");
-    btn.textContent = text;
-    if (active) btn.classList.add("active");
-    if (disabled) {
-      btn.classList.add("disabled");
-      btn.disabled = true;
+      formSINO.value = tx.SINO || "";
+      formDATE.value = tx.DATE || "";
+      formTIME.value = tx.TIME || "";
+      formHEADER.value = tx.ACCOUNT_HEADER || "";
+      formMODE.value = tx.MODE || "";
+      formBANKNAME.value = tx.BANK_NAME || "";
+      formINCOME.value = tx.INCOME || 0;
+      formEXPENSE.value = tx.EXPENSE || 0;
+      formDESC.value = tx.DESCRIPTION || "";
+      formBALANCE.value = tx.BALANCE || 0;
+
+      toggleBankNameVisibility(tx.MODE);
     } else {
-      btn.onclick = () => {
-        currentPage = page;
-        buildTable();
-      };
+      toggleBankNameVisibility(formMODE.value);
     }
-    container.appendChild(btn);
-  };
-
-  const addEllipsis = () => {
-    const span = document.createElement("span");
-    span.textContent = "...";
-    span.style.margin = "0 5px";
-    span.style.color = "#666";
-    container.appendChild(span);
-  };
-
-  const pageRange = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pageRange.push(i);
-  } else {
-    pageRange.push(1);
-
-    if (currentPage > 4) addEllipsis();
-
-    const start = Math.max(2, currentPage - 1);
-    const end = Math.min(totalPages - 1, currentPage + 1);
-    for (let i = start; i <= end; i++) pageRange.push(i);
-
-    if (currentPage < totalPages - 3) addEllipsis();
-
-    pageRange.push(totalPages);
   }
 
-  pageRange.forEach(p => {
-    if (typeof p === "number") {
-      createButton(p, p, false, p === currentPage);
-    }
+  function toggleBankNameVisibility(mode) {
+    formBANKNAME.style.display = (mode === "Bank" || mode === "Credit Card") ? "block" : "none";
+  }
+
+  formMODE.addEventListener("change", e => {
+    toggleBankNameVisibility(e.target.value);
   });
-}
 
+form.addEventListener("submit", async e => {
+  e.preventDefault();
 
+  const id = txIdInput.value;
+  const txData = {
+    SINO: formSINO.value.trim(),
+    DATE: formDATE.value.trim(),
+    TIME: formTIME.value.trim(),
+    ACCOUNT_HEADER: formHEADER.value.trim(),
+    MODE: formMODE.value.trim(),
+    BANK_NAME: formBANKNAME.value.trim(),
+    INCOME: parseFloat(formINCOME.value) || 0,
+    EXPENSE: parseFloat(formEXPENSE.value) || 0,
+    DESCRIPTION: formDESC.value.trim(),
+    BALANCE: parseFloat(formBALANCE.value) || 0,
+  };
 
-function escapeHtml(text) {
-  if (!text) return "";
-  return text.replace(/[&<>"']/g, function(m) {
-    return ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    })[m];
-  });
-}
+  console.log("Saving transaction:", txData); // <--- Debug here
 
-let transactionToDelete = null;
-const confirmDeleteModal = document.getElementById("confirmDeleteModal");
-const closeConfirmDelete = document.getElementById("closeConfirmDelete");
-const cancelDeleteBtn = document.getElementById("cancelDeleteBtn");
-const confirmDeleteBtn = document.getElementById("confirmDeleteBtn");
-
-function showDeleteConfirm(id) {
-  transactionToDelete = id;
-  confirmDeleteModal.style.display = "flex";
-}
-
-closeConfirmDelete.onclick = () => confirmDeleteModal.style.display = "none";
-cancelDeleteBtn.onclick = () => confirmDeleteModal.style.display = "none";
-window.onclick = (e) => {
-  if (e.target === confirmDeleteModal) confirmDeleteModal.style.display = "none";
-};
-
-confirmDeleteBtn.onclick = async () => {
-  if (!transactionToDelete) return;
-  confirmDeleteModal.style.display = "none";
+  loadingModal.style.display = "flex";
   try {
-    loadingModal.style.display = "flex";
-    await deleteDoc(doc(db, "users", currentUser.uid, "transactions", transactionToDelete));
+    if (id) {
+      await updateDoc(doc(db, "users", currentUser.uid, "transactions", id), txData);
+    } else {
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+    }
     await loadTransactions();
+    modal.style.display = "none";
   } catch (err) {
-    alert("Error deleting: " + err.message);
+    alert("Failed to save transaction: " + err.message);
   } finally {
     loadingModal.style.display = "none";
-    transactionToDelete = null;
-  }
-};
-function convertTo24Hour(timeStr) {
-  const [time, modifier] = timeStr.split(' ');
-  let [hours, minutes] = time.split(':');
-  if (modifier === 'PM' && hours !== '12') hours = String(+hours + 12);
-  if (modifier === 'AM' && hours === '12') hours = '00';
-  return `${hours.padStart(2, '0')}:${minutes}`;
-}
-window.editTransactionById = editTransactionById;
-window.showDeleteConfirm = showDeleteConfirm;
-
-
-function convertTo12Hour(timeStr) {
-  const [h,m] = timeStr.split(':');
-  let hour = parseInt(h);
-  const suffix = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${hour}:${m} ${suffix}`;
-}
-
-function populateAccountHeaderDropdown() {
-  const select = document.getElementById("formHEADER");
-  select.innerHTML = '<option value="">Select Account</option>'; // reset options
-
-  chartOfAccounts.forEach(account => {
-    const option = document.createElement("option");
-    option.value = account;
-    option.textContent = account;
-    select.appendChild(option);
-  });
-}
-
-
-const formMODE = document.getElementById("formMODE");
-const formBANKNAME = document.getElementById("formBANKNAME");
-
-formBANKNAME.style.display = "none"; // hide initially
-
-formMODE.addEventListener("change", async () => {
-  const modeValue = formMODE.value.toLowerCase();
-  if (modeValue === "bank") {
-    // Show and load bank accounts dropdown
-    formBANKNAME.style.display = "inline-block"; // or "block", whatever fits your layout
-    await loadBankAccounts();  // your existing function to load bank accounts
-  } else {
-    // Hide and clear bank accounts dropdown
-    formBANKNAME.style.display = "none";
-    formBANKNAME.innerHTML = '<option value="">Select Bank</option>';
-    formBANKNAME.value = "";
   }
 });
 
+
+  window.onclick = function (event) {
+    if (event.target === modal) {
+      modal.style.display = "none";
+    }
+  };
+
+  applyFiltersBtn.addEventListener("click", applyFilters);
 </script>
+
+
 </body>
 </html>
