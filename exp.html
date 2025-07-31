@@ -439,25 +439,25 @@ import {
   const modeFilter = document.getElementById("modeFilter"), bankFilter = document.getElementById("bankFilter");
   const applyFiltersBtn = document.getElementById("applyFiltersBtn");
   const addBtn = document.getElementById("addTransactionBtn"), modal = document.getElementById("transactionModal");
-  addBtn.onclick = async () => {
-    document.getElementById("modalTitle").innerText = "Add Transaction";
-    modal.classList.remove("edit-mode");
-    modal.classList.add("create-mode");
-    modal.style.display = "flex";
+addBtn.onclick = async () => {
+  document.getElementById("modalTitle").innerText = "Add Transaction";
+  modal.classList.remove("edit-mode");
+  modal.classList.add("create-mode");
+  modal.style.display = "flex";
 
-    form.reset();
-    document.getElementById("transactionForm").reset();
-    document.getElementById("txId").value = "";
+  form.reset();
+  document.getElementById("txId").value = "";
 
-    // Auto-generate SINO
-    const lastSino = Math.max(0, ...allTransactions.map(tx => parseInt(tx.SINO) || 0));
-    document.getElementById("formSINO").value = lastSino + 1;
-    document.getElementById("formMODE").value = ""; // clear Mode on add new
+  // Auto-generate SINO
+  const lastSino = Math.max(0, ...allTransactions.map(tx => parseInt(tx.SINO) || 0));
+  document.getElementById("formSINO").value = lastSino + 1;
+  document.getElementById("formMODE").value = ""; // clear Mode on add new
 
-    toggleBankDropdown();
-    await loadExpenseAccounts();
-    await loadBankAccounts();
-  };
+  toggleBankDropdown(); // will show/hide bank dropdown based on mode
+
+  await loadExpenseAccounts();
+  await loadBankAccounts();
+};
 
 
   const closeModal = () => modal.style.display = "none";
@@ -465,20 +465,20 @@ import {
   let currentUser=null, allTransactions = [], filteredTransactions = [];
   let currentPage = 1, rowsPerPage = 10;
 
-onAuthStateChanged(auth, async user => {
-  if (user) {
-    currentUser = user;
-    const name = user.displayName || user.email || "User";
-    usernameElem.textContent = name;
-    initialsElem.textContent = name.charAt(0).toUpperCase();
-    await init(); // load categories, accounts, banks
-    await loadTransactions();
-  } else {
-    alert("Please login first.");
-    window.location.href = "index.html";
-  }
-});
-
+  onAuthStateChanged(auth, async user => {
+    if (user) {
+      currentUser = user;
+      const name = user.displayName || user.email || "User";
+      usernameElem.textContent = name;
+      initialsElem.textContent = name.charAt(0).toUpperCase();
+      await loadTransactions();
+      await loadExpenseAccounts();
+      await loadBankAccounts(); 
+      await populateBankAccounts();
+    } else {
+      alert("Please login first."); window.location.href="index.html";
+    }
+  });
   logoutBtn.addEventListener("click", async ()=>{
     await signOut(auth); window.location.href="index.html";
   });
@@ -589,7 +589,6 @@ async function init() {
     try {
       loadingModal.style.display = "flex";
 
-
 async function loadExpenseAccounts() {
   if (!currentUser) return;
   try {
@@ -599,18 +598,12 @@ async function loadExpenseAccounts() {
       where("type", "==", "Expense")
     );
     const snapshot = await getDocs(q);
-    console.log("Loaded chartOfAccounts:", snapshot.size);
 
     const select = document.getElementById("formHEADER");
     select.innerHTML = `<option value="">Select Account</option>`;
 
-    if (snapshot.empty) {
-      console.warn("No Expense Accounts found for this user.");
-    }
-
     snapshot.forEach(doc => {
       const data = doc.data();
-      console.log("Account:", data);
       const option = document.createElement("option");
       option.value = data.name;
       option.textContent = `${data.category} - ${data.name}`;
@@ -618,54 +611,39 @@ async function loadExpenseAccounts() {
     });
   } catch (err) {
     console.error("Error loading expense accounts:", err);
-    document.getElementById("formHEADER").innerHTML = `<option value="">Failed to Load</option>`;
+    const select = document.getElementById("formHEADER");
+    select.innerHTML = `<option value="">Failed to Load</option>`;
   }
 }
 
-
-
-
-  // Load banks from Firestore chartOfAccounts (Asset > Bank)
 async function loadBankAccounts() {
-  const bankSelect = document.getElementById("bankSelect");
-  if (!bankSelect || !currentUser) return;
+  if (!currentUser) return;
+  try {
+    const q = query(
+      collection(db, "chartOfAccounts"),
+      where("userId", "==", currentUser.uid),
+      where("type", "==", "Asset"),
+      where("category", "==", "Bank")
+    );
+    const snapshot = await getDocs(q);
 
-  bankSelect.innerHTML = '<option value="">Select Bank</option>';
+    const select = document.getElementById("formBANKNAME");
+    select.innerHTML = `<option value="">Select Bank</option>`;
 
-  const q = query(
-    collection(db, "chartOfAccounts"),
-    where("userId", "==", currentUser.uid),
-    where("type", "==", "Asset"),
-    where("category", "==", "Bank")
-  );
-
-  const snapshot = await getDocs(q);
-  snapshot.forEach(docSnap => {
-    const data = docSnap.data();
-    const option = document.createElement("option");
-    option.value = docSnap.id;
-    option.textContent = data.name;
-    bankSelect.appendChild(option);
-  });
-}
-
-
-
-  document.getElementById("formMODE").addEventListener("change", toggleBankDropdown);
-
-function toggleBankDropdown() {
-  const mode = document.getElementById("formMODE").value;
-  const bankField = document.getElementById("bankField");
-
-  if (mode === "Bank") {
-    bankField.style.display = "block";
-
-    // Make sure user is authenticated before calling
-    if (currentUser) loadBankAccounts();
-  } else {
-    bankField.style.display = "none";
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const option = document.createElement("option");
+      option.value = data.name;
+      option.textContent = data.name;
+      select.appendChild(option);
+    });
+  } catch (err) {
+    console.error("Error loading bank accounts:", err);
+    const select = document.getElementById("formBANKNAME");
+    select.innerHTML = `<option value="">Failed to Load</option>`;
   }
 }
+
 
 
 
