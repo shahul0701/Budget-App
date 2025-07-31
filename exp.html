@@ -485,6 +485,7 @@
   let currentPage = 1;
   const rowsPerPage = 10;
 
+  // Listen for auth state change
   onAuthStateChanged(auth, async user => {
     if (user) {
       currentUser = user;
@@ -506,11 +507,12 @@
     window.location.href = "index.html";
   });
 
+  // Load chart of accounts for dropdown
   async function loadAccounts() {
-const q = query(
-  collection(db, "chartOfAccounts"),
-  where("userId", "==", currentUser.uid)
-);
+    const q = query(
+      collection(db, "chartOfAccounts"),
+      where("userId", "==", currentUser.uid)
+    );
     const snapshot = await getDocs(q);
     formHEADER.innerHTML = '<option value="">Select Account</option>';
     snapshot.forEach(doc => {
@@ -522,6 +524,7 @@ const q = query(
     });
   }
 
+  // Populate Bank Accounts dropdown for filters and form
   async function populateBankAccounts() {
     bankFilter.innerHTML = `<option value="all">All</option>`;
     try {
@@ -532,15 +535,18 @@ const q = query(
         where("category", "==", "Bank")
       );
       const snapshot = await getDocs(q);
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        const option = document.createElement("option");
-        option.value = data.name;
-        option.textContent = data.name;
-        bankFilter.appendChild(option);
-      });
-      if (bankFilter.options.length === 1) {
+      if (snapshot.empty) {
         bankFilter.innerHTML = `<option value="all">No Bank Accounts Found</option>`;
+      } else {
+        // Clear "All" and add options dynamically
+        bankFilter.innerHTML = `<option value="all">All</option>`;
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const option = document.createElement("option");
+          option.value = data.name;
+          option.textContent = data.name;
+          bankFilter.appendChild(option);
+        });
       }
     } catch (err) {
       console.error("Error loading bank accounts:", err);
@@ -548,11 +554,13 @@ const q = query(
     }
   }
 
+  // Load all transactions for user
   async function loadTransactions() {
     loadingModal.style.display = "flex";
     try {
       const snap = await getDocs(collection(db, "users", currentUser.uid, "transactions"));
       allTransactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort descending by SINO (serial no)
       allTransactions.sort((a, b) => (parseInt(b.SINO) || 0) - (parseInt(a.SINO) || 0));
       populateFiltersOptions(allTransactions);
       applyFilters();
@@ -563,6 +571,7 @@ const q = query(
     }
   }
 
+  // Populate filter dropdowns with unique values
   function populateFiltersOptions(data) {
     const modes = new Set();
     const banks = new Set();
@@ -570,17 +579,24 @@ const q = query(
       if (t.MODE) modes.add(t.MODE);
       if (t.BANK_NAME) banks.add(t.BANK_NAME);
     });
-    modeFilter.innerHTML = `<option value="all">All</option>` + [...modes].sort().map(m => `<option>${m}</option>`).join("");
-    bankFilter.innerHTML = `<option value="all">All</option>` + [...banks].sort().map(b => `<option>${b}</option>`).join("");
+    modeFilter.innerHTML =
+      `<option value="all">All</option>` +
+      [...modes].sort().map(m => `<option>${escapeHtml(m)}</option>`).join("");
+    bankFilter.innerHTML =
+      `<option value="all">All</option>` +
+      [...banks].sort().map(b => `<option>${escapeHtml(b)}</option>`).join("");
   }
 
+  // Filter transactions according to selected criteria
   function applyFilters() {
     filteredTransactions = allTransactions.slice();
     const now = new Date();
 
+    // Helper to check if date is within range safely
     const isInRange = (dateStr, start, end) => {
       if (!dateStr) return false;
       const d = new Date(dateStr);
+      if (isNaN(d)) return false; // Ignore invalid dates
       return d >= start && d <= end;
     };
 
@@ -607,19 +623,21 @@ const q = query(
           const start = new Date(startDateInput.value);
           const end = new Date(endDateInput.value);
           end.setHours(23, 59, 59, 999);
-          filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, end));
+          if (!isNaN(start) && !isNaN(end)) {
+            filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, end));
+          }
         }
         break;
     }
 
     if (incomeExpenseFilter.value === "income")
-      filteredTransactions = filteredTransactions.filter(t => t.INCOME > 0);
+      filteredTransactions = filteredTransactions.filter(t => (t.INCOME ?? 0) > 0);
     else if (incomeExpenseFilter.value === "expense")
-      filteredTransactions = filteredTransactions.filter(t => t.EXPENSE > 0);
+      filteredTransactions = filteredTransactions.filter(t => (t.EXPENSE ?? 0) > 0);
 
     if (descFilter.value.trim()) {
       const search = descFilter.value.trim().toLowerCase();
-      filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION || "").toLowerCase().includes(search));
+      filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION ?? "").toLowerCase().includes(search));
     }
 
     if (modeFilter.value !== "all")
@@ -632,6 +650,7 @@ const q = query(
     buildTable();
   }
 
+  // Build table rows for current page
   function buildTable() {
     txMap = {};
     const start = (currentPage - 1) * rowsPerPage;
@@ -641,14 +660,15 @@ const q = query(
 
     if (pageItems.length === 0) {
       tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
+      updatePagination();
       return;
     }
 
     pageItems.forEach(d => {
       txMap[d.id] = d;
-      const incomeCell = d.INCOME > 0 ? `<span style="color:green;">${d.INCOME.toFixed(2)}</span>` : "";
-      const expenseCell = d.EXPENSE > 0 ? `<span style="color:red;">${d.EXPENSE.toFixed(2)}</span>` : "";
-      const balanceCell = d.BALANCE ? d.BALANCE.toFixed(2) : "";
+      const incomeCell = (d.INCOME ?? 0) > 0 ? `<span style="color:green;">${(d.INCOME).toFixed(2)}</span>` : "";
+      const expenseCell = (d.EXPENSE ?? 0) > 0 ? `<span style="color:red;">${(d.EXPENSE).toFixed(2)}</span>` : "";
+      const balanceCell = (d.BALANCE != null) ? d.BALANCE.toFixed(2) : "";
       const row = document.createElement("tr");
 
       row.innerHTML = `
@@ -662,7 +682,7 @@ const q = query(
         <td>${expenseCell}</td>
         <td>${escapeHtml(d.DESCRIPTION)}</td>
         <td>${balanceCell}</td>
-        <td class="attachment-cell">${d.ATTACHMENT ? `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank">View</a>` : ""}</td>
+        <td class="attachment-cell">${d.ATTACHMENT ? `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a>` : ""}</td>
         <td>
           <button class="edit-btn" data-id="${d.id}">Edit</button>
           <button class="delete-btn" data-id="${d.id}">Delete</button>
@@ -675,6 +695,7 @@ const q = query(
     updatePagination();
   }
 
+  // Update pagination controls
   function updatePagination() {
     const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
     paginationInfo.textContent = `Page ${currentPage} of ${totalPages || 1}`;
@@ -697,6 +718,7 @@ const q = query(
     }
   };
 
+  // Simple text escaping to avoid XSS in HTML
   function escapeHtml(text = "") {
     return text.toString()
       .replace(/&/g, "&amp;")
@@ -706,6 +728,7 @@ const q = query(
       .replace(/'/g, "&#039;");
   }
 
+  // Set up Edit/Delete buttons on transaction rows
   function setupTableButtons() {
     document.querySelectorAll(".edit-btn").forEach(btn => {
       btn.onclick = () => openEditModal(btn.dataset.id);
@@ -715,6 +738,7 @@ const q = query(
     });
   }
 
+  // Delete transaction handler
   async function deleteTransaction(id) {
     if (!confirm("Delete this transaction?")) return;
     try {
@@ -726,6 +750,7 @@ const q = query(
     }
   }
 
+  // Open modal to add/edit transaction
   function openEditModal(id = null) {
     modal.style.display = "block";
     form.reset();
@@ -754,6 +779,7 @@ const q = query(
     }
   }
 
+  // Show/hide bank name input based on mode selection
   function toggleBankNameVisibility(mode) {
     formBANKNAME.style.display = (mode === "Bank" || mode === "Credit Card") ? "block" : "none";
   }
@@ -762,42 +788,43 @@ const q = query(
     toggleBankNameVisibility(e.target.value);
   });
 
-form.addEventListener("submit", async e => {
-  e.preventDefault();
+  // Handle form submit for add/edit transaction
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
 
-  const id = txIdInput.value;
-  const txData = {
-    SINO: formSINO.value.trim(),
-    DATE: formDATE.value.trim(),
-    TIME: formTIME.value.trim(),
-    ACCOUNT_HEADER: formHEADER.value.trim(),
-    MODE: formMODE.value.trim(),
-    BANK_NAME: formBANKNAME.value.trim(),
-    INCOME: parseFloat(formINCOME.value) || 0,
-    EXPENSE: parseFloat(formEXPENSE.value) || 0,
-    DESCRIPTION: formDESC.value.trim(),
-    BALANCE: parseFloat(formBALANCE.value) || 0,
-  };
+    const id = txIdInput.value;
+    const txData = {
+      SINO: formSINO.value.trim(),
+      DATE: formDATE.value.trim(),
+      TIME: formTIME.value.trim(),
+      ACCOUNT_HEADER: formHEADER.value.trim(),
+      MODE: formMODE.value.trim(),
+      BANK_NAME: formBANKNAME.value.trim(),
+      INCOME: parseFloat(formINCOME.value) || 0,
+      EXPENSE: parseFloat(formEXPENSE.value) || 0,
+      DESCRIPTION: formDESC.value.trim(),
+      BALANCE: parseFloat(formBALANCE.value) || 0,
+    };
 
-  console.log("Saving transaction:", txData); // <--- Debug here
+    console.log("Saving transaction:", txData); // <--- Debug here
 
-  loadingModal.style.display = "flex";
-  try {
-    if (id) {
-      await updateDoc(doc(db, "users", currentUser.uid, "transactions", id), txData);
-    } else {
-      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+    loadingModal.style.display = "flex";
+    try {
+      if (id) {
+        await updateDoc(doc(db, "users", currentUser.uid, "transactions", id), txData);
+      } else {
+        await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+      }
+      await loadTransactions();
+      modal.style.display = "none";
+    } catch (err) {
+      alert("Failed to save transaction: " + err.message);
+    } finally {
+      loadingModal.style.display = "none";
     }
-    await loadTransactions();
-    modal.style.display = "none";
-  } catch (err) {
-    alert("Failed to save transaction: " + err.message);
-  } finally {
-    loadingModal.style.display = "none";
-  }
-});
+  });
 
-
+  // Close modal on outside click
   window.onclick = function (event) {
     if (event.target === modal) {
       modal.style.display = "none";
@@ -806,6 +833,7 @@ form.addEventListener("submit", async e => {
 
   applyFiltersBtn.addEventListener("click", applyFilters);
 </script>
+
 
 
 </body>
