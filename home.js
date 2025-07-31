@@ -324,5 +324,5 @@ chartOfAccountsBtn?.addEventListener("click", () => {
 });
 
 ExpenseTrackerBtn?.addEventListener("click", () => {
-  window.location.href = "expensemanager.html";
+  window.location.href = "exp.html";
 });
