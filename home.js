@@ -320,9 +320,9 @@ function handleEventClick(info) {
 
 // === Navigation to Chart of Accounts ===
 chartOfAccountsBtn?.addEventListener("click", () => {
-  window.location.href = "COA.html";
+  window.location.href = "coa.html";
 });
 
 ExpenseTrackerBtn?.addEventListener("click", () => {
-  window.location.href = "EXP.html";
+  window.location.href = "exp.html";
 });
