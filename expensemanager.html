@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expense Manager</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+    }
+    h2 {
+      text-align: center;
+    }
+    .form-group {
+      display: flex;
+      margin-bottom: 15px;
+    }
+    .form-group label {
+      width: 150px;
+      font-weight: bold;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      flex: 1;
+      padding: 8px;
+      font-size: 1rem;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #007bff;
+      border: none;
+      color: white;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    table {
+      width: 100%;
+      margin-top: 30px;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    th {
+      background-color: #f1f1f1;
+    }
+    .Income {
+      color: green;
+    }
+    .Expense {
+      color: red;
+    }
+    .summary {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>Income & Expense Tracker</h2>
+
+  <form id="transactionForm">
+    <div class="form-group">
+      <label for="transactionAccount">Account</label>
+      <select id="transactionAccount" required>
+        <option value="">Select Account</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="transactionAmount">Amount</label>
+      <input type="number" id="transactionAmount" required />
+    </div>
+
+    <div class="form-group">
+      <label for="transactionDate">Date</label>
+      <input type="date" id="transactionDate" required />
+    </div>
+
+    <div class="form-group">
+      <label for="transactionNote">Note</label>
+      <textarea id="transactionNote" rows="2"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label></label>
+      <button type="submit">Add Transaction</button>
+    </div>
+  </form>
+
+  <div class="summary" id="summary"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Account</th>
+        <th>Type</th>
+        <th>Category</th>
+        <th>Amount</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody id="transactionTable"></tbody>
+  </table>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    query,
+    where,
+    serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import {
+    getAuth,
+    onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_BUCKET",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  const transactionForm = document.getElementById("transactionForm");
+  const transactionAccount = document.getElementById("transactionAccount");
+  const transactionAmount = document.getElementById("transactionAmount");
+  const transactionDate = document.getElementById("transactionDate");
+  const transactionNote = document.getElementById("transactionNote");
+  const transactionTable = document.getElementById("transactionTable");
+  const summary = document.getElementById("summary");
+
+  let currentUser = null;
+  let accounts = [];
+
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      currentUser = user;
+      await loadAccounts();
+      await loadTransactions();
+    } else {
+      alert("You must be logged in.");
+      window.location.href = "index.html";
+    }
+  });
+
+  async function loadAccounts() {
+    const q = query(collection(db, "chartOfAccounts"), where("userId", "==", currentUser.uid));
+    const snapshot = await getDocs(q);
+    accounts = [];
+    transactionAccount.innerHTML = '<option value="">Select Account</option>';
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      accounts.push({ id: doc.id, ...data });
+      const opt = document.createElement("option");
+      opt.value = doc.id;
+      opt.textContent = `${data.name} (${data.type})`;
+      transactionAccount.appendChild(opt);
+    });
+  }
+
+  transactionForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const accountId = transactionAccount.value;
+    const amount = parseFloat(transactionAmount.value);
+    const date = transactionDate.value;
+    const note = transactionNote.value;
+
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) {
+      alert("Invalid account selected.");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "transactions"), {
+        userId: currentUser.uid,
+        accountId: account.id,
+        accountName: account.name,
+        accountType: account.type,
+        category: account.category,
+        amount,
+        date,
+        note,
+        createdAt: serverTimestamp(),
+      });
+      transactionForm.reset();
+      await loadTransactions();
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+  });
+
+  async function loadTransactions() {
+    const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid));
+    const snapshot = await getDocs(q);
+    transactionTable.innerHTML = "";
+    let income = 0, expense = 0;
+
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${d.date}</td>
+        <td>${d.accountName}</td>
+        <td class="${d.accountType}">${d.accountType}</td>
+        <td>${d.category}</td>
+        <td>${d.amount.toFixed(2)}</td>
+        <td>${d.note || ""}</td>
+      `;
+      transactionTable.appendChild(tr);
+
+      if (d.accountType === "Income") income += d.amount;
+      if (d.accountType === "Expense" || d.accountType === "COGS" || d.accountType === "OtherExpense") expense += d.amount;
+    });
+
+    const net = income - expense;
+    summary.innerHTML = `
+      <strong>Total Income:</strong> $${income.toFixed(2)}<br>
+      <strong>Total Expense:</strong> $${expense.toFixed(2)}<br>
+      <strong>Net:</strong> $${net.toFixed(2)}
+    `;
+  }
+</script>
+</body>
+</html>
