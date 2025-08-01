@@ -7,7 +7,7 @@
   import { getFirestore, collection, query, where, getDocs, orderBy, limit, startAfter, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-  // Firebase configuration
+  // Firebase config
   const firebaseConfig = {
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
     authDomain: "budget-app-1365f.firebaseapp.com",
@@ -22,7 +22,7 @@
   const db = getFirestore(app);
   const auth = getAuth(app);
 
-  // Parse accountId from URL
+  // Parse accountId from URL (if any)
   const urlParams = new URLSearchParams(window.location.search);
   const accountIdFromURL = urlParams.get("accountId");
 
@@ -39,10 +39,9 @@
   // Pagination variables
   const PAGE_SIZE = 10;
   let lastVisible = null;
-  let firstVisible = null;
-  let pageStack = []; // stack of cursors for "previous" pages
+  let pageStack = []; // stack to track pages for 'previous' button
 
-  // Create pagination controls
+  // Pagination controls setup
   const paginationControls = document.createElement('div');
   paginationControls.style.margin = "10px auto";
   paginationControls.style.width = "90%";
@@ -61,23 +60,27 @@
 
   document.querySelector('table').after(paginationControls);
 
+  // Previous button click
   prevBtn.addEventListener('click', () => {
     if (pageStack.length > 1) {
-      pageStack.pop(); // current page cursor removed
+      pageStack.pop(); // remove current page's cursor
       const prevCursor = pageStack[pageStack.length - 1];
       loadTrialBalance({ cursor: prevCursor, direction: 'prev' });
     }
   });
 
+  // Next button click
   nextBtn.addEventListener('click', () => {
     loadTrialBalance({ cursor: lastVisible, direction: 'next' });
   });
 
+  // Logout button
   logoutBtn.addEventListener("click", async () => {
     await signOut(auth);
     window.location.href = "login.html";
   });
 
+  // On user auth state change
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       const name = user.displayName || user.email || "User";
@@ -91,23 +94,19 @@
     }
   });
 
+  // Filters event listeners to reload data
   dateFilter.addEventListener("change", () => {
     toggleCustomDateInputs();
+    resetAndLoad();
+  });
+  fromDate.addEventListener("change", resetAndLoad);
+  toDate.addEventListener("change", resetAndLoad);
+  accountHeaderFilter.addEventListener("change", resetAndLoad);
+
+  function resetAndLoad() {
     pageStack = [null];
     loadTrialBalance({ cursor: null, direction: 'next' });
-  });
-  fromDate.addEventListener("change", () => {
-    pageStack = [null];
-    loadTrialBalance({ cursor: null, direction: 'next' });
-  });
-  toDate.addEventListener("change", () => {
-    pageStack = [null];
-    loadTrialBalance({ cursor: null, direction: 'next' });
-  });
-  accountHeaderFilter.addEventListener("change", () => {
-    pageStack = [null];
-    loadTrialBalance({ cursor: null, direction: 'next' });
-  });
+  }
 
   function toggleCustomDateInputs() {
     if (dateFilter.value === "custom") {
@@ -121,6 +120,7 @@
     }
   }
 
+  // Returns Date range from filter type
   function getDateRange(filterType) {
     const now = new Date();
     let from = new Date(), to = new Date();
@@ -151,6 +151,7 @@
     return { from, to };
   }
 
+  // Populate account header dropdown
   async function populateAccountHeaders() {
     const user = auth.currentUser;
     if (!user) return;
@@ -174,6 +175,7 @@
     }
   }
 
+  // Load trial balance with pagination and filters
   async function loadTrialBalance({ cursor = null, direction = 'next' } = {}) {
     const user = auth.currentUser;
     if (!user) return;
@@ -187,13 +189,14 @@
     }
 
     loadingStatus.textContent = "Loading...";
+    balanceTableBody.innerHTML = "";
 
     const { from, to } = getDateRange(dateFilter.value);
     const selectedAccountId = accountHeaderFilter.value;
 
     const txRef = collection(db, "users", user.uid, "transactions");
 
-    // Base query: date range + orderBy date descending
+    // Build base query
     let baseQuery = query(
       txRef,
       where("date", ">=", Timestamp.fromDate(from)),
@@ -202,96 +205,115 @@
       limit(PAGE_SIZE)
     );
 
-    if (cursor) {
-      if (direction === 'next') {
-        baseQuery = query(baseQuery, startAfter(cursor));
-      } else if (direction === 'prev') {
-        // For simplicity, we don't implement startBefore here because it needs a different approach.
-        // Using pageStack to go back.
-      }
+    if (cursor && direction === 'next') {
+      baseQuery = query(baseQuery, startAfter(cursor));
     }
 
-    // Load all documents with date range
     let snap = await getDocs(baseQuery);
 
-    // Filter by account + children if needed
+    // Filter by selected account and children accounts if necessary
     if (selectedAccountId !== "all") {
       const accountsRef = collection(db, "users", user.uid, "chartOfAccounts");
 
-      // Get children accounts of selected account
+      // Fetch children accounts of selected account
       const childrenSnap = await getDocs(query(accountsRef, where("parentId", "==", selectedAccountId)));
       const accountIds = [selectedAccountId];
       childrenSnap.forEach(doc => accountIds.push(doc.id));
 
-      // Filter fetched docs by account IDs in JS
+      // Filter transactions locally
       snap = {
         docs: snap.docs.filter(doc => accountIds.includes(doc.data().ACCOUNT_HEADER))
       };
     }
 
     if (snap.docs.length > 0) {
+      // Update pagination cursors
       firstVisible = snap.docs[0];
       lastVisible = snap.docs[snap.docs.length - 1];
 
       if (direction === 'next') {
         pageStack.push(lastVisible);
-      } else if (direction === 'prev') {
-        // Handled by popping stack on previous button click
       }
     }
 
     renderRows(snap.docs);
 
-    // Enable/disable pagination buttons
+    // Enable/disable buttons
     prevBtn.disabled = pageStack.length <= 1;
     nextBtn.disabled = snap.docs.length < PAGE_SIZE;
 
     loadingStatus.textContent = "Loaded";
   }
 
-function renderRows(docs) {
+  // Render transaction rows
+  function renderRows(docs) {
   balanceTableBody.innerHTML = "";
-  let totalExpense = 0;
-
+  
   if (docs.length === 0) {
-    balanceTableBody.innerHTML = '<tr><td colspan="4">No transactions found.</td></tr>';
+    balanceTableBody.innerHTML = '<tr><td colspan="10">No transactions found.</td></tr>';
     loadingStatus.textContent = "No data found.";
     return;
   }
 
-  // sort by date descending
+  // Sort by date descending just in case
   docs.sort((a, b) => b.data().date.toDate() - a.data().date.toDate());
 
-  docs.forEach(docSnap => {
-    const d = docSnap.data();
-    const dt = d.date.toDate().toLocaleDateString();
-    const desc = d.DESCRIPTION || d.description || "";
-    const header = d.ACCOUNT_HEADER || d.accountHeader || "";
-    const expense = Number(d.EXPENSE || d.expense || 0);
+  let runningBalance = 0;
 
-    totalExpense += expense;
+  docs.forEach((docSnap, index) => {
+    const d = docSnap.data();
+    const dateObj = d.date.toDate();
+
+    const dateStr = dateObj.toLocaleDateString();
+    const timeStr = dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+    const accountHeader = d.ACCOUNT_HEADER || d.accountHeader || "";
+    const mode = d.MODE || d.mode || "";
+    const bankName = d.BANK_NAME || d.bankName || "";
+    const income = Number(d.INCOME || d.income || 0);
+    const expense = Number(d.EXPENSE || d.expense || 0);
+    const description = d.DESCRIPTION || d.description || "";
+
+    // Update running balance
+    runningBalance += (income - expense);
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${dt}</td>
-      <td>${header}</td>
-      <td>${desc}</td>
-      <td style="text-align:right;">${expense.toFixed(2)}</td>`;
+      <td>${index + 1}</td>
+      <td>${dateStr}</td>
+      <td>${timeStr}</td>
+      <td>${accountHeader}</td>
+      <td>${mode}</td>
+      <td>${bankName}</td>
+      <td style="text-align:right;">${income.toFixed(2)}</td>
+      <td style="text-align:right;">${expense.toFixed(2)}</td>
+      <td>${description}</td>
+      <td style="text-align:right;">${runningBalance.toFixed(2)}</td>
+    `;
     balanceTableBody.appendChild(tr);
   });
+
+  // Optionally add a total row for income, expense, and balance
+  const totalIncome = docs.reduce((sum, d) => sum + Number(d.data().INCOME || d.data().income || 0), 0);
+  const totalExpense = docs.reduce((sum, d) => sum + Number(d.data().EXPENSE || d.data().expense || 0), 0);
 
   const trTotal = document.createElement("tr");
   trTotal.style.fontWeight = "bold";
   trTotal.style.background = "#eee";
   trTotal.innerHTML = `
-    <td>Total</td><td></td><td></td>
-    <td style="text-align:right;">${totalExpense.toFixed(2)}</td>`;
+    <td colspan="6">Total</td>
+    <td style="text-align:right;">${totalIncome.toFixed(2)}</td>
+    <td style="text-align:right;">${totalExpense.toFixed(2)}</td>
+    <td></td>
+    <td style="text-align:right;">${(totalIncome - totalExpense).toFixed(2)}</td>
+  `;
   balanceTableBody.appendChild(trTotal);
 
   loadingStatus.textContent = "Loaded";
 }
 
   </script>
+
   <style>
     body { font-family: Arial, sans-serif; text-align: center; margin:0; padding:0; background:#f9f9f9; }
     .top-bar { display:flex; justify-content:space-between; padding:10px 20px; background:#fff; border-bottom:1px solid #ccc; align-items:center; }
@@ -306,6 +328,7 @@ function renderRows(docs) {
     button:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
+
 <body>
   <div class="top-bar">
     <a href="coa.html">← Back to Chart of Accounts</a>
@@ -317,6 +340,7 @@ function renderRows(docs) {
   </div>
 
   <h2>Trial Balance</h2>
+
   <div class="filter">
     Filter:
     <select id="dateFilter">
@@ -332,13 +356,23 @@ function renderRows(docs) {
     </select>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Date</th><th>Account</th><th>Description</th><th style="text-align:right;">Amount</th>
-      </tr>
-    </thead>
-    <tbody id="balanceTableBody"></tbody>
-  </table>
+<table>
+  <thead>
+    <tr>
+      <th>SINO</th>
+      <th>DATE</th>
+      <th>TIME</th>
+      <th>ACCOUNT HEADER</th>
+      <th>MODE</th>
+      <th>BANK NAME</th>
+      <th style="text-align:right;">INCOME</th>
+      <th style="text-align:right;">EXPENSE</th>
+      <th>DESCRIPTION</th>
+      <th style="text-align:right;">BALANCE</th>
+    </tr>
+  </thead>
+  <tbody id="balanceTableBody"></tbody>
+</table>
+
 </body>
 </html>
