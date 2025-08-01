@@ -1,203 +1,211 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Trial Balance with Drilldown</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trial Balance with Drilldown Popup</title>
+
   <script type="module">
-    document.addEventListener("DOMContentLoaded", () => {
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-      import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-      import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-      const firebaseConfig = {
-        apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-        authDomain: "budget-app-1365f.firebaseapp.com",
-        projectId: "budget-app-1365f",
-        storageBucket: "budget-app-1365f.appspot.com",
-        messagingSenderId: "1036194450411",
-        appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-        measurementId: "G-YFFJL2H54X"
-      };
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
 
-      const app = initializeApp(firebaseConfig);
-      const db = getFirestore(app);
-      const auth = getAuth(app);
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
 
-      const logoutBtn = document.getElementById("logoutBtn");
-      const userDisplay = document.getElementById("userDisplay");
-      const loadingStatus = document.getElementById("loadingStatus");
-      const summaryBody = document.getElementById("trialBalanceBody");
-      const detailSection = document.getElementById("detailSection");
-      const detailTitle = document.getElementById("detailTitle");
-      const detailBody = document.getElementById("detailTableBody");
-      const backToSummaryBtn = document.getElementById("backToSummary");
+    // DOM elements
+    const logoutBtn = document.getElementById("logoutBtn");
+    const userDisplay = document.getElementById("userDisplay");
+    const loadingStatus = document.getElementById("loadingStatus");
+    const summaryBody = document.getElementById("trialBalanceBody");
 
-      logoutBtn.addEventListener("click", async () => {
-        await signOut(auth);
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+
+    // Modal controls
+    function openDetailModal(account) {
+      const modal = document.getElementById("detailModal");
+      const iframe = document.getElementById("detailIframe");
+      const url = `exp.html?account=${encodeURIComponent(account)}`;
+      iframe.src = url;
+      modal.style.display = "flex";
+    }
+
+    document.getElementById("closeModalBtn").addEventListener("click", () => {
+      const modal = document.getElementById("detailModal");
+      const iframe = document.getElementById("detailIframe");
+      iframe.src = "";
+      modal.style.display = "none";
+    });
+
+    // Load and render Trial Balance summary
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
         window.location.href = "login.html";
-      });
-
-      function showSummary() {
-        detailSection.style.display = "none";
-        summaryBody.parentElement.parentElement.style.display = "table";
-        loadingStatus.textContent = "Trial Balance loaded.";
+        return;
       }
+      userDisplay.textContent = user.displayName || user.email || "User";
+      loadingStatus.textContent = "Loading Trial Balance...";
 
-      function showDetail() {
-        detailSection.style.display = "block";
-        summaryBody.parentElement.parentElement.style.display = "none";
-        loadingStatus.textContent = "";
-      }
-
-      backToSummaryBtn.addEventListener("click", () => {
-        showSummary();
-      });
-
-      onAuthStateChanged(auth, async user => {
-        if (!user) {
-          window.location.href = "login.html";
-          return;
-        }
-        userDisplay.textContent = user.displayName || user.email || "User";
-        loadingStatus.textContent = "Loading Trial Balance...";
-
-        try {
-          const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-          const transactions = txSnap.docs.map(doc => {
-            const data = doc.data();
-            // For Firestore Timestamp fields, you may need this
-            if (data.date && typeof data.date.toDate === 'function') {
-              data.date = data.date; // Keep as Timestamp, handled later
-            }
-            return data;
-          });
-
-          const summary = {};
-          for (const tx of transactions) {
-            const account = tx.ACCOUNT_HEADER || "Uncategorized";
-            if (!summary[account]) summary[account] = { debit: 0, credit: 0 };
-            summary[account].debit += Number(tx.EXPENSE || 0);
-            summary[account].credit += Number(tx.INCOME || 0);
-          }
-
-          if (Object.keys(summary).length === 0) {
-            summaryBody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No data found.</td></tr>`;
-            loadingStatus.textContent = "No transactions to summarize.";
-            return;
-          }
-
-          let rows = "";
-          for (const [account, amounts] of Object.entries(summary)) {
-            const balance = amounts.credit - amounts.debit;
-            rows += `
-              <tr>
-                <td><a href="#" class="accountLink" data-account="${account}">${account}</a></td>
-                <td style="text-align:right;">${amounts.debit.toFixed(2)}</td>
-                <td style="text-align:right;">${amounts.credit.toFixed(2)}</td>
-                <td style="text-align:right; color:${balance >= 0 ? 'green' : 'red'}">${balance.toFixed(2)}</td>
-              </tr>
-            `;
-          }
-          summaryBody.innerHTML = rows;
-          loadingStatus.textContent = "Trial Balance loaded.";
-
-          // Attach click listeners AFTER rows are in the DOM
-          const accountLinks = document.querySelectorAll(".accountLink");
-          console.log("Number of account links found:", accountLinks.length);
-
-          accountLinks.forEach(link => {
-            link.addEventListener("click", async e => {
-              e.preventDefault();
-              const account = e.target.getAttribute("data-account");
-              console.log("Clicked account:", account);
-              await loadAccountDetails(account, transactions);
-            });
-          });
-
-          showSummary();
-
-        } catch (error) {
-          loadingStatus.textContent = `Error loading data: ${error.message}`;
-          summaryBody.innerHTML = "";
-          console.error("Firestore error:", error);
-        }
-      });
-
-      async function loadAccountDetails(account, allTransactions) {
-        console.log("Loading details for account:", account);
-        loadingStatus.textContent = `Loading transactions for "${account}"...`;
-        showDetail();
-
-        const filteredTxs = allTransactions.filter(tx => (tx.ACCOUNT_HEADER || "Uncategorized") === account);
-        console.log("Filtered transactions count:", filteredTxs.length);
-
-        if (filteredTxs.length === 0) {
-          detailBody.innerHTML = `<tr><td colspan="9" style="text-align:center;">No transactions found for this account.</td></tr>`;
-          detailTitle.textContent = `Details for: ${account}`;
-          loadingStatus.textContent = "";
-          return;
-        }
-
-        filteredTxs.sort((a, b) => {
-          if (!a.date || !b.date) return 0;
-          return b.date.toDate() - a.date.toDate();
+      try {
+        // Load all transactions for user
+        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
+        const transactions = txSnap.docs.map(doc => {
+          return { id: doc.id, ...doc.data() };
         });
 
-        detailTitle.textContent = `Details for: ${account}`;
+        // Group transactions by ACCOUNT_HEADER for summary
+        const summary = {};
+        for (const tx of transactions) {
+          const account = tx.ACCOUNT_HEADER || "Uncategorized";
+          if (!summary[account]) summary[account] = { debit: 0, credit: 0 };
+          summary[account].debit += Number(tx.EXPENSE || 0);
+          summary[account].credit += Number(tx.INCOME || 0);
+        }
 
+        if (Object.keys(summary).length === 0) {
+          summaryBody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No data found.</td></tr>`;
+          loadingStatus.textContent = "No transactions to summarize.";
+          return;
+        }
+
+        // Render summary rows with clickable account headers
         let rows = "";
-        let runningBalance = 0;
-        filteredTxs.forEach((tx, i) => {
-          const d = tx.date ? tx.date.toDate() : null;
-          const dateStr = d ? d.toLocaleDateString() : "N/A";
-          const timeStr = d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
-          const income = Number(tx.INCOME || 0);
-          const expense = Number(tx.EXPENSE || 0);
-          runningBalance += (income - expense);
+        for (const [account, amounts] of Object.entries(summary)) {
+          const balance = amounts.credit - amounts.debit;
           rows += `
             <tr>
-              <td>${i + 1}</td>
-              <td>${dateStr}</td>
-              <td>${timeStr}</td>
-              <td>${tx.MODE || ""}</td>
-              <td>${tx.BANK_NAME || ""}</td>
-              <td style="text-align:right;">${income.toFixed(2)}</td>
-              <td style="text-align:right;">${expense.toFixed(2)}</td>
-              <td>${tx.DESCRIPTION || ""}</td>
-              <td style="text-align:right;">${runningBalance.toFixed(2)}</td>
+              <td><a href="#" class="accountLink" data-account="${account}">${account}</a></td>
+              <td style="text-align:right;">${amounts.debit.toFixed(2)}</td>
+              <td style="text-align:right;">${amounts.credit.toFixed(2)}</td>
+              <td style="text-align:right; color:${balance >= 0 ? 'green' : 'red'}">${balance.toFixed(2)}</td>
             </tr>
           `;
+        }
+        summaryBody.innerHTML = rows;
+        loadingStatus.textContent = "Trial Balance loaded.";
+
+        // Add click handlers for all account links to open modal popup
+        document.querySelectorAll(".accountLink").forEach(link => {
+          link.addEventListener("click", e => {
+            e.preventDefault();
+            const account = e.target.getAttribute("data-account");
+            if (!account) return;
+            openDetailModal(account);
+          });
         });
 
-        const totalIncome = filteredTxs.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
-        const totalExpense = filteredTxs.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
-
-        rows += `
-          <tr style="font-weight:bold; background:#eee;">
-            <td colspan="5">Total</td>
-            <td style="text-align:right;">${totalIncome.toFixed(2)}</td>
-            <td style="text-align:right;">${totalExpense.toFixed(2)}</td>
-            <td></td>
-            <td style="text-align:right;">${(totalIncome - totalExpense).toFixed(2)}</td>
-          </tr>
-        `;
-
-        detailBody.innerHTML = rows;
-        loadingStatus.textContent = "";
+      } catch (error) {
+        loadingStatus.textContent = `Error loading data: ${error.message}`;
+        summaryBody.innerHTML = "";
       }
     });
   </script>
 
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
-    .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: white; border-bottom: 1px solid #ccc; }
-    .logout-btn { background: #c00; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
-    table { width: 90%; margin: 20px auto; border-collapse: collapse; background: white; }
-    th, td { border: 1px solid #ccc; padding: 10px; }
-    th { background: #eee; }
-    a.accountLink { cursor: pointer; color: #0645AD; text-decoration: underline; }
-    a.accountLink:hover { color: #0B0080; }
-    #detailSection { display: none; margin-top: 30px; }
-    #backToSummary { margin: 10px auto; display: block; padding: 8px 16px; font-size: 1rem; cursor: pointer; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background: white;
+      border-bottom: 1px solid #ccc;
+    }
+    .logout-btn {
+      background: #c00;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    table {
+      width: 90%;
+      margin: 20px auto;
+      border-collapse: collapse;
+      background: white;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+    }
+    th {
+      background: #eee;
+    }
+    a.accountLink {
+      cursor: pointer;
+      color: #0645AD;
+      text-decoration: underline;
+    }
+    a.accountLink:hover {
+      color: #0B0080;
+    }
+
+    /* Modal styles */
+    #detailModal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.5);
+      z-index: 9999;
+      justify-content: center;
+      align-items: center;
+    }
+    #detailModal > div {
+      background: #fff;
+      width: 80vw;
+      height: 80vh;
+      border-radius: 8px;
+      position: relative;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+    }
+    #closeModalBtn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 22px;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      color: #666;
+      font-weight: bold;
+      user-select: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background-color 0.2s ease;
+    }
+    #closeModalBtn:hover {
+      background-color: #ddd;
+    }
+    #detailIframe {
+      flex-grow: 1;
+      border: none;
+      border-radius: 0 0 8px 8px;
+    }
   </style>
 </head>
 <body>
@@ -225,27 +233,12 @@
     </tbody>
   </table>
 
-  <section id="detailSection">
-    <h3 id="detailTitle">Account Details</h3>
-    <button id="backToSummary">Back to Trial Balance Summary</button>
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Date</th>
-          <th>Time</th>
-          <th>Mode</th>
-          <th>Bank Name</th>
-          <th>Income</th>
-          <th>Expense</th>
-          <th>Description</th>
-          <th>Running Balance</th>
-        </tr>
-      </thead>
-      <tbody id="detailTableBody">
-        <tr><td colspan="9" style="text-align:center;">Select an account above to see details</td></tr>
-      </tbody>
-    </table>
-  </section>
+  <!-- Modal popup container -->
+  <div id="detailModal">
+    <div>
+      <button id="closeModalBtn" title="Close details popup">✖</button>
+      <iframe id="detailIframe" src=""></iframe>
+    </div>
+  </div>
 </body>
 </html>
