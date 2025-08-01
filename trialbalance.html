@@ -1,93 +1,134 @@
+<!-- trialbalance.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF‑8">
-  <meta name="viewport" content="width=device‑width, initial‑scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trial Balance</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    /* basic styling here (table, inputs, etc.) */
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { padding: 8px; border: 1px solid #ccc; text-align: left; }
-    .filters { display: flex; gap: 10px; margin-bottom: 20px; }
+    body { font-family: Arial, sans-serif; background: #f7f7f7; margin:0; padding:0; }
+    .header { display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:#fff; box-shadow:0 2px 4px rgba(0,0,0,.1); }
+    .header-left a { text-decoration:none; color:#007bff; font-weight:bold; margin-right:20px; }
+    .header-right { display:flex; align-items:center; gap:10px; }
+    #userInitials { background:#007bff; color:#fff; border-radius:50%; width:32px;height:32px; display:flex; align-items:center; justify-content:center; font-weight:bold; }
+    #logoutBtn { background:#dc3545; color:#fff; border:none; border-radius:4px; padding:6px 12px; cursor:pointer; }
+    #logoutBtn:hover { background:#a71d2a; }
+    .container { max-width:1000px; margin:30px auto; background:#fff; padding:30px; border-radius:8px; }
+    h2 { text-align:center; margin:0 0 20px; }
+    .filters { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+    table { width:100%; border-collapse:collapse; margin-top:20px; }
+    th,td { padding:8px; border:1px solid #ccc; text-align:left; }
+    th { background:#f1f1f1; }
+    tfoot th { background:#f9f9f9; }
   </style>
 </head>
 <body>
-  <h2 id="title">Trial Balance</h2>
-  <div class="filters">
-    <label>Filter:
-      <select id="periodFilter">
-        <option value="thisMonth">This Month</option>
-        <option value="thisYear">This Year</option>
-        <option value="thisWeek">This Week</option>
-        <option value="custom">Custom Range</option>
-      </select>
-    </label>
-    <div id="customDates" style="display:none;">
-      <input type="date" id="startDate"> to <input type="date" id="endDate">
-      <button id="applyCustom">Apply</button>
+  <div class="header">
+    <div class="header-left">
+      <a href="home.html"><i class="fa fa-home"></i> Home</a>
+      <span id="datetime">Loading time...</span>
+    </div>
+    <div class="header-right">
+      <div id="userInitials">U</div>
+      <span id="username">User</span>
+      <button id="logoutBtn">Logout</button>
     </div>
   </div>
-  <table id="txTable">
-    <thead><tr><th>Date</th><th>Description</th><th>Amount</th></tr></thead>
-    <tbody></tbody>
-    <tfoot><tr><th>Total</th><th></th><th id="totalAmount">0.00</th></tr></tfoot>
-  </table>
+
+  <div class="container">
+    <h2 id="title">Trial Balance</h2>
+    <div class="filters">
+      <label>Filter:
+        <select id="periodFilter">
+          <option value="thisMonth">This Month</option>
+          <option value="thisYear">This Year</option>
+          <option value="thisWeek">This Week</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </label>
+      <div id="customDates" style="display:none;">
+        <input type="date" id="startDate"> to <input type="date" id="endDate">
+        <button id="applyCustom">Apply</button>
+      </div>
+    </div>
+    <table id="txTable">
+      <thead>
+        <tr><th>Date</th><th>Description</th><th>Amount</th></tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr><th>Total</th><th></th><th id="totalAmount">0.00</th></tr>
+      </tfoot>
+    </table>
+  </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-    const firebaseConfig = {/* your config */};
+    const firebaseConfig = { /* your Firebase config */ };
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
 
-    const txTable = document.getElementById("txTable").querySelector("tbody");
-    const totalAmountEl = document.getElementById("totalAmount");
+    const datetimeEl = document.getElementById("datetime");
+    setInterval(() => { datetimeEl.textContent = new Date().toLocaleString(); }, 1000);
+
+    const usernameEl = document.getElementById("username");
+    const initialsEl = document.getElementById("userInitials");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const titleEl = document.getElementById("title");
+
     const periodFilter = document.getElementById("periodFilter");
     const customDates = document.getElementById("customDates");
     const startDateInput = document.getElementById("startDate");
     const endDateInput = document.getElementById("endDate");
     const applyCustom = document.getElementById("applyCustom");
-    const titleEl = document.getElementById("title");
+    const txBody = document.querySelector("#txTable tbody");
+    const totalAmountEl = document.getElementById("totalAmount");
 
-    // Parse accountId from URL
     const params = new URLSearchParams(location.search);
-    const accountId = params.get("accountId");
+    const accountId = params.get("accountId") || "";
     titleEl.textContent = `Trial Balance for Account: ${accountId}`;
 
-    onAuthStateChanged(auth, user => {
-      if (!user) {
-        alert("Login required.");
-        location.href = "index.html";
-        return;
-      }
-      loadTransactions(user.uid);
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      location.href = "index.html";
     });
 
     periodFilter.addEventListener("change", () => {
       customDates.style.display = periodFilter.value === "custom" ? "block" : "none";
-      loadTransactions(auth.currentUser.uid);
+      loadTransactions();
+    });
+    applyCustom.addEventListener("click", loadTransactions);
+
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
+        location.href = "index.html";
+        return;
+      }
+      const name = user.displayName || user.email || "User";
+      usernameEl.textContent = name;
+      initialsEl.textContent = name.charAt(0).toUpperCase();
+      await loadTransactions();
     });
 
-    applyCustom.addEventListener("click", () => loadTransactions(auth.currentUser.uid));
-
-    async function loadTransactions(uid) {
-      let start, end;
+    function getDateBounds() {
       const now = new Date();
-
+      let start, end;
       switch (periodFilter.value) {
         case "thisMonth":
           start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth()+1, 1);
           break;
         case "thisYear":
           start = new Date(now.getFullYear(), 0, 1);
-          end = new Date(now.getFullYear() + 1, 0, 1);
+          end = new Date(now.getFullYear()+1, 0, 1);
           break;
         case "thisWeek":
-          const day = now.getDay(); // Sunday=0
+          const day = now.getDay();
           start = new Date(now);
           start.setDate(now.getDate() - day + 1);
           end = new Date(start);
@@ -95,34 +136,51 @@
           break;
         case "custom":
           if (!startDateInput.value || !endDateInput.value) {
-            alert("Please select both dates.");
-            return;
+            alert("Select both dates");
+            return {};
           }
           start = new Date(startDateInput.value);
           end = new Date(endDateInput.value);
-          end.setDate(end.getDate() + 1);
+          end.setDate(end.getDate()+1);
           break;
+        default:
+          start = new Date(0);
+          end = new Date();
       }
+      return { start, end };
+    }
 
-      // Firestore query
-      const txCol = collection(db, `users/${uid}/transactions`);
-      let q = query(txCol, where("accountId", "==", accountId));
-      const snap = await getDocs(q);
-      txTable.innerHTML = "";
-      let total = 0;
+    async function loadTransactions() {
+      txBody.innerHTML = "";
+      totalAmountEl.textContent = "0.00";
+      const user = auth.currentUser;
+      if (!user) return;
 
-      snap.forEach(docSnap => {
-        const t = docSnap.data();
-        const d = t.date ? t.date.toDate() : null;
-        if (d && d >= start && d < end) {
-          const row = document.createElement("tr");
-          row.innerHTML = `<td>${d.toLocaleDateString()}</td><td>${t.description || ""}</td><td>${t.amount.toFixed(2)}</td>`;
-          txTable.appendChild(row);
-          total += Number(t.amount || 0);
-        }
-      });
+      const { start, end } = getDateBounds();
+      if (!start || !end) return;
 
-      totalAmountEl.textContent = total.toFixed(2);
+      try {
+        const txCol = collection(db, `users/${user.uid}/transactions`);
+        const q = query(txCol, where("accountId", "==", accountId));
+        const snapshot = await getDocs(q);
+
+        let total = 0;
+        snapshot.forEach(docSnap => {
+          const t = docSnap.data();
+          const d = t.date?.toDate?.();
+          if (t.amount != null && d && d >= start && d < end) {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td>${d.toLocaleDateString()}</td><td>${t.description||''}</td><td>${(t.amount).toFixed(2)}</td>`;
+            txBody.appendChild(row);
+            total += Number(t.amount);
+          }
+        });
+
+        totalAmountEl.textContent = total.toFixed(2);
+      } catch (err) {
+        console.error("Permission or load error:", err);
+        alert("Could not load transactions. Check permissions.");
+      }
     }
   </script>
 </body>
