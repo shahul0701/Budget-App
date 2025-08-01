@@ -4,7 +4,7 @@
   <title>Trial Balance</title>
   <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, collection, query, where, getDocs, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, collection, query, where, getDocs, orderBy, limit, startAfter, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
   // Firebase configuration
@@ -36,6 +36,43 @@
   const logoutBtn = document.getElementById("logoutBtn");
   const userDisplay = document.getElementById("userDisplay");
 
+  // Pagination variables
+  const PAGE_SIZE = 10;
+  let lastVisible = null;
+  let firstVisible = null;
+  let pageStack = []; // stack of cursors for "previous" pages
+
+  // Create pagination controls
+  const paginationControls = document.createElement('div');
+  paginationControls.style.margin = "10px auto";
+  paginationControls.style.width = "90%";
+  paginationControls.style.textAlign = "center";
+
+  const prevBtn = document.createElement('button');
+  prevBtn.textContent = "Previous";
+  prevBtn.disabled = true;
+  prevBtn.style.marginRight = "10px";
+
+  const nextBtn = document.createElement('button');
+  nextBtn.textContent = "Next";
+
+  paginationControls.appendChild(prevBtn);
+  paginationControls.appendChild(nextBtn);
+
+  document.querySelector('table').after(paginationControls);
+
+  prevBtn.addEventListener('click', () => {
+    if (pageStack.length > 1) {
+      pageStack.pop(); // current page cursor removed
+      const prevCursor = pageStack[pageStack.length - 1];
+      loadTrialBalance({ cursor: prevCursor, direction: 'prev' });
+    }
+  });
+
+  nextBtn.addEventListener('click', () => {
+    loadTrialBalance({ cursor: lastVisible, direction: 'next' });
+  });
+
   logoutBtn.addEventListener("click", async () => {
     await signOut(auth);
     window.location.href = "login.html";
@@ -47,7 +84,8 @@
       userDisplay.textContent = name.charAt(0).toUpperCase() + name.slice(1);
       toggleCustomDateInputs();
       await populateAccountHeaders();
-      loadTrialBalance();
+      pageStack = [null]; // reset pagination stack
+      loadTrialBalance({ cursor: null, direction: 'next' });
     } else {
       window.location.href = "login.html";
     }
@@ -55,11 +93,21 @@
 
   dateFilter.addEventListener("change", () => {
     toggleCustomDateInputs();
-    loadTrialBalance();
+    pageStack = [null];
+    loadTrialBalance({ cursor: null, direction: 'next' });
   });
-  fromDate.addEventListener("change", loadTrialBalance);
-  toDate.addEventListener("change", loadTrialBalance);
-  accountHeaderFilter.addEventListener("change", loadTrialBalance);
+  fromDate.addEventListener("change", () => {
+    pageStack = [null];
+    loadTrialBalance({ cursor: null, direction: 'next' });
+  });
+  toDate.addEventListener("change", () => {
+    pageStack = [null];
+    loadTrialBalance({ cursor: null, direction: 'next' });
+  });
+  accountHeaderFilter.addEventListener("change", () => {
+    pageStack = [null];
+    loadTrialBalance({ cursor: null, direction: 'next' });
+  });
 
   function toggleCustomDateInputs() {
     if (dateFilter.value === "custom") {
@@ -111,121 +159,138 @@
     const snapshot = await getDocs(accountsRef);
 
     accountHeaderFilter.innerHTML = '<option value="all">All Accounts</option>';
-    const accountMap = {};
 
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
       const name = data.name || data.accountName || "Unnamed";
-      accountMap[docSnap.id] = name;
-    });
-
-    snapshot.forEach(docSnap => {
-      const data = docSnap.data();
       const option = document.createElement("option");
-      option.value = data.name;
-      option.textContent = data.name;
+      option.value = docSnap.id;
+      option.textContent = name;
       accountHeaderFilter.appendChild(option);
     });
 
-    if (accountIdFromURL && accountMap[accountIdFromURL]) {
-      accountHeaderFilter.value = accountMap[accountIdFromURL];
+    if (accountIdFromURL) {
+      accountHeaderFilter.value = accountIdFromURL;
     }
   }
 
-  async function loadTrialBalance() {
+  async function loadTrialBalance({ cursor = null, direction = 'next' } = {}) {
     const user = auth.currentUser;
     if (!user) return;
 
     if (dateFilter.value === "custom" && (!fromDate.value || !toDate.value)) {
       loadingStatus.textContent = "Select both from & to dates.";
       balanceTableBody.innerHTML = "";
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
       return;
     }
 
-    toggleCustomDateInputs();
     loadingStatus.textContent = "Loading...";
 
     const { from, to } = getDateRange(dateFilter.value);
-    const selectedAccount = accountHeaderFilter.value;
+    const selectedAccountId = accountHeaderFilter.value;
 
     const txRef = collection(db, "users", user.uid, "transactions");
-    let queryRef = query(txRef,
+
+    // Base query: date range + orderBy date descending
+    let baseQuery = query(
+      txRef,
       where("date", ">=", Timestamp.fromDate(from)),
-      where("date", "<=", Timestamp.fromDate(to))
+      where("date", "<=", Timestamp.fromDate(to)),
+      orderBy("date", "desc"),
+      limit(PAGE_SIZE)
     );
 
-    if (selectedAccount !== "all") {
-      const accRef = collection(db, "users", user.uid, "chartOfAccounts");
-      const accSnap = await getDocs(query(accRef, where("name", "==", selectedAccount)));
-      if (!accSnap.empty) {
-        const accDoc = accSnap.docs[0];
-        const accId = accDoc.id;
-
-        // find children via parentId
-        const childrenSnap = await getDocs(query(accRef, where("parentId", "==", accId)));
-        const names = [selectedAccount];
-        childrenSnap.forEach(d => names.push(d.data().name));
-
-        queryRef = queryRef.withConverter(null);
-        // Firestore client SDK doesn't support `in` with multiple where simultaneously,
-        // so just fetch all and filter in JS:
-        const allSnap = await getDocs(queryRef);
-        const results = allSnap.docs.filter(d => names.includes(d.data().ACCOUNT_HEADER));
-        renderRows(results);
-        return;
-      } else {
-        loadingStatus.textContent = "Account not found.";
-        balanceTableBody.innerHTML = "";
-        return;
+    if (cursor) {
+      if (direction === 'next') {
+        baseQuery = query(baseQuery, startAfter(cursor));
+      } else if (direction === 'prev') {
+        // For simplicity, we don't implement startBefore here because it needs a different approach.
+        // Using pageStack to go back.
       }
     }
 
-    const snap = await getDocs(queryRef);
-    renderRows(snap.docs);
-  }
+    // Load all documents with date range
+    let snap = await getDocs(baseQuery);
 
-  function renderRows(docs) {
-    balanceTableBody.innerHTML = "";
-    let total = 0;
+    // Filter by account + children if needed
+    if (selectedAccountId !== "all") {
+      const accountsRef = collection(db, "users", user.uid, "chartOfAccounts");
 
-    if (docs.length === 0) {
-      balanceTableBody.innerHTML = '<tr><td colspan="4">No transactions found.</td></tr>';
-      loadingStatus.textContent = "No data found.";
-      return;
+      // Get children accounts of selected account
+      const childrenSnap = await getDocs(query(accountsRef, where("parentId", "==", selectedAccountId)));
+      const accountIds = [selectedAccountId];
+      childrenSnap.forEach(doc => accountIds.push(doc.id));
+
+      // Filter fetched docs by account IDs in JS
+      snap = {
+        docs: snap.docs.filter(doc => accountIds.includes(doc.data().ACCOUNT_HEADER))
+      };
     }
 
-    // sort by date descending
-    docs.sort((a, b) => b.data().date.toDate() - a.data().date.toDate());
+    if (snap.docs.length > 0) {
+      firstVisible = snap.docs[0];
+      lastVisible = snap.docs[snap.docs.length - 1];
 
-    docs.forEach(docSnap => {
-      const d = docSnap.data();
-      const dt = d.date.toDate().toLocaleDateString();
-      const desc = d.DESCRIPTION || d.description || "";
-      const header = d.ACCOUNT_HEADER || d.accountHeader || "";
-      const income = Number(d.INCOME || d.income || 0);
-      const expense = Number(d.EXPENSE || d.expense || 0);
-      const amount = income - expense;
-      total += amount;
+      if (direction === 'next') {
+        pageStack.push(lastVisible);
+      } else if (direction === 'prev') {
+        // Handled by popping stack on previous button click
+      }
+    }
 
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${dt}</td>
-        <td>${header}</td>
-        <td>${desc}</td>
-        <td style="text-align:right;">${amount.toFixed(2)}</td>`;
-      balanceTableBody.appendChild(tr);
-    });
+    renderRows(snap.docs);
 
-    const trTotal = document.createElement("tr");
-    trTotal.style.fontWeight = "bold";
-    trTotal.style.background = "#eee";
-    trTotal.innerHTML = `
-      <td>Total</td><td></td><td></td>
-      <td style="text-align:right;">${total.toFixed(2)}</td>`;
-    balanceTableBody.appendChild(trTotal);
+    // Enable/disable pagination buttons
+    prevBtn.disabled = pageStack.length <= 1;
+    nextBtn.disabled = snap.docs.length < PAGE_SIZE;
 
     loadingStatus.textContent = "Loaded";
   }
+
+function renderRows(docs) {
+  balanceTableBody.innerHTML = "";
+  let totalExpense = 0;
+
+  if (docs.length === 0) {
+    balanceTableBody.innerHTML = '<tr><td colspan="4">No transactions found.</td></tr>';
+    loadingStatus.textContent = "No data found.";
+    return;
+  }
+
+  // sort by date descending
+  docs.sort((a, b) => b.data().date.toDate() - a.data().date.toDate());
+
+  docs.forEach(docSnap => {
+    const d = docSnap.data();
+    const dt = d.date.toDate().toLocaleDateString();
+    const desc = d.DESCRIPTION || d.description || "";
+    const header = d.ACCOUNT_HEADER || d.accountHeader || "";
+    const expense = Number(d.EXPENSE || d.expense || 0);
+
+    totalExpense += expense;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${dt}</td>
+      <td>${header}</td>
+      <td>${desc}</td>
+      <td style="text-align:right;">${expense.toFixed(2)}</td>`;
+    balanceTableBody.appendChild(tr);
+  });
+
+  const trTotal = document.createElement("tr");
+  trTotal.style.fontWeight = "bold";
+  trTotal.style.background = "#eee";
+  trTotal.innerHTML = `
+    <td>Total</td><td></td><td></td>
+    <td style="text-align:right;">${totalExpense.toFixed(2)}</td>`;
+  balanceTableBody.appendChild(trTotal);
+
+  loadingStatus.textContent = "Loaded";
+}
+
   </script>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; margin:0; padding:0; background:#f9f9f9; }
@@ -237,6 +302,8 @@
     th, td { border:1px solid #ccc; padding:10px; }
     .filter { margin:20px; }
     input[type="date"] { padding:5px; margin-left:10px; }
+    button { padding: 5px 10px; font-size: 1rem; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
