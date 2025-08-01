@@ -6,7 +6,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background:#f9f9f9; text-align:center; }
+    body { font-family: Arial, sans-serif; background:#f9f9f9; text-align:center; margin: 0; padding: 0;}
     .top-bar {
       display:flex; justify-content:space-between; padding:10px 20px; background:#fff; border-bottom:1px solid #ccc; align-items:center;
     }
@@ -14,10 +14,13 @@
     .user-section { display:flex; align-items:center; gap:10px; }
     .logout-btn {
       background:#c00; color:#fff; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;
+      font-weight: bold;
     }
     table { margin:20px auto; border-collapse:collapse; width:90%; background:#fff; }
     th, td { border:1px solid #ccc; padding:10px; }
     .filter { margin-top:20px; }
+    #loadingStatus { font-style: italic; color: #555; }
+    input[type="date"] { padding: 5px; margin-left: 10px; }
   </style>
 </head>
 <body>
@@ -71,6 +74,8 @@
     appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
     measurementId: "G-YFFJL2H54X"
   };
+
+  // Initialize Firebase
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const auth = firebase.auth();
@@ -87,7 +92,9 @@
 
   // Logout button handler
   logoutBtn.addEventListener("click", () => {
-    auth.signOut().then(() => window.location.href = "login.html");
+    auth.signOut().then(() => {
+      window.location.href = "login.html";
+    });
   });
 
   // Handle user auth state
@@ -95,6 +102,7 @@
     if (user) {
       const displayName = user.displayName || user.email || "User";
       userDisplay.textContent = displayName;
+      toggleCustomDateInputs(); // Show/hide date inputs based on default selection on load
       populateAccountHeaders().then(() => loadTrialBalance());
     } else {
       window.location.href = "login.html";
@@ -134,17 +142,21 @@
 
     } catch (error) {
       console.error("Error loading accounts:", error);
+      loadingStatus.textContent = "Error loading accounts";
     }
   }
 
   // Show/hide custom date inputs depending on filter selection
   function toggleCustomDateInputs() {
     if (dateFilter.value === "custom") {
-      fromDate.style.display = "inline";
-      toDate.style.display = "inline";
+      fromDate.style.display = "inline-block";
+      toDate.style.display = "inline-block";
     } else {
       fromDate.style.display = "none";
       toDate.style.display = "none";
+      // Clear custom date inputs when not using custom
+      fromDate.value = "";
+      toDate.value = "";
     }
   }
 
@@ -164,12 +176,15 @@
         break;
       case 'week':
         const day = now.getDay(); // Sunday=0
+        from = new Date(now);
         from.setDate(now.getDate() - day);
+        to = new Date(now);
         to.setDate(now.getDate() + (6 - day));
         break;
       case 'custom':
-        from = new Date(fromDate.value);
-        to = new Date(toDate.value);
+        // If invalid or empty dates, default to today
+        from = fromDate.value ? new Date(fromDate.value) : new Date();
+        to = toDate.value ? new Date(toDate.value) : new Date();
         break;
     }
     from.setHours(0,0,0,0);
@@ -206,10 +221,12 @@
     const txRef = db.collection("users").doc(user.uid).collection("transactions");
 
     try {
+      // Firestore requires orderBy on a field used in range queries
+      // So first orderBy 'date' ascending to match where range
       let queryRef = txRef
+        .orderBy("date")
         .where("date", ">=", firebase.firestore.Timestamp.fromDate(from))
-        .where("date", "<=", firebase.firestore.Timestamp.fromDate(to))
-        .orderBy("date", "desc");
+        .where("date", "<=", firebase.firestore.Timestamp.fromDate(to));
 
       if (selectedAccount !== "all") {
         queryRef = queryRef.where("ACCOUNT_HEADER", "==", selectedAccount);
@@ -226,7 +243,10 @@
         return;
       }
 
-      snapshot.forEach(doc => {
+      // Sort by date descending in JS (since Firestore returns ascending)
+      const docs = snapshot.docs.slice().sort((a, b) => b.data().date.toDate() - a.data().date.toDate());
+
+      docs.forEach(doc => {
         const d = doc.data();
         const income = d.income || 0;
         const expense = d.expense || 0;
@@ -244,14 +264,14 @@
             <td>${dateStr}</td>
             <td>${accountHeader}</td>
             <td>${desc}</td>
-            <td>${amount.toFixed(2)}</td>
+            <td style="text-align:right;">${amount.toFixed(2)}</td>
           </tr>
         `;
       });
 
       balanceTableBody.innerHTML += `
-        <tr>
-          <td><b>Total</b></td><td></td><td></td><td><b>${total.toFixed(2)}</b></td>
+        <tr style="font-weight:bold; background:#eee;">
+          <td>Total</td><td></td><td></td><td style="text-align:right;">${total.toFixed(2)}</td>
         </tr>
       `;
 
@@ -270,6 +290,7 @@
   fromDate.addEventListener("change", loadTrialBalance);
   toDate.addEventListener("change", loadTrialBalance);
   accountHeaderFilter.addEventListener("change", loadTrialBalance);
+
 </script>
 </body>
 </html>
