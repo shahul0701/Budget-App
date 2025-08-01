@@ -64,10 +64,11 @@
 
       try {
         // Load all transactions for user
-        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-        const transactions = txSnap.docs.map(doc => {
-          return { id: doc.id, ...doc.data() };
-        });
+const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
+allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+renderTrialBalance(allTransactions); // separate rendering logic
+
 
         // Group transactions by ACCOUNT_HEADER for summary
         const summary = {};
@@ -115,6 +116,104 @@
         summaryBody.innerHTML = "";
       }
     });
+
+
+    // Filter elements
+const dateFilter = document.getElementById("dateFilter");
+const startDate = document.getElementById("startDate");
+const endDate = document.getElementById("endDate");
+const customDateInputs = document.getElementById("customDateInputs");
+const applyFilterBtn = document.getElementById("applyFilterBtn");
+
+dateFilter.addEventListener("change", () => {
+  if (dateFilter.value === "custom") {
+    customDateInputs.style.display = "inline-block";
+  } else {
+    customDateInputs.style.display = "none";
+  }
+});
+
+let allTransactions = []; // store original
+
+applyFilterBtn.addEventListener("click", () => {
+  const filtered = filterTransactions(allTransactions);
+  renderTrialBalance(filtered);
+});
+
+function filterTransactions(transactions) {
+  const filter = dateFilter.value;
+  const now = new Date();
+
+  const isInRange = (dateStr, start, end) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d >= start && d <= end;
+  };
+
+  switch (filter) {
+    case "year":
+      return transactions.filter(tx => {
+        const d = new Date(tx.DATE);
+        return d.getFullYear() === now.getFullYear();
+      });
+    case "month":
+      return transactions.filter(tx => {
+        const d = new Date(tx.DATE);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      });
+    case "custom": {
+      const s = new Date(startDate.value);
+      const e = new Date(endDate.value);
+      if (isNaN(s) || isNaN(e)) return transactions;
+      e.setHours(23, 59, 59, 999); // include whole end day
+      return transactions.filter(tx => isInRange(tx.DATE, s, e));
+    }
+    default:
+      return transactions;
+  }
+}
+
+function renderTrialBalance(transactions) {
+  const summary = {};
+  for (const tx of transactions) {
+    const account = tx.ACCOUNT_HEADER || "Uncategorized";
+    if (!summary[account]) summary[account] = { debit: 0, credit: 0 };
+    summary[account].debit += Number(tx.EXPENSE || 0);
+    summary[account].credit += Number(tx.INCOME || 0);
+  }
+
+  if (Object.keys(summary).length === 0) {
+    summaryBody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No data found.</td></tr>`;
+    loadingStatus.textContent = "No transactions to summarize.";
+    return;
+  }
+
+  let rows = "";
+  for (const [account, amounts] of Object.entries(summary)) {
+    const balance = amounts.credit - amounts.debit;
+    rows += `
+      <tr>
+        <td><a href="#" class="accountLink" data-account="${account}">${account}</a></td>
+        <td style="text-align:right;">${amounts.debit.toFixed(2)}</td>
+        <td style="text-align:right;">${amounts.credit.toFixed(2)}</td>
+        <td style="text-align:right; color:${balance >= 0 ? 'green' : 'red'}">${balance.toFixed(2)}</td>
+      </tr>
+    `;
+  }
+  summaryBody.innerHTML = rows;
+  loadingStatus.textContent = "Trial Balance loaded.";
+
+  document.querySelectorAll(".accountLink").forEach(link => {
+    link.addEventListener("click", e => {
+      e.preventDefault();
+      const account = e.target.getAttribute("data-account");
+      if (!account) return;
+      openDetailModal(account);
+    });
+  });
+}
+
+
   </script>
 
   <style>
@@ -217,6 +316,23 @@
       <button id="logoutBtn" class="logout-btn">Logout</button>
     </div>
   </div>
+
+<div style="margin: 20px auto; width: 90%; background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #ccc;">
+  <label>
+    Filter By:
+    <select id="dateFilter">
+      <option value="all">All</option>
+      <option value="year">This Year</option>
+      <option value="month">This Month</option>
+      <option value="custom">Custom</option>
+    </select>
+  </label>
+  <span id="customDateInputs" style="display:none; margin-left: 20px;">
+    <label>Start: <input type="date" id="startDate" /></label>
+    <label style="margin-left:10px;">End: <input type="date" id="endDate" /></label>
+  </span>
+  <button id="applyFilterBtn" style="margin-left: 20px;">Apply Filter</button>
+</div>
 
   <h2 style="text-align:center;">Trial Balance Summary</h2>
   <table>
