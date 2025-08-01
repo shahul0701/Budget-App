@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF‑8">
+  <meta name="viewport" content="width=device‑width, initial‑scale=1">
+  <title>Trial Balance</title>
+  <style>
+    /* basic styling here (table, inputs, etc.) */
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 8px; border: 1px solid #ccc; text-align: left; }
+    .filters { display: flex; gap: 10px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h2 id="title">Trial Balance</h2>
+  <div class="filters">
+    <label>Filter:
+      <select id="periodFilter">
+        <option value="thisMonth">This Month</option>
+        <option value="thisYear">This Year</option>
+        <option value="thisWeek">This Week</option>
+        <option value="custom">Custom Range</option>
+      </select>
+    </label>
+    <div id="customDates" style="display:none;">
+      <input type="date" id="startDate"> to <input type="date" id="endDate">
+      <button id="applyCustom">Apply</button>
+    </div>
+  </div>
+  <table id="txTable">
+    <thead><tr><th>Date</th><th>Description</th><th>Amount</th></tr></thead>
+    <tbody></tbody>
+    <tfoot><tr><th>Total</th><th></th><th id="totalAmount">0.00</th></tr></tfoot>
+  </table>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+    const firebaseConfig = {/* your config */};
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    const txTable = document.getElementById("txTable").querySelector("tbody");
+    const totalAmountEl = document.getElementById("totalAmount");
+    const periodFilter = document.getElementById("periodFilter");
+    const customDates = document.getElementById("customDates");
+    const startDateInput = document.getElementById("startDate");
+    const endDateInput = document.getElementById("endDate");
+    const applyCustom = document.getElementById("applyCustom");
+    const titleEl = document.getElementById("title");
+
+    // Parse accountId from URL
+    const params = new URLSearchParams(location.search);
+    const accountId = params.get("accountId");
+    titleEl.textContent = `Trial Balance for Account: ${accountId}`;
+
+    onAuthStateChanged(auth, user => {
+      if (!user) {
+        alert("Login required.");
+        location.href = "index.html";
+        return;
+      }
+      loadTransactions(user.uid);
+    });
+
+    periodFilter.addEventListener("change", () => {
+      customDates.style.display = periodFilter.value === "custom" ? "block" : "none";
+      loadTransactions(auth.currentUser.uid);
+    });
+
+    applyCustom.addEventListener("click", () => loadTransactions(auth.currentUser.uid));
+
+    async function loadTransactions(uid) {
+      let start, end;
+      const now = new Date();
+
+      switch (periodFilter.value) {
+        case "thisMonth":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          break;
+        case "thisYear":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear() + 1, 0, 1);
+          break;
+        case "thisWeek":
+          const day = now.getDay(); // Sunday=0
+          start = new Date(now);
+          start.setDate(now.getDate() - day + 1);
+          end = new Date(start);
+          end.setDate(start.getDate() + 7);
+          break;
+        case "custom":
+          if (!startDateInput.value || !endDateInput.value) {
+            alert("Please select both dates.");
+            return;
+          }
+          start = new Date(startDateInput.value);
+          end = new Date(endDateInput.value);
+          end.setDate(end.getDate() + 1);
+          break;
+      }
+
+      // Firestore query
+      const txCol = collection(db, `users/${uid}/transactions`);
+      let q = query(txCol, where("accountId", "==", accountId));
+      const snap = await getDocs(q);
+      txTable.innerHTML = "";
+      let total = 0;
+
+      snap.forEach(docSnap => {
+        const t = docSnap.data();
+        const d = t.date ? t.date.toDate() : null;
+        if (d && d >= start && d < end) {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td>${d.toLocaleDateString()}</td><td>${t.description || ""}</td><td>${t.amount.toFixed(2)}</td>`;
+          txTable.appendChild(row);
+          total += Number(t.amount || 0);
+        }
+      });
+
+      totalAmountEl.textContent = total.toFixed(2);
+    }
+  </script>
+</body>
+</html>
