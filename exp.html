@@ -407,18 +407,25 @@
     </div>
 
     <div class="table-responsive">
-        <table>
-            <thead>
-                <tr>
-                    <th>SINO</th><th>DATE</th><th>TIME</th><th>ACCOUNT HEADER</th><th>MODE</th>
-                    <th>BANK NAME</th><th>INCOME</th><th>EXPENSE</th><th>DESCRIPTION</th>
-                    <th>BALANCE</th><th>ATTACHMENT</th><th>ACTION</th>
-                </tr>
-            </thead>
-            <tbody id="transactionsTableBody">
-                <tr><td colspan="12" style="text-align:center; color:#777;">No transactions loaded.</td></tr>
-            </tbody>
-        </table>
+<table>
+    <thead>
+        <tr>
+            <th>SINO</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Account Header</th>
+            <th>Mode</th>
+            <th>Bank Name</th>
+            <th>Income</th>
+            <th>Expense</th>
+            <th>Description</th>
+            <th>Balance</th>
+            <th>Attachment</th> <!-- This column was missing -->
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+</table>
     </div>
     <div id="paginationControls" style="text-align:center; margin:10px;">
         <button id="prevPageBtn">Previous</button>
@@ -712,6 +719,7 @@
     }
 
     // Debug function to check attachment data
+// Debug function to check attachment data
 function debugAttachments() {
     console.log("=== DEBUG ATTACHMENTS ===");
     allTransactions.forEach((tx, index) => {
@@ -725,56 +733,35 @@ function debugAttachments() {
     });
     console.log("=== END DEBUG ===");
 }
-    // Load all transactions for user
-async function loadTransactions() {
-    loadingModal.style.display = "flex";
-    try {
-        // Try the original query first
-        let q;
-        try {
-            q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("DATE", "desc"),
-                orderBy("TIME", "desc")
-            );
-            const snap = await getDocs(q);
-            processTransactions(snap);
-        } catch (error) {
-            if (error.code === 'failed-precondition') {
-                // Fallback to single field ordering if index doesn't exist
-                console.warn("Composite index not found, using date-only sorting");
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc")
-                );
-                const snap = await getDocs(q);
-                processTransactions(snap);
-            } else {
-                throw error;
-            }
-        }
 
-        function processTransactions(snap) {
-            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // Get account from URL
-            const selectedAccount = getAccountFromURL();
-
-            // Filter if opened from trial balance
-            if (selectedAccount) {
-                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-            } else {
-                document.getElementById("accountTitle").textContent = "All Transactions";
-            }
-
-            allTransactions = transactions;
-
-            // Calculate running balance
-            calculateRunningBalance(allTransactions);
-            populateFiltersOptions(allTransactions);
-            applyFilters();
-        }
+// In your loadTransactions function, after processing transactions:
+function processTransactions(snap) {
+    let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // Debug: Check what data we're getting
+    console.log("Loaded transactions:", transactions);
+    
+    // Get account from URL
+    const selectedAccount = getAccountFromURL();
+    
+    // Filter if opened from trial balance
+    if (selectedAccount) {
+        transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+        document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+    } else {
+        document.getElementById("accountTitle").textContent = "All Transactions";
+    }
+    
+    allTransactions = transactions;
+    
+    // Debug attachments
+    debugAttachments();
+    
+    // Calculate running balance
+    calculateRunningBalance(allTransactions);
+    populateFiltersOptions(allTransactions);
+    applyFilters();
+}
 
     } catch (err) {
         console.error("Error loading transactions:", err);
@@ -939,17 +926,10 @@ async function saveTransaction() {
             transactionData.ATTACHMENT = data.secure_url;
         } else if (formATTACH.value && formATTACH.value.trim() !== "") {
             // Keep existing attachment
-          // In your saveTransaction function, make sure you're setting the attachment correctly:
-if (formATTACHFILE.files.length > 0) {
-    // File upload logic
-    transactionData.ATTACHMENT = data.secure_url;
-} else if (formATTACH.value && formATTACH.value.trim() !== "") {
-    // Keep existing attachment
-    transactionData.ATTACHMENT = formATTACH.value;
-}
-// If no attachment, don't add the ATTACHMENT field at all
+            transactionData.ATTACHMENT = formATTACH.value;
+        }
+        // If no attachment, don't add the ATTACHMENT field at all
 
-            
         // Prepare data for Firestore - remove any undefined values
         const firestoreData = {};
         Object.keys(transactionData).forEach(key => {
@@ -1073,7 +1053,6 @@ function applyFilters() {
 }
 
 // Build table rows for current page
-// Build table rows for current page
 function buildTable() {
     txMap = {};
     const start = (currentPage - 1) * rowsPerPage;
@@ -1093,17 +1072,13 @@ function buildTable() {
         const expenseCell = (d.EXPENSE ?? 0) > 0 ? `<span style="color:red;">${(d.EXPENSE || 0).toFixed(2)}</span>` : "";
         const balanceCell = (d.BALANCE != null) ? (d.BALANCE || 0).toFixed(2) : "";
         
-        // Fix for attachment display - check if attachment exists and is a valid URL
-// Replace the attachment cell code with this:
-let attachmentCell = "";
-if (d.ATTACHMENT && 
-    typeof d.ATTACHMENT === 'string' && 
-    d.ATTACHMENT.trim() !== "" && 
-    (d.ATTACHMENT.startsWith('http://') || d.ATTACHMENT.startsWith('https://'))) {
-    attachmentCell = `<td class="attachment-cell"><a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a></td>`;
-} else {
-    attachmentCell = `<td></td>`;
-}
+        // FIXED: Proper attachment display check
+        let attachmentCell = "";
+        if (d.ATTACHMENT && typeof d.ATTACHMENT === 'string' && d.ATTACHMENT.trim() !== "") {
+            attachmentCell = `<td class="attachment-cell"><a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a></td>`;
+        } else {
+            attachmentCell = `<td></td>`;
+        }
         
         const row = document.createElement("tr");
 
