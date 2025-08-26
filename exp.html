@@ -893,6 +893,7 @@ async function saveTransaction() {
             bankName = formBANKNAME.value;
         }
         
+        // Create the base transaction data
         const transactionData = {
             SINO: formSINO.value,
             DATE: formDATE.value,
@@ -907,7 +908,7 @@ async function saveTransaction() {
             userId: currentUser.uid
         };
 
-        // Handle file upload if a file is selected
+        // Handle file upload
         if (formATTACHFILE.files.length > 0) {
             const file = formATTACHFILE.files[0];
             const formData = new FormData();
@@ -923,22 +924,32 @@ async function saveTransaction() {
             const data = await res.json();
             transactionData.ATTACHMENT = data.secure_url;
         } else if (formATTACH.value && formATTACH.value.trim() !== "") {
-            // Use existing attachment URL if no new file is selected
+            // Keep existing attachment
             transactionData.ATTACHMENT = formATTACH.value;
         }
-        // If no attachment is provided, don't include the ATTACHMENT field at all
+        // If no attachment, don't add the ATTACHMENT field
+
+        // Prepare data for Firestore - remove any undefined values
+        const firestoreData = {};
+        Object.keys(transactionData).forEach(key => {
+            if (transactionData[key] !== undefined && transactionData[key] !== null) {
+                firestoreData[key] = transactionData[key];
+            }
+        });
 
         if (txIdInput.value) {
-            // Update existing transaction
-            await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), transactionData);
+            // For updates, handle the case where we want to remove attachment
+            if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
+                firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
+            }
+            
+            await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
             Swal.fire("Success", "Transaction updated successfully!", "success");
         } else {
-            // Add new transaction - only include fields that have values
-            await addDoc(collection(db, "users", currentUser.uid, "transactions"), transactionData);
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), firestoreData);
             Swal.fire("Success", "Transaction added successfully!", "success");
         }
 
-        // Refresh the transactions list
         await loadTransactions();
         modal.style.display = "none";
         
