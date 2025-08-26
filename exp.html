@@ -758,8 +758,6 @@ async function loadTransactions() {
     }
 }
 
-    // Calculate running balance for transactions
-// Calculate running balance for transactions per bank
 // Calculate running balance for transactions per bank
 function calculateRunningBalance(transactions) {
     // Create a map to track balances for each bank
@@ -898,6 +896,7 @@ async function saveTransaction() {
         };
 
         // Handle file upload if a file is selected
+        let attachmentUrl = null;
         if (formATTACHFILE.files.length > 0) {
             const file = formATTACHFILE.files[0];
             const formData = new FormData();
@@ -911,19 +910,30 @@ async function saveTransaction() {
             });
 
             const data = await res.json();
-            transactionData.ATTACHMENT = data.secure_url;
+            attachmentUrl = data.secure_url;
         } else if (formATTACH.value) {
             // Use existing attachment URL if no new file is selected
-            transactionData.ATTACHMENT = formATTACH.value;
+            attachmentUrl = formATTACH.value;
         }
-        // If neither condition is met, ATTACHMENT won't be added to transactionData
+        
+        // Only add ATTACHMENT field if we have a value
+        if (attachmentUrl) {
+            transactionData.ATTACHMENT = attachmentUrl;
+        } else if (txIdInput.value) {
+            // If updating and we want to remove the attachment, explicitly set it to empty string
+            transactionData.ATTACHMENT = "";
+        }
 
         if (txIdInput.value) {
             // Update existing transaction
             await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), transactionData);
             Swal.fire("Success", "Transaction updated successfully!", "success");
         } else {
-            // Add new transaction
+            // Add new transaction - only include ATTACHMENT if it exists
+            if (!transactionData.ATTACHMENT) {
+                delete transactionData.ATTACHMENT;
+            }
+            
             await addDoc(collection(db, "users", currentUser.uid, "transactions"), transactionData);
             Swal.fire("Success", "Transaction added successfully!", "success");
         }
@@ -939,7 +949,6 @@ async function saveTransaction() {
         loadingModal.style.display = "none";
     }
 }
-
 // Add event listeners to update the balance when bank selection changes
 formMODE.addEventListener("change", () => {
     toggleToBankGroup(formMODE.value);
