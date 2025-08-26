@@ -1094,12 +1094,12 @@ function buildTable() {
         // Fix for attachment display - check if attachment exists and is a valid URL
 // Replace the attachment cell code with this:
 let attachmentCell = "";
-if (d.ATTACHMENT && typeof d.ATTACHMENT === 'string' && d.ATTACHMENT.trim() !== "" &&
-    (d.ATTACHMENT.startsWith("http://") || d.ATTACHMENT.startsWith("https://"))) {
-    attachmentCell = `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer" class="btn-view">View</a>`;
+if (d.ATTACHMENT && d.ATTACHMENT.trim() !== "") {
+  attachmentCell = `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer" class="btn-view">View</a>`;
 } else {
-    attachmentCell = `<span style="color:#999;">No File</span>`;
+  attachmentCell = `<span style="color:#999;">No File</span>`;
 }
+
 
 const row = document.createElement("tr");
 row.innerHTML = `
@@ -1360,6 +1360,71 @@ formATTACHFILE.addEventListener("change", async function () {
         loadingModal.style.display = "none";
     }
 });
+
+    async function saveTransaction(e) {
+  e.preventDefault();
+
+  const transactionData = {
+    DATE: formDATE.value,
+    ACCOUNT: formACCOUNT.value.trim(),
+    TYPE: formTYPE.value,
+    AMOUNT: parseFloat(formAMOUNT.value),
+    DESCRIPTION: formDESCRIPTION.value.trim(),
+  };
+
+  try {
+    // ✅ Handle file upload or existing attachment
+    if (formATTACHFILE.files.length > 0) {
+      // Upload new file to Cloudinary
+      const file = formATTACHFILE.files[0];
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", "my_app_uploadst");
+
+      const res = await fetch(
+        "https://api.cloudinary.com/v1_1/dpwdsyvz8/upload",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await res.json();
+      transactionData.ATTACHMENT = data.secure_url || "";
+      // ✅ Keep Cloudinary URL in hidden field too
+      formATTACH.value = transactionData.ATTACHMENT;
+    } else if (formATTACH.value && formATTACH.value.trim() !== "") {
+      // Use existing attachment from hidden input
+      transactionData.ATTACHMENT = formATTACH.value.trim();
+    } else {
+      // Always include ATTACHMENT, even if empty
+      transactionData.ATTACHMENT = "";
+    }
+
+    const user = auth.currentUser;
+    if (!user) {
+      Swal.fire("Error", "You must be logged in.", "error");
+      return;
+    }
+
+    if (editMode && editId) {
+      const txRef = doc(db, "users", user.uid, "transactions", editId);
+      await updateDoc(txRef, transactionData);
+      Swal.fire("Updated", "Transaction updated successfully.", "success");
+    } else {
+      const colRef = collection(db, "users", user.uid, "transactions");
+      await addDoc(colRef, transactionData);
+      Swal.fire("Added", "Transaction added successfully.", "success");
+    }
+
+    closeModal();
+    loadTransactions();
+  } catch (error) {
+    console.error("Error saving transaction:", error);
+    Swal.fire("Error", "Failed to save transaction.", "error");
+  }
+}
+
 
 </script>
 
