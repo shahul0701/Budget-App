@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -462,12 +463,12 @@
 
                 <div id="incomeGroup" class="form-group">
                     <label for="formINCOME">Income</label>
-                    <input type="number" id="formINCOME" />
+                    <input type="number" id="formINCOME" step="0.01" min="0" />
                 </div>
 
                 <div id="expenseGroup" class="form-group">
                     <label for="formEXPENSE">Expense</label>
-                    <input type="number" id="formEXPENSE" />
+                    <input type="number" id="formEXPENSE" step="0.01" min="0" />
                 </div>
                 <label>DESCRIPTION: <input type="text" id="formDESC" /></label>
                 <label>BALANCE: <input type="number" step="0.01" id="formBALANCE" readonly /></label>
@@ -514,7 +515,8 @@
         deleteDoc,
         doc,
         where,
-        getDoc
+        getDoc,
+        orderBy
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -585,6 +587,7 @@
     let txMap = {};
     let currentPage = 1;
     const rowsPerPage = 10;
+    let lastBalance = 0; // Track the last balance for calculations
 
     // Listen for auth state change
     onAuthStateChanged(auth, async user => {
@@ -700,7 +703,12 @@
     async function loadTransactions() {
         loadingModal.style.display = "flex";
         try {
-            const snap = await getDocs(collection(db, "users", currentUser.uid, "transactions"));
+            const q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("DATE", "desc"),
+                orderBy("TIME", "desc")
+            );
+            const snap = await getDocs(q);
             let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
             // Get account from URL
@@ -716,7 +724,8 @@
 
             allTransactions = transactions;
 
-            allTransactions.sort((a, b) => (parseInt(b.SINO) || 0) - (parseInt(a.SINO) || 0));
+            // Calculate running balance
+            calculateRunningBalance(allTransactions);
             populateFiltersOptions(allTransactions);
             applyFilters();
 
@@ -725,6 +734,33 @@
         } finally {
             loadingModal.style.display = "none";
         }
+    }
+
+    // Calculate running balance for transactions
+    function calculateRunningBalance(transactions) {
+        let balance = 0;
+        
+        // Sort transactions by date and time
+        const sortedTransactions = [...transactions].sort((a, b) => {
+            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+            return dateA - dateB;
+        });
+        
+        // Calculate balance for each transaction
+        sortedTransactions.forEach(transaction => {
+            const income = parseFloat(transaction.INCOME) || 0;
+            const expense = parseFloat(transaction.EXPENSE) || 0;
+            balance += income - expense;
+            transaction.BALANCE = parseFloat(balance.toFixed(2));
+        });
+        
+        // Update the last balance for new transactions
+        if (sortedTransactions.length > 0) {
+            lastBalance = sortedTransactions[sortedTransactions.length - 1].BALANCE;
+        }
+        
+        return sortedTransactions;
     }
 
     // Populate filter dropdowns with unique values
@@ -943,6 +979,9 @@
         const now = new Date();
         formDATE.value = now.toISOString().slice(0, 10); // yyyy-mm-dd
         formTIME.value = now.toTimeString().slice(0, 5);  // hh:mm
+        
+        // Set initial balance to last known balance
+        formBALANCE.value = lastBalance.toFixed(2);
     }
 
     // Toggle income/expense input visibility based on values
@@ -999,7 +1038,37 @@
             formINCOME.value = "";
             formEXPENSE.value = "";
         }
+        
+        // Update balance when type changes
+        updateBalance();
     });
+
+    // Update balance when income or expense values change
+    formINCOME.addEventListener("input", updateBalance);
+    formEXPENSE.addEventListener("input", updateBalance);
+
+    // Calculate and update the balance field
+    function updateBalance() {
+        const income = parseFloat(formINCOME.value) || 0;
+        const expense = parseFloat(formEXPENSE.value) || 0;
+        const currentBalance = parseFloat(formBALANCE.value) || lastBalance;
+        
+        // For new transactions, calculate based on last balance
+        if (!txIdInput.value) {
+            formBALANCE.value = (lastBalance + income - expense).toFixed(2);
+        } else {
+            // For editing existing transactions, we need to recalculate the entire running balance
+            // This is more complex and might require reloading all transactions
+            // For now, we'll just update this transaction's impact
+            const tx = txMap[txIdInput.value];
+            if (tx) {
+                const oldIncome = parseFloat(tx.INCOME) || 0;
+                const oldExpense = parseFloat(tx.EXPENSE) || 0;
+                const balanceChange = (income - expense) - (oldIncome - oldExpense);
+                formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
+            }
+        }
+    }
 
     // Mode select change to toggle bank transfer fields
     formMODE.addEventListener("change", () => {
