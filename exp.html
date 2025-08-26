@@ -700,15 +700,35 @@
     }
 
     // Load all transactions for user
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        // Try the original query first
+        let q;
         try {
-            const q = query(
+            q = query(
                 collection(db, "users", currentUser.uid, "transactions"),
                 orderBy("DATE", "desc"),
                 orderBy("TIME", "desc")
             );
             const snap = await getDocs(q);
+            processTransactions(snap);
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                // Fallback to single field ordering if index doesn't exist
+                console.warn("Composite index not found, using date-only sorting");
+                q = query(
+                    collection(db, "users", currentUser.uid, "transactions"),
+                    orderBy("DATE", "desc")
+                );
+                const snap = await getDocs(q);
+                processTransactions(snap);
+            } else {
+                throw error;
+            }
+        }
+
+        function processTransactions(snap) {
             let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
             // Get account from URL
@@ -728,13 +748,15 @@
             calculateRunningBalance(allTransactions);
             populateFiltersOptions(allTransactions);
             applyFilters();
-
-        } catch (err) {
-            alert("Error loading transactions: " + err.message);
-        } finally {
-            loadingModal.style.display = "none";
         }
+
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        alert("Error loading transactions. Please check console for details.");
+    } finally {
+        loadingModal.style.display = "none";
     }
+}
 
     // Calculate running balance for transactions
     function calculateRunningBalance(transactions) {
@@ -1048,28 +1070,27 @@
     formEXPENSE.addEventListener("input", updateBalance);
 
     // Calculate and update the balance field
-    function updateBalance() {
-        const income = parseFloat(formINCOME.value) || 0;
-        const expense = parseFloat(formEXPENSE.value) || 0;
-        const currentBalance = parseFloat(formBALANCE.value) || lastBalance;
-        
-        // For new transactions, calculate based on last balance
-        if (!txIdInput.value) {
-            formBALANCE.value = (lastBalance + income - expense).toFixed(2);
-        } else {
-            // For editing existing transactions, we need to recalculate the entire running balance
-            // This is more complex and might require reloading all transactions
-            // For now, we'll just update this transaction's impact
-            const tx = txMap[txIdInput.value];
-            if (tx) {
-                const oldIncome = parseFloat(tx.INCOME) || 0;
-                const oldExpense = parseFloat(tx.EXPENSE) || 0;
-                const balanceChange = (income - expense) - (oldIncome - oldExpense);
-                formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
-            }
+// Replace your updateBalance function with this:
+function updateBalance() {
+    const income = parseFloat(formINCOME.value) || 0;
+    const expense = parseFloat(formEXPENSE.value) || 0;
+    
+    if (!txIdInput.value) {
+        // For new transactions
+        formBALANCE.value = (lastBalance + income - expense).toFixed(2);
+    } else {
+        // For editing existing transactions
+        const tx = txMap[txIdInput.value];
+        if (tx) {
+            const oldIncome = parseFloat(tx.INCOME) || 0;
+            const oldExpense = parseFloat(tx.EXPENSE) || 0;
+            const oldNet = oldIncome - oldExpense;
+            const newNet = income - expense;
+            const balanceChange = newNet - oldNet;
+            formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
         }
     }
-
+}
     // Mode select change to toggle bank transfer fields
     formMODE.addEventListener("change", () => {
         toggleToBankGroup(formMODE.value);
