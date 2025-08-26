@@ -738,55 +738,82 @@
         loadingModal.style.display = "flex";
         
         try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("DATE", "desc"),
-                orderBy("TIME", "desc")
-            );
-            
-            const snap = await getDocs(q);
-            
-            if (snap.empty) {
-                allTransactions = [];
-                filteredTransactions = [];
-                buildTable();
-                loadingModal.style.display = "none";
-                return;
+            // First try the query with ordering by both DATE and TIME
+            let q;
+            try {
+                q = query(
+                    collection(db, "users", currentUser.uid, "transactions"),
+                    orderBy("DATE", "desc"),
+                    orderBy("TIME", "desc")
+                );
+                
+                const snap = await getDocs(q);
+                processTransactions(snap);
+            } catch (indexError) {
+                console.warn("Index error, falling back to date-only ordering:", indexError);
+                
+                // Fallback: Only order by date if the composite index doesn't exist
+                q = query(
+                    collection(db, "users", currentUser.uid, "transactions"),
+                    orderBy("DATE", "desc")
+                );
+                
+                const snap = await getDocs(q);
+                processTransactions(snap);
+                
+                // Show a message about creating the index for better performance
+                Swal.fire({
+                    title: 'Performance Tip',
+                    text: 'For better sorting, create a Firestore index. Click the link in the console for instructions.',
+                    icon: 'info',
+                    confirmButtonText: 'OK'
+                });
+                
+                console.log("Create index at: https://console.firebase.google.com/v1/r/project/budget-app-1365f/firestore/indexes?create_composite=ClVwcm9qZWN0cy9idWRnZXQtYXBwLTEzNjVmL2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy90cmFuc2FjdGlvbnMvaW5kZXhlcy9fEAEaCAoEREFURRACGggKBFRJTUUQAhoMCghfX25hbWVfXxAC");
             }
-            
-            // Process the transactions
-            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            // Debug: Check what data we're getting
-            console.log("Loaded transactions:", transactions);
-            
-            // Get account from URL
-            const selectedAccount = getAccountFromURL();
-            
-            // Filter if opened from trial balance
-            if (selectedAccount) {
-                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-            } else {
-                document.getElementById("accountTitle").textContent = "All Transactions";
-            }
-            
-            allTransactions = transactions;
-            
-            // Debug attachments
-            debugAttachments();
-            
-            // Calculate running balance
-            calculateRunningBalance(allTransactions);
-            populateFiltersOptions(allTransactions);
-            applyFilters();
             
         } catch (err) {
             console.error("Error loading transactions:", err);
-            alert("Error loading transactions. Please check console for details.");
+            Swal.fire("Error", "Failed to load transactions. Please check console for details.", "error");
         } finally {
             loadingModal.style.display = "none";
         }
+    }
+
+    // Process transactions after loading
+    function processTransactions(snap) {
+        if (snap.empty) {
+            allTransactions = [];
+            filteredTransactions = [];
+            buildTable();
+            return;
+        }
+        
+        let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Debug: Check what data we're getting
+        console.log("Loaded transactions:", transactions);
+        
+        // Get account from URL
+        const selectedAccount = getAccountFromURL();
+        
+        // Filter if opened from trial balance
+        if (selectedAccount) {
+            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+        } else {
+            document.getElementById("accountTitle").textContent = "All Transactions";
+        }
+        
+        allTransactions = transactions;
+        
+        // Debug attachments
+        debugAttachments();
+        
+        // Calculate running balance
+        calculateRunningBalance(allTransactions);
+        populateFiltersOptions(allTransactions);
+        applyFilters();
     }
 
     // Calculate running balance for transactions per bank
