@@ -407,20 +407,18 @@
     </div>
 
     <div class="table-responsive">
-<table>
-  <thead>
-    <tr>
-      <th>Date</th>
-      <th>Description</th>
-      <th>Amount</th>
-      <th>Bank</th>
-    </tr>
-  </thead>
-  <tbody id="transactionsTableBody">
-    <!-- Rows go here -->
-  </tbody>
-</table>
-
+        <table>
+            <thead>
+                <tr>
+                    <th>SINO</th><th>DATE</th><th>TIME</th><th>ACCOUNT HEADER</th><th>MODE</th>
+                    <th>BANK NAME</th><th>INCOME</th><th>EXPENSE</th><th>DESCRIPTION</th>
+                    <th>BALANCE</th><th>ATTACHMENT</th><th>ACTION</th>
+                </tr>
+            </thead>
+            <tbody id="transactionsTableBody">
+                <tr><td colspan="12" style="text-align:center; color:#777;">No transactions loaded.</td></tr>
+            </tbody>
+        </table>
     </div>
     <div id="paginationControls" style="text-align:center; margin:10px;">
         <button id="prevPageBtn">Previous</button>
@@ -601,7 +599,7 @@
     let txMap = {};
     let currentPage = 1;
     const rowsPerPage = 10;
-    let lastBalances = {}; // Track the last balances for each bank
+    let lastBalance = 0; // Track the last balance for calculations
 
     // Listen for auth state change
     onAuthStateChanged(auth, async user => {
@@ -714,650 +712,219 @@
     }
 
     // Debug function to check attachment data
-    function debugAttachments() {
-        console.log("=== DEBUG ATTACHMENTS ===");
-        allTransactions.forEach((tx, index) => {
-            console.log(`Transaction ${index}:`, {
-                id: tx.id,
-                hasAttachment: !!tx.ATTACHMENT,
-                attachment: tx.ATTACHMENT,
-                attachmentType: typeof tx.ATTACHMENT,
-                DESCRIPTION: tx.DESCRIPTION
-            });
+function debugAttachments() {
+    console.log("=== DEBUG ATTACHMENTS ===");
+    allTransactions.forEach((tx, index) => {
+        console.log(`Transaction ${index}:`, {
+            id: tx.id,
+            hasAttachment: !!tx.ATTACHMENT,
+            attachment: tx.ATTACHMENT,
+            attachmentType: typeof tx.ATTACHMENT,
+            DESCRIPTION: tx.DESCRIPTION
         });
-        console.log("=== END DEBUG ===");
-    }
-
-    // Load transactions from Firestore
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
-        
+    });
+    console.log("=== END DEBUG ===");
+}
+    // Load all transactions for user
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        // Try the original query first
+        let q;
         try {
-            // First try the query with ordering by both DATE and TIME
-            let q;
-            try {
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc"),
-                    orderBy("TIME", "desc")
-                );
-                
-                const snap = await getDocs(q);
-                processTransactions(snap);
-            } catch (indexError) {
-                console.warn("Index error, falling back to date-only ordering:", indexError);
-                
-                // Fallback: Only order by date if the composite index doesn't exist
+            q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("DATE", "desc"),
+                orderBy("TIME", "desc")
+            );
+            const snap = await getDocs(q);
+            processTransactions(snap);
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                // Fallback to single field ordering if index doesn't exist
+                console.warn("Composite index not found, using date-only sorting");
                 q = query(
                     collection(db, "users", currentUser.uid, "transactions"),
                     orderBy("DATE", "desc")
                 );
-                
                 const snap = await getDocs(q);
                 processTransactions(snap);
-                
-                // Show a message about creating the index for better performance
-                Swal.fire({
-                    title: 'Performance Tip',
-                    text: 'For better sorting, create a Firestore index. Click the link in the console for instructions.',
-                    icon: 'info',
-                    confirmButtonText: 'OK'
-                });
-                
-                console.log("Create index at: https://console.firebase.google.com/v1/r/project/budget-app-1365f/firestore/indexes?create_composite=ClVwcm9qZWN0cy9idWRnZXQtYXBwLTEzNjVmL2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy90cmFuc2FjdGlvbnMvaW5kZXhlcy9fEAEaCAoEREFURRACGggKBFRJTUUQAhoMCghfX25hbWVfXxAC");
-            }
-            
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            Swal.fire("Error", "Failed to load transactions. Please check console for details.", "error");
-        } finally {
-            loadingModal.style.display = "none";
-        }
-    }
-
-    // Process transactions after loading
-    function processTransactions(snap) {
-        if (snap.empty) {
-            allTransactions = [];
-            filteredTransactions = [];
-            buildTable();
-            return;
-        }
-        
-        let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Debug: Check what data we're getting
-        console.log("Loaded transactions:", transactions);
-        
-        // Get account from URL
-        const selectedAccount = getAccountFromURL();
-        
-        // Filter if opened from trial balance
-        if (selectedAccount) {
-            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-        } else {
-            document.getElementById("accountTitle").textContent = "All Transactions";
-        }
-        
-        allTransactions = transactions;
-        
-        // Debug attachments
-        debugAttachments();
-        
-        // Calculate running balance
-        calculateRunningBalance(allTransactions);
-        populateFiltersOptions(allTransactions);
-        applyFilters();
-    }
-
-    // Calculate running balance for transactions per bank
-    function calculateRunningBalance(transactions) {
-        // Create a map to track balances for each bank
-        const bankBalances = {};
-        
-        // Sort transactions by date and time
-        const sortedTransactions = [...transactions].sort((a, b) => {
-            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
-            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
-            return dateA - dateB;
-        });
-        
-        // Calculate balance for each transaction based on its bank
-        sortedTransactions.forEach(transaction => {
-            const income = parseFloat(transaction.INCOME) || 0;
-            const expense = parseFloat(transaction.EXPENSE) || 0;
-            
-            // Determine which bank this transaction belongs to
-            let bankKey = "Cash"; // Default for cash transactions
-            
-            if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
-                bankKey = transaction.BANK_NAME;
-            } else if (transaction.MODE === "Transfer") {
-                // For transfers, we need special handling
-                // This is a simplified approach - you might need to adjust based on your data structure
-                if (transaction.BANK_NAME) {
-                    bankKey = transaction.BANK_NAME;
-                }
-            }
-            
-            // Initialize bank balance if not exists
-            if (!bankBalances[bankKey]) {
-                bankBalances[bankKey] = 0;
-            }
-            
-            // Update the balance for this bank
-            bankBalances[bankKey] += income - expense;
-            transaction.BALANCE = parseFloat(bankBalances[bankKey].toFixed(2));
-        });
-        
-        // Update the last balances for new transactions
-        lastBalances = bankBalances;
-        
-        return sortedTransactions;
-    }
-
-    // Update the updateBalance function to handle per-bank calculations
-    function updateBalance() {
-        const income = parseFloat(formINCOME.value) || 0;
-        const expense = parseFloat(formEXPENSE.value) || 0;
-        
-        // Determine which bank this transaction belongs to
-        let bankKey = "Cash"; // Default for cash
-        
-        if (formMODE.value === "Bank" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
-        } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
-        }
-        
-        // Get the current balance for this bank
-        const currentBankBalance = lastBalances[bankKey] || 0;
-        
-        // For new transactions, calculate based on the bank's last balance
-        if (!txIdInput.value) {
-            formBALANCE.value = (currentBankBalance + income - expense).toFixed(2);
-        } else {
-            // For editing existing transactions, we need to recalculate
-            const tx = txMap[txIdInput.value];
-            if (tx) {
-                const oldIncome = parseFloat(tx.INCOME) || 0;
-                const oldExpense = parseFloat(tx.EXPENSE) || 0;
-                const balanceChange = (income - expense) - (oldIncome - oldExpense);
-                formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
-            }
-        }
-    }
-
-    // Update the clearForm function to use lastBalances instead of lastBalance
-    function clearForm() {
-        form.reset();
-        txIdInput.value = "";
-        incomeGroup.style.display = "none";
-        expenseGroup.style.display = "none";
-        toBankGroup.style.display = "none";
-
-        // Auto-generate SINO (next number)
-        const nextSINO = allTransactions.length > 0 
-            ? Math.max(...allTransactions.map(tx => parseInt(tx.SINO) || 0)) + 1
-            : 1;
-        formSINO.value = nextSINO;
-
-        // Set current date and time
-        const now = new Date();
-        formDATE.value = now.toISOString().slice(0, 10); // yyyy-mm-dd
-        formTIME.value = now.toTimeString().slice(0, 5);  // hh:mm
-        
-        // Set initial balance to last known balance for the selected bank
-        // Default to Cash if no bank is selected yet
-        let bankKey = "Cash";
-        if (formMODE.value === "Bank" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
-        } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
-        }
-        
-        formBALANCE.value = (lastBalances[bankKey] || 0).toFixed(2);
-    }
-
-    // Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
-    async function saveTransaction() {
-        loadingModal.style.display = "flex";
-        
-        try {
-            // Determine which bank this transaction belongs to
-            let bankName = "";
-            if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
-                bankName = formBANKNAME.value;
-            }
-            
-            // Create the base transaction data
-            const transactionData = {
-                SINO: formSINO.value,
-                DATE: formDATE.value,
-                TIME: formTIME.value,
-                ACCOUNT_HEADER: formHEADER.value,
-                MODE: formMODE.value,
-                BANK_NAME: bankName,
-                INCOME: parseFloat(formINCOME.value) || 0,
-                EXPENSE: parseFloat(formEXPENSE.value) || 0,
-                DESCRIPTION: formDESC.value,
-                BALANCE: parseFloat(formBALANCE.value) || 0,
-                userId: currentUser.uid
-            };
-
-            // Handle file upload
-            if (formATTACHFILE.files.length > 0) {
-                const file = formATTACHFILE.files[0];
-                const formData = new FormData();
-                formData.append("file", file);
-                formData.append("upload_preset", "my_app_uploadst");
-                formData.append("cloud_name", "dpwdsyvz8");
-
-                const res = await fetch("https://api.cloudinary.com/v1_1/dpwdsyvz8/upload", {
-                    method: "POST",
-                    body: formData
-                });
-
-                const data = await res.json();
-                transactionData.ATTACHMENT = data.secure_url;
-            } else if (formATTACH.value && formATTACH.value.trim() !== "") {
-                // Keep existing attachment
-                transactionData.ATTACHMENT = formATTACH.value;
-            }
-            // If no attachment, don't add the ATTACHMENT field at all
-
-            // Prepare data for Firestore - remove any undefined values
-            const firestoreData = {};
-            Object.keys(transactionData).forEach(key => {
-                if (transactionData[key] !== undefined && transactionData[key] !== null) {
-                    firestoreData[key] = transactionData[key];
-                }
-            });
-
-            if (txIdInput.value) {
-                // For updates, handle the case where we want to remove attachment
-                if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
-                    firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
-                }
-                
-                await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
-                Swal.fire("Success", "Transaction updated successfully!", "success");
             } else {
-                await addDoc(collection(db, "users", currentUser.uid, "transactions"), firestoreData);
-                Swal.fire("Success", "Transaction added successfully!", "success");
+                throw error;
+            }
+        }
+
+        function processTransactions(snap) {
+            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // Get account from URL
+            const selectedAccount = getAccountFromURL();
+
+            // Filter if opened from trial balance
+            if (selectedAccount) {
+                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+            } else {
+                document.getElementById("accountTitle").textContent = "All Transactions";
             }
 
-            await loadTransactions();
-            modal.style.display = "none";
-            
-        } catch (error) {
-            console.error("Error saving transaction:", error);
-            Swal.fire("Error", "Failed to save transaction: " + error.message, "error");
-        } finally {
-            loadingModal.style.display = "none";
+            allTransactions = transactions;
+
+            // Calculate running balance
+            calculateRunningBalance(allTransactions);
+            populateFiltersOptions(allTransactions);
+            applyFilters();
         }
+
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        alert("Error loading transactions. Please check console for details.");
+    } finally {
+        loadingModal.style.display = "none";
     }
-
-    // Add event listeners to update the balance when bank selection changes
-    formMODE.addEventListener("change", () => {
-        toggleToBankGroup(formMODE.value);
-        updateBalance(); // Update balance when mode changes
-    });
-
-    formBANKNAME.addEventListener("change", () => {
-        updateBalance(); // Update balance when bank selection changes
-    });
-
-    // Populate filter dropdowns with unique values
-    function populateFiltersOptions(data) {
-        const modes = new Set();
-        const banks = new Set();
-        data.forEach(t => {
-            if (t.MODE) modes.add(t.MODE);
-            if (t.BANK_NAME) banks.add(t.BANK_NAME);
-        });
-        modeFilter.innerHTML =
-            `<option value="all">All</option>` +
-            [...modes].sort().map(m => `<option>${escapeHtml(m)}</option>`).join("");
-        bankFilter.innerHTML =
-            `<option value="all">All</option>` +
-            [...banks].sort().map(b => `<option>${escapeHtml(b)}</option>`).join("");
-    }
-
-    // Filter transactions according to selected criteria
-    function applyFilters() {
-        filteredTransactions = allTransactions.slice();
-        const now = new Date();
-
-        // Helper to check if date is within range safely
-        const isInRange = (dateStr, start, end) => {
-            if (!dateStr) return false;
-            const d = new Date(dateStr);
-            if (isNaN(d)) return false; // Ignore invalid dates
-            return d >= start && d <= end;
-        };
-
-        switch (dateFilter.value) {
-            case "week": {
-                const start = new Date(now);
-                start.setHours(0, 0, 0, 0);
-                start.setDate(now.getDate() - now.getDay());
-                filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
-                break;
-            }
-            case "month": {
-                const start = new Date(now.getFullYear(), now.getMonth(), 1);
-                filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
-                break;
-            }
-            case "year": {
-                const start = new Date(now.getFullYear(), 0, 1);
-                filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
-                break;
-            }
-            case "custom":
-                if (startDateInput.value && endDateInput.value) {
-                    const start = new Date(startDateInput.value);
-                    const end = new Date(endDateInput.value);
-                    end.setHours(23, 59, 59, 999);
-                    if (!isNaN(start) && !isNaN(end)) {
-                        filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, end));
-                        // Display range below filters
-                        dateRangeDisplay.textContent = `Showing: ${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
-                    }
-                }
-                break;
-        }
-
-        if (incomeExpenseFilter.value === "income")
-            filteredTransactions = filteredTransactions.filter(t => (t.INCOME ?? 0) > 0);
-        else if (incomeExpenseFilter.value === "expense")
-            filteredTransactions = filteredTransactions.filter(t => (t.EXPENSE ?? 0) > 0);
-
-        if (descFilter.value.trim()) {
-            const search = descFilter.value.trim().toLowerCase();
-            filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION ?? "").toLowerCase().includes(search));
-        }
-
-        if (modeFilter.value !== "all")
-            filteredTransactions = filteredTransactions.filter(t => t.MODE === modeFilter.value);
-
-        if (bankFilter.value !== "all")
-            filteredTransactions = filteredTransactions.filter(t => t.BANK_NAME === bankFilter.value);
-
-        currentPage = 1;
-        buildTable();
-    }
-
-    // Build table rows for current page
-    function buildTable() {
-        txMap = {};
-        const start = (currentPage - 1) * rowsPerPage;
-        const end = start + rowsPerPage;
-        const pageItems = filteredTransactions.slice(start, end);
-        tableBody.innerHTML = "";
-
-        if (pageItems.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
-            updatePagination();
-            return;
-        }
-
-        pageItems.forEach(d => {
-            txMap[d.id] = d;
-            const incomeCell = (d.INCOME ?? 0) > 0 ? `<span style="color:green;">${(d.INCOME || 0).toFixed(2)}</span>` : "";
-            const expenseCell = (d.EXPENSE ?? 0) > 0 ? `<span style="color:red;">${(d.EXPENSE || 0).toFixed(2)}</span>` : "";
-            const balanceCell = (d.BALANCE != null) ? (d.BALANCE || 0).toFixed(2) : "";
-            
-            // FIXED: Proper attachment display check
-let attachmentCell = "";
-if (d.ATTACHMENT && typeof d.ATTACHMENT === "string" && d.ATTACHMENT.trim() !== "") {
-    attachmentCell = `<a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer" class="btn-view">View</a>`;
-} else {
-    attachmentCell = `<span style="color:#999;">No File</span>`;
 }
 
-let row = document.createElement("tr");  // <--- missing in your code
-row.innerHTML = `
-    <td>${escapeHtml(d.SINO || '')}</td>
-    <td>${escapeHtml(d.DATE || '')}</td>
-    <td>${escapeHtml(d.TIME || '')}</td>
-    <td>${escapeHtml(d.ACCOUNT_HEADER || '')}</td>
-    <td>${escapeHtml(d.MODE || '')}</td>
-    <td>${escapeHtml(d.BANK_NAME || '')}</td>
-    <td>${incomeCell}</td>
-    <td>${expenseCell}</td>
-    <td>${escapeHtml(d.DESCRIPTION || '')}</td>
-    <td>${balanceCell}</td>
-    <td>${attachmentCell}</td>
-    <td>
-        <button class="btn-edit" data-id="${d.id}">Edit</button>
-        <button class="btn-delete" data-id="${d.id}">Delete</button>
-    </td>
-`;
-
-tbody.appendChild(row);
-
-
-            tableBody.appendChild(row);
-        });
-
-        setupTableButtons();
-        updatePagination();
-    }
-
-    // Update pagination controls
-    function updatePagination() {
-        const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage) || 1;
-        paginationInfo.textContent = `Page ${currentPage} of ${totalPages}`;
-        prevPageBtn.disabled = currentPage <= 1;
-        nextPageBtn.disabled = currentPage >= totalPages;
-    }
-
-    prevPageBtn.addEventListener("click", () => {
-        if (currentPage > 1) {
-            currentPage--;
-            buildTable();
-        }
+// Calculate running balance for transactions per bank
+function calculateRunningBalance(transactions) {
+    // Create a map to track balances for each bank
+    const bankBalances = {};
+    
+    // Sort transactions by date and time
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+        const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+        return dateA - dateB;
     });
-
-    nextPageBtn.addEventListener("click", () => {
-        const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
-        if (currentPage < totalPages) {
-            currentPage++;
-            buildTable();
-        }
-    });
-
-    // Attach event listeners to Edit/Delete buttons
-    function setupTableButtons() {
-        document.querySelectorAll(".btn-edit").forEach(btn => {
-            btn.onclick = () => openEditModal(btn.dataset.id);
-        });
-        document.querySelectorAll(".btn-delete").forEach(btn => {
-            btn.onclick = () => deleteTransaction(btn.dataset.id);
-        });
-    }
-
-    // Open modal for adding a new transaction
-    function openAddModal() {
-        modal.style.display = 'flex';
-        modal.querySelector('.modal-content').classList.add('create-mode');
-        modal.querySelector('.modal-content').classList.remove('edit-mode');
+    
+    // Calculate balance for each transaction based on its bank
+    sortedTransactions.forEach(transaction => {
+        const income = parseFloat(transaction.INCOME) || 0;
+        const expense = parseFloat(transaction.EXPENSE) || 0;
         
-        document.getElementById('formTitle').textContent = 'Add Transaction';
+        // Determine which bank this transaction belongs to
+        let bankKey = "Cash"; // Default for cash transactions
         
-        clearForm();
-    }
-
-    // Open modal and populate for editing
-    function openEditModal(id) {
-        const tx = txMap[id];
-        if (!tx) return;
-
-        modal.style.display = 'flex';
-        modal.querySelector('.modal-content').classList.add('edit-mode');
-        modal.querySelector('.modal-content').classList.remove('create-mode');
-        
-        document.getElementById('formTitle').textContent = 'Edit Transaction';
-
-        txIdInput.value = id;
-        formSINO.value = tx.SINO || '';
-        formDATE.value = tx.DATE || '';
-        formTIME.value = tx.TIME || '';
-        formHEADER.value = tx.ACCOUNT_HEADER || '';
-        formMODE.value = tx.MODE || '';
-        formBANKNAME.value = tx.BANK_NAME || '';
-        formINCOME.value = tx.INCOME || '';
-        formEXPENSE.value = tx.EXPENSE || '';
-        formDESC.value = tx.DESCRIPTION || '';
-        formBALANCE.value = tx.BALANCE || '';
-        formATTACH.value = tx.ATTACHMENT || '';
-
-        toggleIncomeExpenseGroups(tx.INCOME, tx.EXPENSE);
-        toggleToBankGroup(tx.MODE);
-    }
-
-    // Toggle income/expense input visibility based on values
-    function toggleIncomeExpenseGroups(income, expense) {
-        income = parseFloat(income) || 0;
-        expense = parseFloat(expense) || 0;
-
-        if (income > 0) {
-            typeSelector.value = "income";
-            incomeGroup.style.display = "block";
-            expenseGroup.style.display = "none";
-            formINCOME.value = income;
-            formEXPENSE.value = "";
-        } else if (expense > 0) {
-            typeSelector.value = "expense";
-            incomeGroup.style.display = "none";
-            expenseGroup.style.display = "block";
-            formINCOME.value = "";
-            formEXPENSE.value = expense;
-        } else {
-            typeSelector.value = "";
-            incomeGroup.style.display = "none";
-            expenseGroup.style.display = "none";
-            formINCOME.value = "";
-            formEXPENSE.value = "";
-        }
-    }
-
-    // Toggle toBankGroup based on mode
-    function toggleToBankGroup(mode) {
-        if (mode === "Transfer") {
-            toBankGroup.style.display = "block";
-        } else {
-            toBankGroup.style.display = "none";
-            toBankSelect.value = "";
-        }
-    }
-
-    // Form "type" selector change to show relevant fields
-    typeSelector.addEventListener("change", () => {
-        if (typeSelector.value === "income") {
-            incomeGroup.style.display = "block";
-            expenseGroup.style.display = "none";
-            formINCOME.value = formINCOME.value || "0";
-            formEXPENSE.value = "";
-        } else if (typeSelector.value === "expense") {
-            incomeGroup.style.display = "none";
-            expenseGroup.style.display = "block";
-            formINCOME.value = "";
-            formEXPENSE.value = formEXPENSE.value || "0";
-        } else {
-            incomeGroup.style.display = "none";
-            expenseGroup.style.display = "none";
-            formINCOME.value = "";
-            formEXPENSE.value = "";
-        }
-        
-        // Update balance when type changes
-        updateBalance();
-    });
-
-    // Update balance when income or expense values change
-    formINCOME.addEventListener("input", updateBalance);
-    formEXPENSE.addEventListener("input", updateBalance);
-
-    // Mode select change to toggle bank transfer fields
-    formMODE.addEventListener("change", () => {
-        toggleToBankGroup(formMODE.value);
-    });
-
-    // Close modal on click outside form
-    modal.addEventListener("click", e => {
-        if (e.target === modal) modal.style.display = "none";
-    });
-
-    function escapeHtml(text) {
-        if (typeof text !== "string") {
-            if (text === undefined || text === null) {
-                return "";
-            }
-            try {
-                text = String(text);
-            } catch {
-                return "";
+        if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
+            bankKey = transaction.BANK_NAME;
+        } else if (transaction.MODE === "Transfer") {
+            // For transfers, we need special handling
+            // This is a simplified approach - you might need to adjust based on your data structure
+            if (transaction.BANK_NAME) {
+                bankKey = transaction.BANK_NAME;
             }
         }
-
-        return text.replace(/[&<>"']/g, m =>
-            ({
-                "&": "&amp;",
-                "<": "&lt;",
-                ">": "&gt;",
-                '"': "&quot;",
-                "'": "&#039;"
-            })[m]
-        );
-    }
-
-    // Get account name from URL param 'account'
-    function getAccountFromURL() {
-        const params = new URLSearchParams(window.location.search);
-        return params.get("account");
-    }
-
-    // Filter apply button
-    applyFiltersBtn.addEventListener("click", () => {
-        applyFilters();
-    });
-
-    // Date filter change toggles custom date inputs
-    dateFilter.addEventListener("change", () => {
-        if (dateFilter.value === "custom") {
-            document.getElementById("customDateRange").style.display = "flex";
-        } else {
-            document.getElementById("customDateRange").style.display = "none";
-            dateRangeDisplay.textContent = "";
+        
+        // Initialize bank balance if not exists
+        if (!bankBalances[bankKey]) {
+            bankBalances[bankKey] = 0;
         }
+        
+        // Update the balance for this bank
+        bankBalances[bankKey] += income - expense;
+        transaction.BALANCE = parseFloat(bankBalances[bankKey].toFixed(2));
     });
+    
+    // Update the last balances for new transactions
+    lastBalances = bankBalances;
+    
+    return sortedTransactions;
+}
 
-    // Delete transaction
-    async function deleteTransaction(txId) {
-        if (!confirm("Are you sure you want to delete this transaction?")) return;
-
-        try {
-            await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txId));
-            Swal.fire("Success", "Transaction deleted successfully!", "success");
-            await loadTransactions(); // Refresh list
-        } catch (err) {
-            console.error("Error deleting transaction:", err);
-            Swal.fire("Error", "Failed to delete transaction: " + err.message, "error");
+// Update the updateBalance function to handle per-bank calculations
+function updateBalance() {
+    const income = parseFloat(formINCOME.value) || 0;
+    const expense = parseFloat(formEXPENSE.value) || 0;
+    
+    // Determine which bank this transaction belongs to
+    let bankKey = "Cash"; // Default for cash
+    
+    if (formMODE.value === "Bank" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    }
+    
+    // Get the current balance for this bank
+    const currentBankBalance = lastBalances[bankKey] || 0;
+    
+    // For new transactions, calculate based on the bank's last balance
+    if (!txIdInput.value) {
+        formBALANCE.value = (currentBankBalance + income - expense).toFixed(2);
+    } else {
+        // For editing existing transactions, we need to recalculate
+        const tx = txMap[txIdInput.value];
+        if (tx) {
+            const oldIncome = parseFloat(tx.INCOME) || 0;
+            const oldExpense = parseFloat(tx.EXPENSE) || 0;
+            const balanceChange = (income - expense) - (oldIncome - oldExpense);
+            formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
         }
     }
+}
 
-    // Handle attachment file upload
-    formATTACHFILE.addEventListener("change", async function () {
-        const file = this.files[0];
-        if (!file) return;
+// Update the clearForm function to use lastBalances instead of lastBalance
+function clearForm() {
+    form.reset();
+    txIdInput.value = "";
+    incomeGroup.style.display = "none";
+    expenseGroup.style.display = "none";
+    toBankGroup.style.display = "none";
 
-        try {
-            loadingModal.style.display = "flex";
-            
+    // Auto-generate SINO (next number)
+    const nextSINO = allTransactions.length > 0 
+        ? Math.max(...allTransactions.map(tx => parseInt(tx.SINO) || 0)) + 1
+        : 1;
+    formSINO.value = nextSINO;
+
+    // Set current date and time
+    const now = new Date();
+    formDATE.value = now.toISOString().slice(0, 10); // yyyy-mm-dd
+    formTIME.value = now.toTimeString().slice(0, 5);  // hh:mm
+    
+    // Set initial balance to last known balance for the selected bank
+    // Default to Cash if no bank is selected yet
+    let bankKey = "Cash";
+    if (formMODE.value === "Bank" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    }
+    
+    formBALANCE.value = (lastBalances[bankKey] || 0).toFixed(2);
+}
+
+// Update the variable declaration to track balances per bank
+let lastBalances = {}; // Track the last balances for each bank
+
+// Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
+async function saveTransaction() {
+    loadingModal.style.display = "flex";
+    
+    try {
+        // Determine which bank this transaction belongs to
+        let bankName = "";
+        if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
+            bankName = formBANKNAME.value;
+        }
+        
+        // Create the base transaction data
+        const transactionData = {
+            SINO: formSINO.value,
+            DATE: formDATE.value,
+            TIME: formTIME.value,
+            ACCOUNT_HEADER: formHEADER.value,
+            MODE: formMODE.value,
+            BANK_NAME: bankName,
+            INCOME: parseFloat(formINCOME.value) || 0,
+            EXPENSE: parseFloat(formEXPENSE.value) || 0,
+            DESCRIPTION: formDESC.value,
+            BALANCE: parseFloat(formBALANCE.value) || 0,
+            userId: currentUser.uid
+        };
+
+        // Handle file upload
+        if (formATTACHFILE.files.length > 0) {
+            const file = formATTACHFILE.files[0];
             const formData = new FormData();
             formData.append("file", file);
             formData.append("upload_preset", "my_app_uploadst");
@@ -1369,16 +936,435 @@ tbody.appendChild(row);
             });
 
             const data = await res.json();
-            formATTACH.value = data.secure_url;
+            transactionData.ATTACHMENT = data.secure_url;
+        } else if (formATTACH.value && formATTACH.value.trim() !== "") {
+            // Keep existing attachment
+          // In your saveTransaction function, make sure you're setting the attachment correctly:
+if (formATTACHFILE.files.length > 0) {
+    // File upload logic
+    transactionData.ATTACHMENT = data.secure_url;
+} else if (formATTACH.value && formATTACH.value.trim() !== "") {
+    // Keep existing attachment
+    transactionData.ATTACHMENT = formATTACH.value;
+}
+// If no attachment, don't add the ATTACHMENT field at all
+
             
-            Swal.fire("Success", "File uploaded successfully!", "success");
-        } catch (error) {
-            console.error("Error uploading file:", error);
-            Swal.fire("Error", "Failed to upload file: " + error.message, "error");
-        } finally {
-            loadingModal.style.display = "none";
+        // Prepare data for Firestore - remove any undefined values
+        const firestoreData = {};
+        Object.keys(transactionData).forEach(key => {
+            if (transactionData[key] !== undefined && transactionData[key] !== null) {
+                firestoreData[key] = transactionData[key];
+            }
+        });
+
+        if (txIdInput.value) {
+            // For updates, handle the case where we want to remove attachment
+            if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
+                firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
+            }
+            
+            await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
+            Swal.fire("Success", "Transaction updated successfully!", "success");
+        } else {
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), firestoreData);
+            Swal.fire("Success", "Transaction added successfully!", "success");
         }
+
+        await loadTransactions();
+        modal.style.display = "none";
+        
+    } catch (error) {
+        console.error("Error saving transaction:", error);
+        Swal.fire("Error", "Failed to save transaction: " + error.message, "error");
+    } finally {
+        loadingModal.style.display = "none";
+    }
+}
+// Add event listeners to update the balance when bank selection changes
+formMODE.addEventListener("change", () => {
+    toggleToBankGroup(formMODE.value);
+    updateBalance(); // Update balance when mode changes
+});
+
+formBANKNAME.addEventListener("change", () => {
+    updateBalance(); // Update balance when bank selection changes
+});
+
+// Populate filter dropdowns with unique values
+function populateFiltersOptions(data) {
+    const modes = new Set();
+    const banks = new Set();
+    data.forEach(t => {
+        if (t.MODE) modes.add(t.MODE);
+        if (t.BANK_NAME) banks.add(t.BANK_NAME);
     });
+    modeFilter.innerHTML =
+        `<option value="all">All</option>` +
+        [...modes].sort().map(m => `<option>${escapeHtml(m)}</option>`).join("");
+    bankFilter.innerHTML =
+        `<option value="all">All</option>` +
+        [...banks].sort().map(b => `<option>${escapeHtml(b)}</option>`).join("");
+}
+
+// Filter transactions according to selected criteria
+function applyFilters() {
+    filteredTransactions = allTransactions.slice();
+    const now = new Date();
+
+    // Helper to check if date is within range safely
+    const isInRange = (dateStr, start, end) => {
+        if (!dateStr) return false;
+        const d = new Date(dateStr);
+        if (isNaN(d)) return false; // Ignore invalid dates
+        return d >= start && d <= end;
+    };
+
+    switch (dateFilter.value) {
+        case "week": {
+            const start = new Date(now);
+            start.setHours(0, 0, 0, 0);
+            start.setDate(now.getDate() - now.getDay());
+            filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+            break;
+        }
+        case "month": {
+            const start = new Date(now.getFullYear(), now.getMonth(), 1);
+            filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+            break;
+        }
+        case "year": {
+            const start = new Date(now.getFullYear(), 0, 1);
+            filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, now));
+            break;
+        }
+        case "custom":
+            if (startDateInput.value && endDateInput.value) {
+                const start = new Date(startDateInput.value);
+                const end = new Date(endDateInput.value);
+                end.setHours(23, 59, 59, 999);
+                if (!isNaN(start) && !isNaN(end)) {
+                    filteredTransactions = filteredTransactions.filter(t => isInRange(t.DATE, start, end));
+                    // Display range below filters
+                    dateRangeDisplay.textContent = `Showing: ${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
+                }
+            }
+            break;
+    }
+
+    if (incomeExpenseFilter.value === "income")
+        filteredTransactions = filteredTransactions.filter(t => (t.INCOME ?? 0) > 0);
+    else if (incomeExpenseFilter.value === "expense")
+        filteredTransactions = filteredTransactions.filter(t => (t.EXPENSE ?? 0) > 0);
+
+    if (descFilter.value.trim()) {
+        const search = descFilter.value.trim().toLowerCase();
+        filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION ?? "").toLowerCase().includes(search));
+    }
+
+    if (modeFilter.value !== "all")
+        filteredTransactions = filteredTransactions.filter(t => t.MODE === modeFilter.value);
+
+    if (bankFilter.value !== "all")
+        filteredTransactions = filteredTransactions.filter(t => t.BANK_NAME === bankFilter.value);
+
+    currentPage = 1;
+    buildTable();
+}
+
+// Build table rows for current page
+// Build table rows for current page
+function buildTable() {
+    txMap = {};
+    const start = (currentPage - 1) * rowsPerPage;
+    const end = start + rowsPerPage;
+    const pageItems = filteredTransactions.slice(start, end);
+    tableBody.innerHTML = "";
+
+    if (pageItems.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:#777;">No transactions found.</td></tr>`;
+        updatePagination();
+        return;
+    }
+
+    pageItems.forEach(d => {
+        txMap[d.id] = d;
+        const incomeCell = (d.INCOME ?? 0) > 0 ? `<span style="color:green;">${(d.INCOME || 0).toFixed(2)}</span>` : "";
+        const expenseCell = (d.EXPENSE ?? 0) > 0 ? `<span style="color:red;">${(d.EXPENSE || 0).toFixed(2)}</span>` : "";
+        const balanceCell = (d.BALANCE != null) ? (d.BALANCE || 0).toFixed(2) : "";
+        
+        // Fix for attachment display - check if attachment exists and is a valid URL
+// Replace the attachment cell code with this:
+let attachmentCell = "";
+if (d.ATTACHMENT && 
+    typeof d.ATTACHMENT === 'string' && 
+    d.ATTACHMENT.trim() !== "" && 
+    (d.ATTACHMENT.startsWith('http://') || d.ATTACHMENT.startsWith('https://'))) {
+    attachmentCell = `<td class="attachment-cell"><a href="${escapeHtml(d.ATTACHMENT)}" target="_blank" rel="noopener noreferrer">View</a></td>`;
+} else {
+    attachmentCell = `<td></td>`;
+}
+        
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>${escapeHtml(d.SINO || '')}</td>
+            <td>${escapeHtml(d.DATE || '')}</td>
+            <td>${escapeHtml(d.TIME || '')}</td>
+            <td>${escapeHtml(d.ACCOUNT_HEADER || '')}</td>
+            <td>${escapeHtml(d.MODE || '')}</td>
+            <td>${escapeHtml(d.BANK_NAME || '')}</td>
+            <td>${incomeCell}</td>
+            <td>${expenseCell}</td>
+            <td>${escapeHtml(d.DESCRIPTION || '')}</td>
+            <td>${balanceCell}</td>
+            ${attachmentCell}
+            <td>
+                <button class="btn-edit" data-id="${d.id}">Edit</button>
+                <button class="btn-delete" data-id="${d.id}">Delete</button>
+            </td>
+        `;
+        tableBody.appendChild(row);
+    });
+
+    setupTableButtons();
+    updatePagination();
+}
+
+// Update pagination controls
+function updatePagination() {
+    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage) || 1;
+    paginationInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+    prevPageBtn.disabled = currentPage <= 1;
+    nextPageBtn.disabled = currentPage >= totalPages;
+}
+
+prevPageBtn.addEventListener("click", () => {
+    if (currentPage > 1) {
+        currentPage--;
+        buildTable();
+    }
+});
+
+nextPageBtn.addEventListener("click", () => {
+    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+    if (currentPage < totalPages) {
+        currentPage++;
+        buildTable();
+    }
+});
+
+// Attach event listeners to Edit/Delete buttons
+function setupTableButtons() {
+    document.querySelectorAll(".btn-edit").forEach(btn => {
+        btn.onclick = () => openEditModal(btn.dataset.id);
+    });
+    document.querySelectorAll(".btn-delete").forEach(btn => {
+        btn.onclick = () => deleteTransaction(btn.dataset.id);
+    });
+}
+
+// Open modal for adding a new transaction
+function openAddModal() {
+    modal.style.display = 'flex';
+    modal.querySelector('.modal-content').classList.add('create-mode');
+    modal.querySelector('.modal-content').classList.remove('edit-mode');
+    
+    document.getElementById('formTitle').textContent = 'Add Transaction';
+    
+    clearForm();
+}
+
+// Open modal and populate for editing
+function openEditModal(id) {
+    const tx = txMap[id];
+    if (!tx) return;
+
+    modal.style.display = 'flex';
+    modal.querySelector('.modal-content').classList.add('edit-mode');
+    modal.querySelector('.modal-content').classList.remove('create-mode');
+    
+    document.getElementById('formTitle').textContent = 'Edit Transaction';
+
+    txIdInput.value = id;
+    formSINO.value = tx.SINO || '';
+    formDATE.value = tx.DATE || '';
+    formTIME.value = tx.TIME || '';
+    formHEADER.value = tx.ACCOUNT_HEADER || '';
+    formMODE.value = tx.MODE || '';
+    formBANKNAME.value = tx.BANK_NAME || '';
+    formINCOME.value = tx.INCOME || '';
+    formEXPENSE.value = tx.EXPENSE || '';
+    formDESC.value = tx.DESCRIPTION || '';
+    formBALANCE.value = tx.BALANCE || '';
+    formATTACH.value = tx.ATTACHMENT || '';
+
+    toggleIncomeExpenseGroups(tx.INCOME, tx.EXPENSE);
+    toggleToBankGroup(tx.MODE);
+}
+
+// Toggle income/expense input visibility based on values
+function toggleIncomeExpenseGroups(income, expense) {
+    income = parseFloat(income) || 0;
+    expense = parseFloat(expense) || 0;
+
+    if (income > 0) {
+        typeSelector.value = "income";
+        incomeGroup.style.display = "block";
+        expenseGroup.style.display = "none";
+        formINCOME.value = income;
+        formEXPENSE.value = "";
+    } else if (expense > 0) {
+        typeSelector.value = "expense";
+        incomeGroup.style.display = "none";
+        expenseGroup.style.display = "block";
+        formINCOME.value = "";
+        formEXPENSE.value = expense;
+    } else {
+        typeSelector.value = "";
+        incomeGroup.style.display = "none";
+        expenseGroup.style.display = "none";
+        formINCOME.value = "";
+        formEXPENSE.value = "";
+    }
+}
+
+// Toggle toBankGroup based on mode
+function toggleToBankGroup(mode) {
+    if (mode === "Transfer") {
+        toBankGroup.style.display = "block";
+    } else {
+        toBankGroup.style.display = "none";
+        toBankSelect.value = "";
+    }
+}
+
+// Form "type" selector change to show relevant fields
+typeSelector.addEventListener("change", () => {
+    if (typeSelector.value === "income") {
+        incomeGroup.style.display = "block";
+        expenseGroup.style.display = "none";
+        formINCOME.value = formINCOME.value || "0";
+        formEXPENSE.value = "";
+    } else if (typeSelector.value === "expense") {
+        incomeGroup.style.display = "none";
+        expenseGroup.style.display = "block";
+        formINCOME.value = "";
+        formEXPENSE.value = formEXPENSE.value || "0";
+    } else {
+        incomeGroup.style.display = "none";
+        expenseGroup.style.display = "none";
+        formINCOME.value = "";
+        formEXPENSE.value = "";
+    }
+    
+    // Update balance when type changes
+    updateBalance();
+});
+
+// Update balance when income or expense values change
+formINCOME.addEventListener("input", updateBalance);
+formEXPENSE.addEventListener("input", updateBalance);
+
+// Mode select change to toggle bank transfer fields
+formMODE.addEventListener("change", () => {
+    toggleToBankGroup(formMODE.value);
+});
+
+// Close modal on click outside form
+modal.addEventListener("click", e => {
+    if (e.target === modal) modal.style.display = "none";
+});
+
+function escapeHtml(text) {
+    if (typeof text !== "string") {
+        if (text === undefined || text === null) {
+            return "";
+        }
+        try {
+            text = String(text);
+        } catch {
+            return "";
+        }
+    }
+
+    return text.replace(/[&<>"']/g, m =>
+        ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;"
+        })[m]
+    );
+}
+
+// Get account name from URL param 'account'
+function getAccountFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("account");
+}
+
+// Filter apply button
+applyFiltersBtn.addEventListener("click", () => {
+    applyFilters();
+});
+
+// Date filter change toggles custom date inputs
+dateFilter.addEventListener("change", () => {
+    if (dateFilter.value === "custom") {
+        document.getElementById("customDateRange").style.display = "flex";
+    } else {
+        document.getElementById("customDateRange").style.display = "none";
+        dateRangeDisplay.textContent = "";
+    }
+});
+
+// Delete transaction
+async function deleteTransaction(txId) {
+    if (!confirm("Are you sure you want to delete this transaction?")) return;
+
+    try {
+        await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txId));
+        Swal.fire("Success", "Transaction deleted successfully!", "success");
+        await loadTransactions(); // Refresh list
+    } catch (err) {
+        console.error("Error deleting transaction:", err);
+        Swal.fire("Error", "Failed to delete transaction: " + err.message, "error");
+    }
+}
+
+// Handle attachment file upload
+formATTACHFILE.addEventListener("change", async function () {
+    const file = this.files[0];
+    if (!file) return;
+
+    try {
+        loadingModal.style.display = "flex";
+        
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("upload_preset", "my_app_uploadst");
+        formData.append("cloud_name", "dpwdsyvz8");
+
+        const res = await fetch("https://api.cloudinary.com/v1_1/dpwdsyvz8/upload", {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await res.json();
+        formATTACH.value = data.secure_url;
+        
+        Swal.fire("Success", "File uploaded successfully!", "success");
+    } catch (error) {
+        console.error("Error uploading file:", error);
+        Swal.fire("Error", "Failed to upload file: " + error.message, "error");
+    } finally {
+        loadingModal.style.display = "none";
+    }
+});
+
 </script>
+
 </body>
 </html>
