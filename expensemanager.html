@@ -165,14 +165,6 @@
       gap: 10px;
       margin-bottom: 20px;
     }
-    
-    /* COA management section */
-    .coa-management {
-      background: #f8f9fa;
-      padding: 15px;
-      border-radius: 10px;
-      margin-bottom: 20px;
-    }
   </style>
 </head>
 <body>
@@ -185,7 +177,7 @@
       <button id="homeBtn" class="btn btn-outline-secondary">
         <i class="fa fa-home me-1"></i> Home
       </button>
-      <button id="manageCOABtn" class="btn btn-outline-info">
+      <button id="coaBtn" class="btn btn-outline-info">
         <i class="fa fa-chart-pie me-1"></i> Manage COA
       </button>
     </div>
@@ -239,32 +231,6 @@
       </div>
       
       <div class="content-body">
-        <!-- COA management section (initially hidden) -->
-        <div id="coaManagement" class="coa-management" style="display: none;">
-          <h4><i class="fa fa-chart-pie me-2"></i>Chart of Accounts Management</h4>
-          <div class="row mt-3">
-            <div class="col-md-6">
-              <h5>Account Headers</h5>
-              <div class="d-flex mb-2">
-                <input id="newAccountInput" type="text" class="form-control form-control-sm me-2" placeholder="New account header">
-                <button id="addAccountBtn" class="btn btn-sm btn-primary">Add</button>
-              </div>
-              <ul id="accountsList" class="list-group"></ul>
-            </div>
-            <div class="col-md-6">
-              <h5>Bank Accounts</h5>
-              <div class="d-flex mb-2">
-                <input id="newBankInput" type="text" class="form-control form-control-sm me-2" placeholder="New bank account">
-                <button id="addBankBtn" class="btn btn-sm btn-primary">Add</button>
-              </div>
-              <ul id="banksList" class="list-group"></ul>
-            </div>
-          </div>
-          <div class="mt-3 text-end">
-            <button id="closeCOABtn" class="btn btn-sm btn-secondary">Close</button>
-          </div>
-        </div>
-        
         <!-- Bank balances -->
         <div id="bankBalances" class="bank-balances">
           <!-- Will be populated dynamically -->
@@ -481,15 +447,7 @@
     const balanceToggle = document.getElementById("balanceToggle");
     const backBtn = document.getElementById("backBtn");
     const homeBtn = document.getElementById("homeBtn");
-    const manageCOABtn = document.getElementById("manageCOABtn");
-    const closeCOABtn = document.getElementById("closeCOABtn");
-    const coaManagement = document.getElementById("coaManagement");
-    const addAccountBtn = document.getElementById("addAccountBtn");
-    const newAccountInput = document.getElementById("newAccountInput");
-    const accountsList = document.getElementById("accountsList");
-    const addBankBtn = document.getElementById("addBankBtn");
-    const newBankInput = document.getElementById("newBankInput");
-    const banksList = document.getElementById("banksList");
+    const coaBtn = document.getElementById("coaBtn");
 
     // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
@@ -566,42 +524,10 @@
       window.location.href = "index.html";
     });
     
-    // COA management
-    manageCOABtn.addEventListener("click", () => {
-      coaManagement.style.display = "block";
-      renderCOALists();
+    coaBtn.addEventListener("click", () => {
+      window.location.href = "coa.html";
     });
-    
-    closeCOABtn.addEventListener("click", () => {
-      coaManagement.style.display = "none";
-    });
-    
-    addAccountBtn.addEventListener("click", async () => {
-      const accountName = newAccountInput.value.trim();
-      if (accountName && !coaAccounts.includes(accountName)) {
-        const success = await addAccountToCOA(accountName, "account");
-        if (success) {
-          coaAccounts.push(accountName);
-          renderCOALists();
-          populateCOADropdowns();
-          newAccountInput.value = "";
-        }
-      }
-    });
-    
-    addBankBtn.addEventListener("click", async () => {
-      const bankName = newBankInput.value.trim();
-      if (bankName && !coaBanks.includes(bankName)) {
-        const success = await addAccountToCOA(bankName, "bank");
-        if (success) {
-          coaBanks.push(bankName);
-          renderCOALists();
-          populateCOADropdowns();
-          newBankInput.value = "";
-        }
-      }
-    });
-    
+
     // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
       try {
@@ -610,7 +536,7 @@
         // Get account headers from chartOfAccounts collection
         const accountsQuery = query(
           collection(db, "chartOfAccounts"), 
-          where("type", "==", "account"),
+          where("type", "in", ["Asset", "Liability", "Equity", "Income", "Expense", "COGS", "OtherIncome", "OtherExpense"]),
           where("userId", "==", currentUser.uid)
         );
         const accountsSnapshot = await getDocs(accountsQuery);
@@ -619,16 +545,19 @@
         // Get bank accounts from chartOfAccounts collection
         const banksQuery = query(
           collection(db, "chartOfAccounts"), 
-          where("type", "==", "bank"),
+          where("category", "in", ["Bank", "Cash"]),
           where("userId", "==", currentUser.uid)
         );
         const banksSnapshot = await getDocs(banksQuery);
         coaBanks = banksSnapshot.docs.map(doc => doc.data().name);
         
-        // If no accounts found, set default accounts and save to COA
-        if (coaAccounts.length === 0 && coaBanks.length === 0) {
-          setDefaultAccounts();
-          await saveDefaultCOAData();
+        // If no accounts found, set default accounts
+        if (coaAccounts.length === 0) {
+          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM"];
+        }
+        
+        if (coaBanks.length === 0) {
+          coaBanks = ["AXIS", "BOM"];
         }
         
         // Populate the dropdowns
@@ -637,162 +566,11 @@
       } catch (error) {
         console.warn('Error loading COA data:', error.message);
         // Use default accounts if COA is not available
-        setDefaultAccounts();
+        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM"];
+        coaBanks = ["AXIS", "BOM"];
         populateCOADropdowns();
       }
     }
-    
-    // Save default COA data to the chartOfAccounts collection
-    async function saveDefaultCOAData() {
-      try {
-        if (!currentUser) return;
-        
-        // Save default account headers
-        for (const account of coaAccounts) {
-          await addDoc(collection(db, "chartOfAccounts"), {
-            name: account,
-            type: "account",
-            userId: currentUser.uid,
-            createdAt: new Date()
-          });
-        }
-        
-        // Save default bank accounts
-        for (const bank of coaBanks) {
-          await addDoc(collection(db, "chartOfAccounts"), {
-            name: bank,
-            type: "bank",
-            userId: currentUser.uid,
-            createdAt: new Date()
-          });
-        }
-      } catch (error) {
-        console.error("Error saving default COA data:", error);
-        Swal.fire("Error", "Failed to save default COA data.", "error");
-      }
-    }
-    
-    // Add a new account to the chartOfAccounts collection
-    async function addAccountToCOA(name, type) {
-      try {
-        await addDoc(collection(db, "chartOfAccounts"), {
-          name: name,
-          type: type,
-          userId: currentUser.uid,
-          createdAt: new Date()
-        });
-        return true;
-      } catch (error) {
-        console.error("Error adding to COA:", error);
-        Swal.fire("Error", "Failed to add to COA.", "error");
-        return false;
-      }
-    }
-    
-    // Delete an account from the chartOfAccounts collection
-    async function deleteAccountFromCOA(name, type) {
-      try {
-        const querySnapshot = await getDocs(
-          query(
-            collection(db, "chartOfAccounts"),
-            where("name", "==", name),
-            where("type", "==", type),
-            where("userId", "==", currentUser.uid)
-          )
-        );
-        
-        if (!querySnapshot.empty) {
-          const docId = querySnapshot.docs[0].id;
-          await deleteDoc(doc(db, "chartOfAccounts", docId));
-          return true;
-        }
-        return false;
-      } catch (error) {
-        console.error("Error deleting from COA:", error);
-        Swal.fire("Error", "Failed to delete from COA.", "error");
-        return false;
-      }
-    }
-    
-    // Get all documents from chartOfAccounts for the current user
-    async function getCOADocuments() {
-      try {
-        const querySnapshot = await getDocs(
-          query(
-            collection(db, "chartOfAccounts"),
-            where("userId", "==", currentUser.uid)
-          )
-        );
-        return querySnapshot.docs;
-      } catch (error) {
-        console.error("Error getting COA documents:", error);
-        return [];
-      }
-    }
-    
-    // Update the renderCOALists function to work with COA documents
-    async function renderCOALists() {
-      // Get all COA documents for the current user
-      const coaDocs = await getCOADocuments();
-      
-      // Filter accounts and banks
-      coaAccounts = coaDocs
-        .filter(doc => doc.data().type === "account")
-        .map(doc => doc.data().name);
-      
-      coaBanks = coaDocs
-        .filter(doc => doc.data().type === "bank")
-        .map(doc => doc.data().name);
-      
-      // Render accounts list
-      accountsList.innerHTML = "";
-      coaAccounts.forEach((account) => {
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.innerHTML = `
-          ${escapeHtml(account)}
-          <button class="btn btn-sm btn-danger" data-name="${account}" data-type="account">
-            <i class="fa fa-trash"></i>
-          </button>
-        `;
-        accountsList.appendChild(li);
-      });
-      
-      // Render banks list
-      banksList.innerHTML = "";
-      coaBanks.forEach((bank) => {
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.innerHTML = `
-          ${escapeHtml(bank)}
-          <button class="btn btn-sm btn-danger" data-name="${bank}" data-type="bank">
-            <i class="fa fa-trash"></i>
-          </button>
-        `;
-        banksList.appendChild(li);
-      });
-      
-      // Add event listeners to delete buttons
-      document.querySelectorAll("#accountsList button, #banksList button").forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          const name = e.currentTarget.dataset.name;
-          const type = e.currentTarget.dataset.type;
-          
-          const success = await deleteAccountFromCOA(name, type);
-          if (success) {
-            if (type === "account") {
-              coaAccounts = coaAccounts.filter(acc => acc !== name);
-            } else {
-              coaBanks = coaBanks.filter(bank => bank !== name);
-            }
-            
-            renderCOALists();
-            populateCOADropdowns();
-          }
-        });
-      });
-    }
-
     
     function populateCOADropdowns() {
       // Clear existing options (except the first one)
