@@ -112,6 +112,35 @@
     .filters .form-select, .filters .form-control { min-width:160px; }
 
     .small-muted { font-size:13px; color:var(--muted); }
+    
+    /* Bank balance section */
+    .bank-balances {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+    }
+    .bank-balance-item {
+      background: white;
+      padding: 10px 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      min-width: 180px;
+    }
+    .bank-balance-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .bank-balance-value {
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .positive-balance { color: #0f7a3a; }
+    .negative-balance { color: #c92a2a; }
   </style>
 </head>
 <body>
@@ -155,14 +184,18 @@
           <div class="small-muted">This month</div>
         </div>
       </div>
-
-      <!-- info banner -->
+      
+      <!-- Bank balances section -->
       <div class="info-banner">
         <i class="fa fa-info-circle me-2"></i> Manage your transactions, view attachments, and track your finances in one place.
       </div>
-
-      <!-- content -->
+      
       <div class="content-body">
+        <!-- Bank balances -->
+        <div id="bankBalances" class="bank-balances">
+          <!-- Will be populated dynamically -->
+        </div>
+        
         <!-- filters -->
         <div class="filters mb-2">
           <select id="dateFilter" class="form-select form-select-sm">
@@ -389,6 +422,7 @@
 
     const transactionsTableBody = document.getElementById("transactionsTableBody");
     const paginationControls = document.getElementById("paginationControls");
+    const bankBalancesContainer = document.getElementById("bankBalances");
 
     // Modal refs
     const transactionModalEl = document.getElementById("transactionModal");
@@ -588,10 +622,78 @@
         currentPage = 1;
         buildTable();
         updateStats();
+        updateBankBalances();
       } catch (err) {
         console.error("loadTransactions", err);
         transactionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
+    }
+
+    // Calculate bank balances
+    function calculateBankBalances() {
+      const bankBalances = {};
+      
+      // Initialize all known banks with 0 balance
+      coaBanks.forEach(bank => {
+        bankBalances[bank] = 0;
+      });
+      
+      // Calculate balances based on transactions
+      allTransactions.forEach(tx => {
+        const bankName = tx.BANK_NAME || tx.MODE || "";
+        if (bankName && coaBanks.includes(bankName)) {
+          const income = parseFloat(tx.INCOME) || 0;
+          const expense = parseFloat(tx.EXPENSE) || 0;
+          bankBalances[bankName] += (income - expense);
+        }
+      });
+      
+      return bankBalances;
+    }
+    
+    // Update bank balances display
+    function updateBankBalances() {
+      const bankBalances = calculateBankBalances();
+      
+      bankBalancesContainer.innerHTML = "";
+      
+      // Add a section for cash if it exists in transactions
+      let hasCash = false;
+      allTransactions.forEach(tx => {
+        if ((tx.BANK_NAME === "Cash" || tx.MODE === "Cash") && !coaBanks.includes("Cash")) {
+          hasCash = true;
+        }
+      });
+      
+      if (hasCash) {
+        let cashBalance = 0;
+        allTransactions.forEach(tx => {
+          if (tx.BANK_NAME === "Cash" || tx.MODE === "Cash") {
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            cashBalance += (income - expense);
+          }
+        });
+        
+        const cashItem = document.createElement("div");
+        cashItem.className = "bank-balance-item";
+        cashItem.innerHTML = `
+          <div class="bank-balance-name">Cash</div>
+          <div class="bank-balance-value ${cashBalance >= 0 ? 'positive-balance' : 'negative-balance'}">$${cashBalance.toFixed(2)}</div>
+        `;
+        bankBalancesContainer.appendChild(cashItem);
+      }
+      
+      // Add bank balances
+      Object.entries(bankBalances).forEach(([bankName, balance]) => {
+        const bankItem = document.createElement("div");
+        bankItem.className = "bank-balance-item";
+        bankItem.innerHTML = `
+          <div class="bank-balance-name">${escapeHtml(bankName)}</div>
+          <div class="bank-balance-value ${balance >= 0 ? 'positive-balance' : 'negative-balance'}">$${balance.toFixed(2)}</div>
+        `;
+        bankBalancesContainer.appendChild(bankItem);
+      });
     }
 
     // filters
