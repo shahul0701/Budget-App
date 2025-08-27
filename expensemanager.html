@@ -165,6 +165,14 @@
       gap: 10px;
       margin-bottom: 20px;
     }
+    
+    /* COA management section */
+    .coa-management {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
@@ -177,6 +185,9 @@
       <button id="homeBtn" class="btn btn-outline-secondary">
         <i class="fa fa-home me-1"></i> Home
       </button>
+      <button id="manageCOABtn" class="btn btn-outline-info">
+        <i class="fa fa-chart-pie me-1"></i> Manage COA
+      </button>
     </div>
     
     <div class="app-card">
@@ -184,7 +195,6 @@
       <div class="tm-header">
         <h2><i class="fa fa-money-bill-wave"></i> Transaction Manager</h2>
         <div class="header-actions">
-          <!-- Removed the filters button from header -->
           <button id="newTxBtn" class="btn btn-light btn-sm text-primary"><i class="fa fa-plus me-1"></i> New Transaction</button>
           <div style="width:1px;height:36px;background:rgba(255,255,255,0.12); margin-left:8px;"></div>
           <div style="display:flex;align-items:center; gap:10px; margin-left:8px;">
@@ -229,6 +239,32 @@
       </div>
       
       <div class="content-body">
+        <!-- COA management section (initially hidden) -->
+        <div id="coaManagement" class="coa-management" style="display: none;">
+          <h4><i class="fa fa-chart-pie me-2"></i>Chart of Accounts Management</h4>
+          <div class="row mt-3">
+            <div class="col-md-6">
+              <h5>Account Headers</h5>
+              <div class="d-flex mb-2">
+                <input id="newAccountInput" type="text" class="form-control form-control-sm me-2" placeholder="New account header">
+                <button id="addAccountBtn" class="btn btn-sm btn-primary">Add</button>
+              </div>
+              <ul id="accountsList" class="list-group"></ul>
+            </div>
+            <div class="col-md-6">
+              <h5>Bank Accounts</h5>
+              <div class="d-flex mb-2">
+                <input id="newBankInput" type="text" class="form-control form-control-sm me-2" placeholder="New bank account">
+                <button id="addBankBtn" class="btn btn-sm btn-primary">Add</button>
+              </div>
+              <ul id="banksList" class="list-group"></ul>
+            </div>
+          </div>
+          <div class="mt-3 text-end">
+            <button id="closeCOABtn" class="btn btn-sm btn-secondary">Close</button>
+          </div>
+        </div>
+        
         <!-- Bank balances -->
         <div id="bankBalances" class="bank-balances">
           <!-- Will be populated dynamically -->
@@ -421,7 +457,7 @@
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-    // ---------- CONFIG (use your project keys) ----------
+    // Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
       authDomain: "budget-app-1365f.firebaseapp.com",
@@ -431,16 +467,10 @@
       appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
       measurementId: "G-YFFJL2H54X"
     };
-    // ----------------------------------------------------
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
-
-    // Cloudinary config (update if you use other account)
-    const CLOUDINARY_UPLOAD_PRESET = "my_app_uploads";
-    const CLOUDINARY_CLOUD_NAME = "dpwdsyvz8";
-    const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`;
 
     // DOM refs
     const usernameElem = document.getElementById("username");
@@ -451,7 +481,17 @@
     const balanceToggle = document.getElementById("balanceToggle");
     const backBtn = document.getElementById("backBtn");
     const homeBtn = document.getElementById("homeBtn");
+    const manageCOABtn = document.getElementById("manageCOABtn");
+    const closeCOABtn = document.getElementById("closeCOABtn");
+    const coaManagement = document.getElementById("coaManagement");
+    const addAccountBtn = document.getElementById("addAccountBtn");
+    const newAccountInput = document.getElementById("newAccountInput");
+    const accountsList = document.getElementById("accountsList");
+    const addBankBtn = document.getElementById("addBankBtn");
+    const newBankInput = document.getElementById("newBankInput");
+    const banksList = document.getElementById("banksList");
 
+    // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
     const startDateInput = document.getElementById("startDate");
     const endDateInput = document.getElementById("endDate");
@@ -460,7 +500,6 @@
     const searchDesc = document.getElementById("searchDesc");
     const applyFiltersBtn = document.getElementById("applyFiltersBtn");
     const resetFiltersBtn = document.getElementById("resetFiltersBtn");
-
     const transactionsTableBody = document.getElementById("transactionsTableBody");
     const paginationControls = document.getElementById("paginationControls");
     const bankBalancesContainer = document.getElementById("bankBalances");
@@ -526,6 +565,86 @@
     homeBtn.addEventListener("click", () => {
       window.location.href = "index.html";
     });
+    
+    // COA management
+    manageCOABtn.addEventListener("click", () => {
+      coaManagement.style.display = "block";
+      renderCOALists();
+    });
+    
+    closeCOABtn.addEventListener("click", () => {
+      coaManagement.style.display = "none";
+    });
+    
+    addAccountBtn.addEventListener("click", async () => {
+      const accountName = newAccountInput.value.trim();
+      if (accountName && !coaAccounts.includes(accountName)) {
+        coaAccounts.push(accountName);
+        await saveCOAData();
+        renderCOALists();
+        populateCOADropdowns();
+        newAccountInput.value = "";
+      }
+    });
+    
+    addBankBtn.addEventListener("click", async () => {
+      const bankName = newBankInput.value.trim();
+      if (bankName && !coaBanks.includes(bankName)) {
+        coaBanks.push(bankName);
+        await saveCOAData();
+        renderCOALists();
+        populateCOADropdowns();
+        newBankInput.value = "";
+      }
+    });
+    
+    function renderCOALists() {
+      // Render accounts list
+      accountsList.innerHTML = "";
+      coaAccounts.forEach((account, index) => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          ${escapeHtml(account)}
+          <button class="btn btn-sm btn-danger" data-index="${index}" data-type="account">
+            <i class="fa fa-trash"></i>
+          </button>
+        `;
+        accountsList.appendChild(li);
+      });
+      
+      // Render banks list
+      banksList.innerHTML = "";
+      coaBanks.forEach((bank, index) => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          ${escapeHtml(bank)}
+          <button class="btn btn-sm btn-danger" data-index="${index}" data-type="bank">
+            <i class="fa fa-trash"></i>
+          </button>
+        `;
+        banksList.appendChild(li);
+      });
+      
+      // Add event listeners to delete buttons
+      document.querySelectorAll("#accountsList button, #banksList button").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const index = parseInt(e.currentTarget.dataset.index);
+          const type = e.currentTarget.dataset.type;
+          
+          if (type === "account") {
+            coaAccounts.splice(index, 1);
+          } else {
+            coaBanks.splice(index, 1);
+          }
+          
+          await saveCOAData();
+          renderCOALists();
+          populateCOADropdowns();
+        });
+      });
+    }
 
     // Load COA data from user-specific COA in Firestore
     async function loadCOAData() {
@@ -545,10 +664,7 @@
           setDefaultAccounts();
           
           // Save default accounts to user's COA
-          await setDoc(coaDocRef, {
-            accounts: coaAccounts,
-            banks: coaBanks
-          });
+          await saveCOAData();
         }
         
         // Populate the dropdowns
@@ -562,22 +678,22 @@
       }
     }
     
-    function setDefaultAccounts() {
-      // Default account headers based on the provided image
-      coaAccounts = [
-        "Rent",
-        "AXIS",
-        "Amount Tally",
-        "Meals & Entertainment",
-        "BOM"
-      ];
-      
-      // Default bank accounts
-      coaBanks = [
-        "AXIS",
-        "BOM"
-      ];
+    async function saveCOAData() {
+      try {
+        if (!currentUser) return;
+        
+        const coaDocRef = doc(db, "users", currentUser.uid, "coa", "data");
+        await setDoc(coaDocRef, {
+          accounts: coaAccounts,
+          banks: coaBanks,
+          userId: currentUser.uid
+        });
+      } catch (error) {
+        console.error("Error saving COA data:", error);
+        Swal.fire("Error", "Failed to save COA data.", "error");
+      }
     }
+    
     
     function populateCOADropdowns() {
       // Clear existing options (except the first one)
@@ -1107,17 +1223,6 @@
       statBalance.textContent = `$${(balance||0).toFixed(2)}`;
       statCount.textContent = `${allTransactions.length}`;
     }
-
-    // initial DOM events
-    document.getElementById("filtersBtn").addEventListener("click", ()=> {
-      Swal.fire({
-        title: 'Filters',
-        html: document.querySelector('.filters').outerHTML,
-        showCloseButton: true,
-        showConfirmButton: false,
-        width: 600
-      });
-    });
 
   </script>
 
