@@ -165,6 +165,16 @@
       gap: 10px;
       margin-bottom: 20px;
     }
+    
+    /* Attachment preview */
+    .attachment-preview {
+      max-width: 100%;
+      max-height: 150px;
+      margin-top: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -273,6 +283,7 @@
                 <th>Description</th>
                 <th style="width:120px;">Type</th>
                 <th style="width:110px;">Voucher #</th>
+                <th style="width:120px;">Bank Name</th>
                 <th style="width:120px; text-align:right;">Income</th>
                 <th style="width:120px; text-align:right;">Expense</th>
                 <th style="width:120px; text-align:right;">Balance</th>
@@ -281,7 +292,7 @@
               </tr>
             </thead>
             <tbody id="transactionsTableBody">
-              <tr><td colspan="9" class="text-center text-muted py-4">No transactions loaded.</td></tr>
+              <tr><td colspan="10" class="text-center text-muted py-4">No transactions loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -371,7 +382,8 @@
                 <label class="form-label">Attachment</label>
                 <input id="formATTACHFILE" type="file" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,image/*" />
                 <input id="formATTACH" type="hidden" />
-                <img id="attachmentPreview" class="attachment-preview" style="display:none; max-width:100%; margin-top:8px;" alt="Preview" />
+                <img id="attachmentPreview" class="attachment-preview" alt="Preview" />
+                <div id="attachmentInfo" class="small-muted mt-1"></div>
               </div>
             </div>
           </form>
@@ -480,6 +492,7 @@
     const formATTACHFILE = document.getElementById("formATTACHFILE");
     const formATTACH = document.getElementById("formATTACH");
     const attachmentPreview = document.getElementById("attachmentPreview");
+    const attachmentInfo = document.getElementById("attachmentInfo");
     const saveTransactionBtn = document.getElementById("saveTransactionBtn");
 
     const attachmentModalEl = document.getElementById("attachmentModal");
@@ -647,7 +660,7 @@
     // load transactions
     async function loadTransactions(){
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
         const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
         const snap = await getDocs(q);
         const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -659,7 +672,7 @@
         updateBankBalances();
       } catch (err) {
         console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
     }
 
@@ -840,7 +853,7 @@
 
       transactionsTableBody.innerHTML = "";
       if (pageItems.length === 0) {
-        transactionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center py-4 small-muted">No transactions found.</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">No transactions found.</td></tr>`;
         renderPagination(totalPages);
         return;
       }
@@ -855,15 +868,28 @@
 
         let attachmentHtml = `<span class="small-muted">None</span>`;
         if (tx.ATTACHMENT && typeof tx.ATTACHMENT === "string" && tx.ATTACHMENT.startsWith("http")) {
-          const parts = tx.ATTACHMENT.split("/"); const fname = parts[parts.length-1] || "file";
+          const parts = tx.ATTACHMENT.split("/"); 
+          const fname = parts[parts.length-1] || "file";
           const short = fname.length>18 ? fname.slice(0,15)+"..." : fname;
-          attachmentHtml = `<div class="d-flex flex-column">
-                              <div class="d-flex gap-1">
-                                <button class="action-btn btn-view btn-sm" data-url="${escapeHtml(tx.ATTACHMENT)}" title="View"><i class="fa fa-eye"></i></button>
-                                <a class="action-btn btn-sm btn-primary" href="${escapeHtml(tx.ATTACHMENT)}" download="${escapeHtml(fname)}" title="Download"><i class="fa fa-download"></i></a>
-                              </div>
-                              <small class="small-muted mt-1">${escapeHtml(short)}</small>
-                            </div>`;
+          
+          // Check if it's an image or other file type
+          const isImage = fname.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+          
+          if (isImage) {
+            attachmentHtml = `<div class="d-flex flex-column">
+                                <div class="d-flex gap-1">
+                                  <button class="action-btn btn-view btn-sm" data-url="${escapeHtml(tx.ATTACHMENT)}" title="View"><i class="fa fa-eye"></i></button>
+                                  <a class="action-btn btn-sm btn-primary" href="${escapeHtml(tx.ATTACHMENT)}" download="${escapeHtml(fname)}" title="Download"><i class="fa fa-download"></i></a>
+                                </div>
+                                <small class="small-muted mt-1">${escapeHtml(short)}</small>
+                              </div>`;
+          } else {
+            attachmentHtml = `<div class="d-flex flex-column">
+                                <a class="btn btn-sm btn-primary" href="${escapeHtml(tx.ATTACHMENT)}" download="${escapeHtml(fname)}" title="Download">
+                                  <i class="fa fa-download me-1"></i> ${escapeHtml(short)}
+                                </a>
+                              </div>`;
+          }
         }
 
         const tr = document.createElement("tr");
@@ -872,12 +898,13 @@
           <td>${escapeHtml(tx.ACCOUNT_HEADER || tx.DESCRIPTION || tx.PARTICULAR || "")}</td>
           <td>${escapeHtml(tx.TYPE || "")}</td>
           <td>${escapeHtml(tx.SINO || tx.VOUCHERNO || "")}</td>
+          <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
           <td style="text-align:right;">${incomeHtml}</td>
           <td style="text-align:right;">${expenseHtml}</td>
           <td style="text-align:right;">${escapeHtml(balanceVal)}</td>
           <td>${attachmentHtml}</td>
           <td>
-            <button class="action-btn btn-view me-1" data-url="${escapeHtml(tx.ATTACHMENT || "")}" title="View attach"><i class="fa fa-eye"></i></button>
+            <button class="action-btn btn-view me-1" data-url="${escapeHtml(tx.ATTACHMENT || "")}" data-filename="${escapeHtml(tx.ATTACHMENT?.split('/').pop() || "")}" title="View attach"><i class="fa fa-eye"></i></button>
             <button class="action-btn btn-edit me-1" data-id="${tx.id}" title="Edit"><i class="fa fa-edit"></i></button>
             <button class="action-btn btn-del" data-id="${tx.id}" title="Delete"><i class="fa fa-trash"></i></button>
           </td>
@@ -889,8 +916,12 @@
       document.querySelectorAll(".action-btn.btn-view").forEach(b => {
         b.addEventListener("click", (e) => {
           const url = e.currentTarget.dataset.url;
-          if (!url) { Swal.fire("No attachment", "This transaction has no attachment.", "info"); return; }
-          openAttachmentViewer(url);
+          const filename = e.currentTarget.dataset.filename;
+          if (!url) { 
+            Swal.fire("No attachment", "This transaction has no attachment.", "info"); 
+            return; 
+          }
+          openAttachmentViewer(url, filename);
         });
       });
 
@@ -937,6 +968,7 @@
       formATTACH.value = "";
       attachmentPreview.style.display = "none";
       attachmentPreview.src = "";
+      attachmentInfo.textContent = "";
 
       // default date and auto SINO
       const now = new Date();
@@ -964,12 +996,20 @@
       formBALANCE.value = tx.BALANCE || "";
       formNOTES.value = tx.DESCRIPTION || tx.NOTES || "";
       formATTACH.value = tx.ATTACHMENT || "";
+      
       if (formATTACH.value && formATTACH.value.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
         attachmentPreview.src = formATTACH.value;
         attachmentPreview.style.display = "block";
+        attachmentInfo.textContent = "Image preview";
+      } else if (formATTACH.value) {
+        attachmentPreview.style.display = "none";
+        const filename = formATTACH.value.split('/').pop();
+        attachmentInfo.textContent = `File: ${filename}`;
       } else {
         attachmentPreview.style.display = "none";
+        attachmentInfo.textContent = "";
       }
+      
       document.getElementById("transactionModalLabel").innerText = "Edit Transaction";
       transactionModal.show();
     }
@@ -994,15 +1034,41 @@
     });
 
     // open attachment viewer
-    function openAttachmentViewer(url){
+    function openAttachmentViewer(url, filename){
       attachmentModalBody.innerHTML = "";
       const lower = url.toLowerCase();
+      
       if (lower.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
-        attachmentModalBody.innerHTML = `<img src="${escapeHtml(url)}" class="img-fluid" alt="Attachment">`;
+        // For images, show the image
+        attachmentModalBody.innerHTML = `
+          <img src="${escapeHtml(url)}" class="img-fluid" alt="Attachment">
+          <div class="mt-3">
+            <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn btn-primary">
+              <i class="fa fa-download me-1"></i> Download Image
+            </a>
+          </div>
+        `;
       } else if (lower.match(/\.pdf$/)) {
-        attachmentModalBody.innerHTML = `<iframe src="${escapeHtml(url)}" style="width:100%;height:70vh;border:none;"></iframe>`;
+        // For PDFs, show download link and iframe
+        attachmentModalBody.innerHTML = `
+          <iframe src="${escapeHtml(url)}" style="width:100%;height:70vh;border:none;"></iframe>
+          <div class="mt-3">
+            <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn btn-primary">
+              <i class="fa fa-download me-1"></i> Download PDF
+            </a>
+          </div>
+        `;
       } else {
-        attachmentModalBody.innerHTML = `<p><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open attachment</a></p>`;
+        // For other file types, show download link
+        attachmentModalBody.innerHTML = `
+          <div class="p-4 text-center">
+            <i class="fa fa-file fa-3x mb-3"></i>
+            <p>This file cannot be previewed in the browser.</p>
+            <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn btn-primary">
+              <i class="fa fa-download me-1"></i> Download File
+            </a>
+          </div>
+        `;
       }
       attachmentModal.show();
     }
@@ -1013,17 +1079,31 @@
       if (!file) return;
 
       // validations
-      if (file.size > 10 * 1024 * 1024) { Swal.fire("File too large", "Max 10MB allowed", "warning"); this.value = ""; return; }
+      if (file.size > 10 * 1024 * 1024) { 
+        Swal.fire("File too large", "Max 10MB allowed", "warning"); 
+        this.value = ""; 
+        return; 
+      }
+      
       const allowed = ["application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","image/jpeg","image/png","image/gif","image/webp","text/plain"];
-      if (!allowed.includes(file.type)) { Swal.fire("Invalid file", "Only documents and images allowed.", "warning"); this.value = ""; return; }
+      if (!allowed.includes(file.type)) { 
+        Swal.fire("Invalid file", "Only documents and images allowed.", "warning"); 
+        this.value = ""; 
+        return; 
+      }
 
       // preview if image
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
-        reader.onload = e => { attachmentPreview.src = e.target.result; attachmentPreview.style.display = "block"; };
+        reader.onload = e => { 
+          attachmentPreview.src = e.target.result; 
+          attachmentPreview.style.display = "block";
+          attachmentInfo.textContent = "Image preview";
+        };
         reader.readAsDataURL(file);
       } else {
         attachmentPreview.style.display = "none";
+        attachmentInfo.textContent = `File: ${file.name}`;
       }
 
       try {
