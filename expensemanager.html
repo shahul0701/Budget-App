@@ -241,8 +241,11 @@
                 <input id="formSINO" type="text" class="form-control" />
               </div>
               <div class="col-md-6">
-                <label class="form-label">Description / Account Header</label>
-                <input id="formDESC" type="text" class="form-control" />
+                <label class="form-label">Account Header</label>
+                <select id="formACCOUNTHEADER" class="form-select">
+                  <option value="">Select Account Header</option>
+                  <!-- Will be populated from COA -->
+                </select>
               </div>
             </div>
 
@@ -263,11 +266,10 @@
                 </select>
               </div>
               <div class="col-md-4">
-                <label class="form-label">Mode</label>
-                <select id="formMODE" class="form-select">
-                  <option>Cash</option>
-                  <option>Bank</option>
-                  <option>Transfer</option>
+                <label class="form-label">Bank Name</label>
+                <select id="formBANKNAME" class="form-select">
+                  <option value="">Select Bank</option>
+                  <!-- Will be populated from COA -->
                 </select>
               </div>
             </div>
@@ -395,10 +397,10 @@
     const txIdInput = document.getElementById("txId");
     const formDATE = document.getElementById("formDATE");
     const formSINO = document.getElementById("formSINO");
-    const formDESC = document.getElementById("formDESC");
+    const formACCOUNTHEADER = document.getElementById("formACCOUNTHEADER");
     const formVOUCHERTYPE = document.getElementById("formVOUCHERTYPE");
     const formTYPE = document.getElementById("formTYPE");
-    const formMODE = document.getElementById("formMODE");
+    const formBANKNAME = document.getElementById("formBANKNAME");
     const formINCOME = document.getElementById("formINCOME");
     const formEXPENSE = document.getElementById("formEXPENSE");
     const formBALANCE = document.getElementById("formBALANCE");
@@ -430,10 +432,104 @@
     let currentPage = 1;
     const rowsPerPage = 5;
     let txToDelete = null;
+    
+    // COA data
+    let coaAccounts = [];
+    let coaBanks = [];
 
     function escapeHtml(s){
       if (s === null || s === undefined) return "";
       return String(s).replace(/[&<>"']/g, m=> ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);
+    }
+
+    // Load COA data from COA.html
+    async function loadCOAData() {
+      try {
+        // Try to fetch the COA.html file
+        const response = await fetch('COA.html');
+        if (!response.ok) {
+          throw new Error('COA.html not found, using default accounts');
+        }
+        
+        const htmlContent = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlContent, 'text/html');
+        
+        // Extract account data from the table
+        const rows = doc.querySelectorAll('table tr');
+        
+        // Skip the header row and process each data row
+        for (let i = 1; i < rows.length; i++) {
+          const cells = rows[i].querySelectorAll('td');
+          if (cells.length >= 3) {
+            const type = cells[0].textContent.trim();
+            const category = cells[1].textContent.trim();
+            const accountName = cells[2].textContent.trim();
+            
+            // Add to accounts list
+            coaAccounts.push(accountName);
+            
+            // If it's a bank account, add to banks list
+            if (type === 'Asset' && category === 'Bank') {
+              coaBanks.push(accountName);
+            }
+          }
+        }
+        
+        // Remove duplicates and sort
+        coaAccounts = [...new Set(coaAccounts)].sort();
+        coaBanks = [...new Set(coaBanks)].sort();
+        
+        // Populate the dropdowns
+        populateCOADropdowns();
+        
+      } catch (error) {
+        console.warn('Error loading COA data:', error.message);
+        // Use default accounts if COA.html is not available
+        setDefaultAccounts();
+      }
+    }
+    
+    function setDefaultAccounts() {
+      // Default account headers based on the provided image
+      coaAccounts = [
+        "Rent",
+        "AXIS",
+        "Amount Tally",
+        "Meals & Entertainment",
+        "BOM"
+      ];
+      
+      // Default bank accounts
+      coaBanks = [
+        "AXIS",
+        "BOM"
+      ];
+      
+      // Populate the dropdowns
+      populateCOADropdowns();
+    }
+    
+    function populateCOADropdowns() {
+      // Clear existing options (except the first one)
+      formACCOUNTHEADER.innerHTML = '<option value="">Select Account Header</option>';
+      formBANKNAME.innerHTML = '<option value="">Select Bank</option>';
+      
+      // Add account headers
+      coaAccounts.forEach(account => {
+        const option = document.createElement('option');
+        option.value = account;
+        option.textContent = account;
+        formACCOUNTHEADER.appendChild(option);
+      });
+      
+      // Add bank names
+      coaBanks.forEach(bank => {
+        const option = document.createElement('option');
+        option.value = bank;
+        option.textContent = bank;
+        formBANKNAME.appendChild(option);
+      });
     }
 
     // Auth handling
@@ -443,6 +539,9 @@
         const name = user.displayName || user.email || "User";
         usernameElem.textContent = name;
         initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
+        
+        // Load COA data first, then transactions
+        await loadCOAData();
         await loadTransactions();
       } else {
         // not logged in
@@ -549,7 +648,7 @@
 
       if (searchDesc.value.trim()) {
         const s = searchDesc.value.trim().toLowerCase();
-        filteredTransactions = filteredTransactions.filter(t => ((t.DESCRIPTION || t.ACCOUNT_HEADER || "").toLowerCase().includes(s) || (t.SINO||"").toLowerCase().includes(s)));
+        filteredTransactions = filteredTransactions.filter(t => ((t.ACCOUNT_HEADER || t.DESCRIPTION || "").toLowerCase().includes(s) || (t.SINO||"").toLowerCase().includes(s)));
       }
 
       currentPage = 1;
@@ -682,10 +781,10 @@
       txIdInput.value = id;
       formDATE.value = tx.DATE || "";
       formSINO.value = tx.SINO || tx.VOUCHERNO || "";
-      formDESC.value = tx.ACCOUNT_HEADER || tx.DESCRIPTION || tx.PARTICULAR || "";
+      formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
       formVOUCHERTYPE.value = tx.VOUCHER_TYPE || tx.VOUCHERTYPE || "Payment";
       formTYPE.value = tx.TYPE || ((parseFloat(tx.INCOME)||0)>0 ? "Income":"Expense");
-      formMODE.value = tx.MODE || "Cash";
+      formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
       formINCOME.value = tx.INCOME || "";
       formEXPENSE.value = tx.EXPENSE || "";
       formBALANCE.value = tx.BALANCE || "";
@@ -781,11 +880,12 @@
           DATE: formDATE.value,
           SINO: formSINO.value || "",
           VOUCHERNO: formSINO.value || "",
-          ACCOUNT_HEADER: formDESC.value || "",
-          PARTICULAR: formDESC.value || "",
+          ACCOUNT_HEADER: formACCOUNTHEADER.value || "",
+          PARTICULAR: formACCOUNTHEADER.value || "",
           VOUCHER_TYPE: formVOUCHERTYPE.value || "",
           TYPE: formTYPE.value || "",
-          MODE: formMODE.value || "Cash",
+          BANK_NAME: formBANKNAME.value || "",
+          MODE: formBANKNAME.value || "Cash",
           INCOME: formINCOME.value ? parseFloat(formINCOME.value) : 0,
           EXPENSE: formEXPENSE.value ? parseFloat(formEXPENSE.value) : 0,
           BALANCE: formBALANCE.value ? parseFloat(formBALANCE.value) : 0,
@@ -827,8 +927,6 @@
       statCount.textContent = `${allTransactions.length}`;
     }
 
-    // small helpers: open edit on page load? none
-
     // initial DOM events
     document.getElementById("filtersBtn").addEventListener("click", ()=> {
       Swal.fire({
@@ -838,11 +936,6 @@
         showConfirmButton: false,
         width: 600
       });
-    });
-
-    // Utility to avoid errors if inputs not found
-    window.addEventListener("DOMContentLoaded", ()=> {
-      // nothing for now
     });
 
   </script>
