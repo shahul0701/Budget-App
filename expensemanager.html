@@ -453,7 +453,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc
+      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, where
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -579,92 +579,56 @@
     addAccountBtn.addEventListener("click", async () => {
       const accountName = newAccountInput.value.trim();
       if (accountName && !coaAccounts.includes(accountName)) {
-        coaAccounts.push(accountName);
-        await saveCOAData();
-        renderCOALists();
-        populateCOADropdowns();
-        newAccountInput.value = "";
+        const success = await addAccountToCOA(accountName, "account");
+        if (success) {
+          coaAccounts.push(accountName);
+          renderCOALists();
+          populateCOADropdowns();
+          newAccountInput.value = "";
+        }
       }
     });
     
     addBankBtn.addEventListener("click", async () => {
       const bankName = newBankInput.value.trim();
       if (bankName && !coaBanks.includes(bankName)) {
-        coaBanks.push(bankName);
-        await saveCOAData();
-        renderCOALists();
-        populateCOADropdowns();
-        newBankInput.value = "";
+        const success = await addAccountToCOA(bankName, "bank");
+        if (success) {
+          coaBanks.push(bankName);
+          renderCOALists();
+          populateCOADropdowns();
+          newBankInput.value = "";
+        }
       }
     });
     
-    function renderCOALists() {
-      // Render accounts list
-      accountsList.innerHTML = "";
-      coaAccounts.forEach((account, index) => {
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.innerHTML = `
-          ${escapeHtml(account)}
-          <button class="btn btn-sm btn-danger" data-index="${index}" data-type="account">
-            <i class="fa fa-trash"></i>
-          </button>
-        `;
-        accountsList.appendChild(li);
-      });
-      
-      // Render banks list
-      banksList.innerHTML = "";
-      coaBanks.forEach((bank, index) => {
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.innerHTML = `
-          ${escapeHtml(bank)}
-          <button class="btn btn-sm btn-danger" data-index="${index}" data-type="bank">
-            <i class="fa fa-trash"></i>
-          </button>
-        `;
-        banksList.appendChild(li);
-      });
-      
-      // Add event listeners to delete buttons
-      document.querySelectorAll("#accountsList button, #banksList button").forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          const index = parseInt(e.currentTarget.dataset.index);
-          const type = e.currentTarget.dataset.type;
-          
-          if (type === "account") {
-            coaAccounts.splice(index, 1);
-          } else {
-            coaBanks.splice(index, 1);
-          }
-          
-          await saveCOAData();
-          renderCOALists();
-          populateCOADropdowns();
-        });
-      });
-    }
-
-    // Load COA data from user-specific COA in Firestore
+    // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
       try {
         if (!currentUser) return;
         
-        // Try to get user-specific COA data from Firestore
-        const coaDocRef = doc(db, "users", currentUser.uid, "coa", "data");
-        const coaDoc = await getDoc(coaDocRef);
+        // Get account headers from chartOfAccounts collection
+        const accountsQuery = query(
+          collection(db, "chartOfAccounts"), 
+          where("type", "==", "account"),
+          where("userId", "==", currentUser.uid)
+        );
+        const accountsSnapshot = await getDocs(accountsQuery);
+        coaAccounts = accountsSnapshot.docs.map(doc => doc.data().name);
         
-        if (coaDoc.exists()) {
-          const coaData = coaDoc.data();
-          coaAccounts = coaData.accounts || [];
-          coaBanks = coaData.banks || [];
-        } else {
-          // If no user-specific COA exists, use default accounts
+        // Get bank accounts from chartOfAccounts collection
+        const banksQuery = query(
+          collection(db, "chartOfAccounts"), 
+          where("type", "==", "bank"),
+          where("userId", "==", currentUser.uid)
+        );
+        const banksSnapshot = await getDocs(banksQuery);
+        coaBanks = banksSnapshot.docs.map(doc => doc.data().name);
+        
+        // If no accounts found, set default accounts and save to COA
+        if (coaAccounts.length === 0 && coaBanks.length === 0) {
           setDefaultAccounts();
-          
-          // Save default accounts to user's COA
-          await saveCOAData();
+          await saveDefaultCOAData();
         }
         
         // Populate the dropdowns
@@ -678,22 +642,157 @@
       }
     }
     
-    async function saveCOAData() {
+    // Save default COA data to the chartOfAccounts collection
+    async function saveDefaultCOAData() {
       try {
         if (!currentUser) return;
         
-        const coaDocRef = doc(db, "users", currentUser.uid, "coa", "data");
-        await setDoc(coaDocRef, {
-          accounts: coaAccounts,
-          banks: coaBanks,
-          userId: currentUser.uid
-        });
+        // Save default account headers
+        for (const account of coaAccounts) {
+          await addDoc(collection(db, "chartOfAccounts"), {
+            name: account,
+            type: "account",
+            userId: currentUser.uid,
+            createdAt: new Date()
+          });
+        }
+        
+        // Save default bank accounts
+        for (const bank of coaBanks) {
+          await addDoc(collection(db, "chartOfAccounts"), {
+            name: bank,
+            type: "bank",
+            userId: currentUser.uid,
+            createdAt: new Date()
+          });
+        }
       } catch (error) {
-        console.error("Error saving COA data:", error);
-        Swal.fire("Error", "Failed to save COA data.", "error");
+        console.error("Error saving default COA data:", error);
+        Swal.fire("Error", "Failed to save default COA data.", "error");
       }
     }
     
+    // Add a new account to the chartOfAccounts collection
+    async function addAccountToCOA(name, type) {
+      try {
+        await addDoc(collection(db, "chartOfAccounts"), {
+          name: name,
+          type: type,
+          userId: currentUser.uid,
+          createdAt: new Date()
+        });
+        return true;
+      } catch (error) {
+        console.error("Error adding to COA:", error);
+        Swal.fire("Error", "Failed to add to COA.", "error");
+        return false;
+      }
+    }
+    
+    // Delete an account from the chartOfAccounts collection
+    async function deleteAccountFromCOA(name, type) {
+      try {
+        const querySnapshot = await getDocs(
+          query(
+            collection(db, "chartOfAccounts"),
+            where("name", "==", name),
+            where("type", "==", type),
+            where("userId", "==", currentUser.uid)
+          )
+        );
+        
+        if (!querySnapshot.empty) {
+          const docId = querySnapshot.docs[0].id;
+          await deleteDoc(doc(db, "chartOfAccounts", docId));
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("Error deleting from COA:", error);
+        Swal.fire("Error", "Failed to delete from COA.", "error");
+        return false;
+      }
+    }
+    
+    // Get all documents from chartOfAccounts for the current user
+    async function getCOADocuments() {
+      try {
+        const querySnapshot = await getDocs(
+          query(
+            collection(db, "chartOfAccounts"),
+            where("userId", "==", currentUser.uid)
+          )
+        );
+        return querySnapshot.docs;
+      } catch (error) {
+        console.error("Error getting COA documents:", error);
+        return [];
+      }
+    }
+    
+    // Update the renderCOALists function to work with COA documents
+    async function renderCOALists() {
+      // Get all COA documents for the current user
+      const coaDocs = await getCOADocuments();
+      
+      // Filter accounts and banks
+      coaAccounts = coaDocs
+        .filter(doc => doc.data().type === "account")
+        .map(doc => doc.data().name);
+      
+      coaBanks = coaDocs
+        .filter(doc => doc.data().type === "bank")
+        .map(doc => doc.data().name);
+      
+      // Render accounts list
+      accountsList.innerHTML = "";
+      coaAccounts.forEach((account) => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          ${escapeHtml(account)}
+          <button class="btn btn-sm btn-danger" data-name="${account}" data-type="account">
+            <i class="fa fa-trash"></i>
+          </button>
+        `;
+        accountsList.appendChild(li);
+      });
+      
+      // Render banks list
+      banksList.innerHTML = "";
+      coaBanks.forEach((bank) => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          ${escapeHtml(bank)}
+          <button class="btn btn-sm btn-danger" data-name="${bank}" data-type="bank">
+            <i class="fa fa-trash"></i>
+          </button>
+        `;
+        banksList.appendChild(li);
+      });
+      
+      // Add event listeners to delete buttons
+      document.querySelectorAll("#accountsList button, #banksList button").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const name = e.currentTarget.dataset.name;
+          const type = e.currentTarget.dataset.type;
+          
+          const success = await deleteAccountFromCOA(name, type);
+          if (success) {
+            if (type === "account") {
+              coaAccounts = coaAccounts.filter(acc => acc !== name);
+            } else {
+              coaBanks = coaBanks.filter(bank => bank !== name);
+            }
+            
+            renderCOALists();
+            populateCOADropdowns();
+          }
+        });
+      });
+    }
+
     
     function populateCOADropdowns() {
       // Clear existing options (except the first one)
@@ -1150,6 +1249,10 @@
       }
 
       try {
+        // Note: You'll need to set up your own Cloudinary account and replace these values
+        const CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/upload";
+        const CLOUDINARY_UPLOAD_PRESET = "YOUR_UPLOAD_PRESET";
+        
         const fd = new FormData();
         fd.append("file", file);
         fd.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
