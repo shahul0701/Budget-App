@@ -112,16 +112,79 @@
     .filters .form-select, .filters .form-control { min-width:160px; }
 
     .small-muted { font-size:13px; color:var(--muted); }
+    
+    /* Bank balance section */
+    .bank-balances {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+    }
+    .bank-balance-item {
+      background: white;
+      padding: 10px 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      min-width: 180px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .bank-balance-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .bank-balance-value {
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .positive-balance { color: #0f7a3a; }
+    .negative-balance { color: #c92a2a; }
+    
+    /* Balance visibility toggle */
+    .balance-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 16px;
+      margin-left: 8px;
+    }
+    .balance-hidden {
+      filter: blur(5px);
+      user-select: none;
+    }
+    
+    /* Navigation buttons */
+    .nav-buttons {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
   <div class="page">
+    <!-- Navigation buttons -->
+    <div class="nav-buttons">
+      <button id="backBtn" class="btn btn-outline-primary">
+        <i class="fa fa-arrow-left me-1"></i> Back
+      </button>
+      <button id="homeBtn" class="btn btn-outline-secondary">
+        <i class="fa fa-home me-1"></i> Home
+      </button>
+    </div>
+    
     <div class="app-card">
       <!-- header -->
       <div class="tm-header">
         <h2><i class="fa fa-money-bill-wave"></i> Transaction Manager</h2>
         <div class="header-actions">
-          <button id="filtersBtn" class="btn btn-outline-light btn-sm"><i class="fa fa-filter me-1"></i> Filters</button>
+          <!-- Removed the filters button from header -->
           <button id="newTxBtn" class="btn btn-light btn-sm text-primary"><i class="fa fa-plus me-1"></i> New Transaction</button>
           <div style="width:1px;height:36px;background:rgba(255,255,255,0.12); margin-left:8px;"></div>
           <div style="display:flex;align-items:center; gap:10px; margin-left:8px;">
@@ -147,7 +210,11 @@
         <div class="stat-card">
           <div class="stat-label">Current Balance</div>
           <div id="statBalance" class="stat-value">$0.00</div>
-          <div class="small-muted"><i class="fa fa-arrow-up text-success"></i> 0.0%</div>
+          <div class="small-muted">
+            <button id="balanceToggle" class="balance-toggle" title="Toggle balance visibility">
+              <i class="fa fa-eye"></i>
+            </button>
+          </div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Transactions</div>
@@ -155,14 +222,18 @@
           <div class="small-muted">This month</div>
         </div>
       </div>
-
-      <!-- info banner -->
+      
+      <!-- Bank balances section -->
       <div class="info-banner">
         <i class="fa fa-info-circle me-2"></i> Manage your transactions, view attachments, and track your finances in one place.
       </div>
-
-      <!-- content -->
+      
       <div class="content-body">
+        <!-- Bank balances -->
+        <div id="bankBalances" class="bank-balances">
+          <!-- Will be populated dynamically -->
+        </div>
+        
         <!-- filters -->
         <div class="filters mb-2">
           <select id="dateFilter" class="form-select form-select-sm">
@@ -346,7 +417,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy
+      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -377,6 +448,9 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const newTxBtn = document.getElementById("newTxBtn");
     const floatingAdd = document.getElementById("floatingAdd");
+    const balanceToggle = document.getElementById("balanceToggle");
+    const backBtn = document.getElementById("backBtn");
+    const homeBtn = document.getElementById("homeBtn");
 
     const dateFilter = document.getElementById("dateFilter");
     const startDateInput = document.getElementById("startDate");
@@ -389,6 +463,7 @@
 
     const transactionsTableBody = document.getElementById("transactionsTableBody");
     const paginationControls = document.getElementById("paginationControls");
+    const bankBalancesContainer = document.getElementById("bankBalances");
 
     // Modal refs
     const transactionModalEl = document.getElementById("transactionModal");
@@ -432,6 +507,7 @@
     let currentPage = 1;
     const rowsPerPage = 5;
     let txToDelete = null;
+    let balanceVisible = true;
     
     // COA data
     let coaAccounts = [];
@@ -442,51 +518,47 @@
       return String(s).replace(/[&<>"']/g, m=> ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);
     }
 
-    // Load COA data from COA.html
+    // Navigation button handlers
+    backBtn.addEventListener("click", () => {
+      window.history.back();
+    });
+    
+    homeBtn.addEventListener("click", () => {
+      window.location.href = "index.html";
+    });
+
+    // Load COA data from user-specific COA in Firestore
     async function loadCOAData() {
       try {
-        // Try to fetch the COA.html file
-        const response = await fetch('COA.html');
-        if (!response.ok) {
-          throw new Error('COA.html not found, using default accounts');
+        if (!currentUser) return;
+        
+        // Try to get user-specific COA data from Firestore
+        const coaDocRef = doc(db, "users", currentUser.uid, "coa", "data");
+        const coaDoc = await getDoc(coaDocRef);
+        
+        if (coaDoc.exists()) {
+          const coaData = coaDoc.data();
+          coaAccounts = coaData.accounts || [];
+          coaBanks = coaData.banks || [];
+        } else {
+          // If no user-specific COA exists, use default accounts
+          setDefaultAccounts();
+          
+          // Save default accounts to user's COA
+          await setDoc(coaDocRef, {
+            accounts: coaAccounts,
+            banks: coaBanks
+          });
         }
-        
-        const htmlContent = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlContent, 'text/html');
-        
-        // Extract account data from the table
-        const rows = doc.querySelectorAll('table tr');
-        
-        // Skip the header row and process each data row
-        for (let i = 1; i < rows.length; i++) {
-          const cells = rows[i].querySelectorAll('td');
-          if (cells.length >= 3) {
-            const type = cells[0].textContent.trim();
-            const category = cells[1].textContent.trim();
-            const accountName = cells[2].textContent.trim();
-            
-            // Add to accounts list
-            coaAccounts.push(accountName);
-            
-            // If it's a bank account, add to banks list
-            if (type === 'Asset' && category === 'Bank') {
-              coaBanks.push(accountName);
-            }
-          }
-        }
-        
-        // Remove duplicates and sort
-        coaAccounts = [...new Set(coaAccounts)].sort();
-        coaBanks = [...new Set(coaBanks)].sort();
         
         // Populate the dropdowns
         populateCOADropdowns();
         
       } catch (error) {
         console.warn('Error loading COA data:', error.message);
-        // Use default accounts if COA.html is not available
+        // Use default accounts if COA is not available
         setDefaultAccounts();
+        populateCOADropdowns();
       }
     }
     
@@ -505,9 +577,6 @@
         "AXIS",
         "BOM"
       ];
-      
-      // Populate the dropdowns
-      populateCOADropdowns();
     }
     
     function populateCOADropdowns() {
@@ -559,6 +628,12 @@
     // UI wiring
     newTxBtn.addEventListener("click", openAddModal);
     floatingAdd.addEventListener("click", openAddModal);
+    
+    // Balance visibility toggle
+    balanceToggle.addEventListener("click", () => {
+      balanceVisible = !balanceVisible;
+      updateBalanceVisibility();
+    });
 
     dateFilter.addEventListener("change", () => {
       if (dateFilter.value === "custom") customRangeControls.style.display = "flex";
@@ -588,10 +663,117 @@
         currentPage = 1;
         buildTable();
         updateStats();
+        updateBankBalances();
       } catch (err) {
         console.error("loadTransactions", err);
         transactionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
+    }
+
+    // Calculate bank balances
+    function calculateBankBalances() {
+      const bankBalances = {};
+      
+      // Initialize all known banks with 0 balance
+      coaBanks.forEach(bank => {
+        bankBalances[bank] = 0;
+      });
+      
+      // Calculate balances based on transactions
+      allTransactions.forEach(tx => {
+        const bankName = tx.BANK_NAME || tx.MODE || "";
+        if (bankName && coaBanks.includes(bankName)) {
+          const income = parseFloat(tx.INCOME) || 0;
+          const expense = parseFloat(tx.EXPENSE) || 0;
+          bankBalances[bankName] += (income - expense);
+        }
+      });
+      
+      return bankBalances;
+    }
+    
+    // Update bank balances display
+    function updateBankBalances() {
+      const bankBalances = calculateBankBalances();
+      
+      bankBalancesContainer.innerHTML = "";
+      
+      // Add a section for cash if it exists in transactions
+      let hasCash = false;
+      allTransactions.forEach(tx => {
+        if ((tx.BANK_NAME === "Cash" || tx.MODE === "Cash") && !coaBanks.includes("Cash")) {
+          hasCash = true;
+        }
+      });
+      
+      if (hasCash) {
+        let cashBalance = 0;
+        allTransactions.forEach(tx => {
+          if (tx.BANK_NAME === "Cash" || tx.MODE === "Cash") {
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            cashBalance += (income - expense);
+          }
+        });
+        
+        const cashItem = document.createElement("div");
+        cashItem.className = "bank-balance-item";
+        cashItem.innerHTML = `
+          <div class="bank-balance-name">Cash</div>
+          <div class="bank-balance-value ${cashBalance >= 0 ? 'positive-balance' : 'negative-balance'}">
+            ${balanceVisible ? `$${cashBalance.toFixed(2)}` : '••••'}
+          </div>
+          <button class="balance-toggle" title="Toggle balance visibility">
+            <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
+          </button>
+        `;
+        bankBalancesContainer.appendChild(cashItem);
+        
+        // Add event listener to the cash balance toggle
+        cashItem.querySelector('.balance-toggle').addEventListener('click', () => {
+          balanceVisible = !balanceVisible;
+          updateBalanceVisibility();
+        });
+      }
+      
+      // Add bank balances
+      Object.entries(bankBalances).forEach(([bankName, balance]) => {
+        const bankItem = document.createElement("div");
+        bankItem.className = "bank-balance-item";
+        bankItem.innerHTML = `
+          <div class="bank-balance-name">${escapeHtml(bankName)}</div>
+          <div class="bank-balance-value ${balance >= 0 ? 'positive-balance' : 'negative-balance'}">
+            ${balanceVisible ? `$${balance.toFixed(2)}` : '••••'}
+          </div>
+          <button class="balance-toggle" title="Toggle balance visibility">
+            <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
+          </button>
+        `;
+        bankBalancesContainer.appendChild(bankItem);
+        
+        // Add event listener to the bank balance toggle
+        bankItem.querySelector('.balance-toggle').addEventListener('click', () => {
+          balanceVisible = !balanceVisible;
+          updateBalanceVisibility();
+        });
+      });
+    }
+    
+    // Update balance visibility across the app
+    function updateBalanceVisibility() {
+      // Update main balance
+      const totalIncome = allTransactions.reduce((s,t)=> s + (parseFloat(t.INCOME)||0), 0);
+      const totalExpense = allTransactions.reduce((s,t)=> s + (parseFloat(t.EXPENSE)||0), 0);
+      const balance = totalIncome - totalExpense;
+      
+      statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
+      statBalance.classList.toggle('balance-hidden', !balanceVisible);
+      
+      // Update toggle button icon
+      balanceToggle.innerHTML = `<i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+      
+      // Update bank balances
+      updateBankBalances();
     }
 
     // filters
@@ -639,7 +821,6 @@
           break;
         }
       }
-
       if (typeFilter.value === "income") {
         filteredTransactions = filteredTransactions.filter(t => (parseFloat(t.INCOME) || 0) > 0);
       } else if (typeFilter.value === "expense") {
