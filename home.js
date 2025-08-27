@@ -323,6 +323,27 @@ chartOfAccountsBtn?.addEventListener("click", () => {
   window.location.href = "coa.html";
 });
 
-ExpenseTrackerBtn?.addEventListener("click", () => {
+// === Expense Tracker View Popup ===
+const expenseTrackerBtn = document.getElementById("ExpenseTrackerBtn");
+const expenseViewModal = document.getElementById("expenseViewModal");
+const closeExpenseView = document.getElementById("closeExpenseView");
+const classicViewBtn = document.getElementById("classicViewBtn");
+const compactViewBtn = document.getElementById("compactViewBtn");
+
+expenseTrackerBtn?.addEventListener("click", () => {
+  expenseViewModal.style.display = "flex"; // open popup
+});
+
+closeExpenseView?.addEventListener("click", () => {
+  expenseViewModal.style.display = "none";
+});
+
+// Navigation based on choice
+classicViewBtn?.addEventListener("click", () => {
   window.location.href = "exp.html";
 });
+
+compactViewBtn?.addEventListener("click", () => {
+  window.location.href = "expensemanager.html";
+});
+
