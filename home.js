@@ -325,25 +325,13 @@ chartOfAccountsBtn?.addEventListener("click", () => {
 
 // === Expense Tracker View Popup ===
 const expenseTrackerBtn = document.getElementById("ExpenseTrackerBtn");
-const expenseViewModal = document.getElementById("expenseViewModal");
-const closeExpenseView = document.getElementById("closeExpenseView");
-const classicViewBtn = document.getElementById("classicViewBtn");
-const compactViewBtn = document.getElementById("compactViewBtn");
+const expenseModal = document.getElementById("expenseModal"); // FIXED ID
+const closeExpenseModal = document.getElementById("closeExpenseModal"); // FIXED ID
 
 expenseTrackerBtn?.addEventListener("click", () => {
-  expenseViewModal.style.display = "flex"; // open popup
+  expenseModal.style.display = "flex"; // open popup
 });
 
-closeExpenseView?.addEventListener("click", () => {
-  expenseViewModal.style.display = "none";
+closeExpenseModal?.addEventListener("click", () => {
+  expenseModal.style.display = "none";
 });
-
-// Navigation based on choice
-classicViewBtn?.addEventListener("click", () => {
-  window.location.href = "exp.html";
-});
-
-compactViewBtn?.addEventListener("click", () => {
-  window.location.href = "expensemanager.html";
-});
-
