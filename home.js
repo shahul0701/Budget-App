@@ -1,3 +1,19 @@
+// === Firebase Configuration and Initialization ===
+apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+  authDomain: "budget-app-1365f.firebaseapp.com",
+  projectId: "budget-app-1365f",
+  storageBucket: "budget-app-1365f.firebasestorage.app",
+  messagingSenderId: "1036194450411",
+  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+  measurementId: "G-YFFJL2H54X"
+};
+// Initialize Firebase
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+const db = firebase.firestore();
+const auth = firebase.auth();
+
 // === Element References ===
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
@@ -19,30 +35,58 @@ const saveReminderBtn = document.getElementById("saveReminder");
 const reminderTypeSelect = document.getElementById("reminderType");
 const formFieldsContainer = document.getElementById("formFields");
 const chartOfAccountsBtn = document.getElementById("chartOfAccountsBtn");
+const expenseTrackerBtn = document.getElementById("ExpenseTrackerBtn");
+const expenseModal = document.getElementById("expenseModal");
+const closeExpenseModal = document.getElementById("closeExpenseModal");
+const ReportsBtn = document.getElementById("ReportsBtn");
 
-// === Session Check & Initialization ===
-const loggedInUser = localStorage.getItem("username");
+// === Global Variables ===
+let spendingChart;
+let calendar;
+let currentEvents = [];
+let currentUser = null;
+let currentUserId = null;
 
-if (!loggedInUser) {
-  window.location.href = "index.html";
-} else {
-  // Show dashboard content now that user is logged in
-  if (dashboardContent) {
-    dashboardContent.style.display = "block";
-  }
-  
-  if (usernameElem) {
-    usernameElem.textContent = loggedInUser;
-  }
-  if (profileCircle) {
-    const initials = loggedInUser
-      .split(" ")
-      .filter(part => part.length > 0)
-      .map(part => part[0])
-      .join("")
-      .toUpperCase();
-    profileCircle.textContent = initials;
-  }
+// === Authentication and Session Management ===
+function checkAuthState() {
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      currentUser = user;
+      currentUserId = user.uid;
+      
+      // Set user info in UI
+      if (usernameElem) {
+        usernameElem.textContent = user.displayName || user.email;
+      }
+      if (profileCircle) {
+        const name = user.displayName || user.email;
+        const initials = name
+          .split(" ")
+          .filter(part => part.length > 0)
+          .map(part => part[0])
+          .join("")
+          .toUpperCase();
+        profileCircle.textContent = initials;
+      }
+      
+      // Show dashboard content
+      if (dashboardContent) {
+        dashboardContent.style.display = "block";
+      }
+      
+      // Load user data
+      loadUserData();
+    } else {
+      // No user signed in, redirect to login
+      window.location.href = "index.html";
+    }
+  });
+}
+
+// === Load User Data from Firebase ===
+function loadUserData() {
+  fetchSummaryData('month');
+  loadCalendarEvents();
 }
 
 // === Sidebar Toggle ===
@@ -80,25 +124,17 @@ updateTime();
 
 // === Logout Handler ===
 logoutBtn?.addEventListener('click', () => {
-  localStorage.removeItem("username");
-  window.location.href = "index.html";
+  auth.signOut().then(() => {
+    window.location.href = "index.html";
+  }).catch((error) => {
+    console.error("Logout error:", error);
+  });
 });
 
 // === Chart.js Setup ===
-let spendingChart;
-
-function renderSpendingChart(filter) {
+function renderSpendingChart(labels, values) {
   const chartCanvas = document.getElementById("spendingChart");
   if (!chartCanvas) return;
-
-  const dummyChartData = {
-    today: { labels: ["Food", "Travel", "Utilities"], values: [150, 120, 130] },
-    week: { labels: ["Groceries", "Rent", "Transport", "Others"], values: [800, 1000, 300, 200] },
-    month: { labels: ["Rent", "Bills", "Shopping", "Subscriptions"], values: [4000, 1500, 2000, 1000] },
-    year: { labels: ["Rent", "Education", "Trips", "Gadgets"], values: [50000, 25000, 30000, 15000] },
-  };
-
-  const selected = dummyChartData[filter] || dummyChartData.month;
 
   if (spendingChart) {
     spendingChart.destroy();
@@ -107,11 +143,11 @@ function renderSpendingChart(filter) {
   spendingChart = new Chart(chartCanvas, {
     type: "doughnut",
     data: {
-      labels: selected.labels,
+      labels: labels,
       datasets: [{
         label: "Expenses",
-        data: selected.values,
-        backgroundColor: ["#4caf50", "#f44336", "#2196f3", "#ff9800"],
+        data: values,
+        backgroundColor: ["#4caf50", "#f44336", "#2196f3", "#ff9800", "#9c27b0", "#009688"],
         borderWidth: 1,
       }],
     },
@@ -126,50 +162,86 @@ function renderSpendingChart(filter) {
   });
 }
 
-// === Dummy Income & Expense Summary ===
-function fetchSummaryData(filter) {
-  const dummyData = {
-    today: { income: 1200, expenses: 400 },
-    week: { income: 5000, expenses: 1800 },
-    month: { income: 22000, expenses: 10500 },
-    year: { income: 270000, expenses: 145000 },
-  };
-
-  const selected = dummyData[filter] || dummyData.month;
-
-  if (totalIncomeElem) totalIncomeElem.textContent = `₹${selected.income.toLocaleString()}`;
-  if (totalExpensesElem) totalExpensesElem.textContent = `₹${selected.expenses.toLocaleString()}`;
-
-  renderSpendingChart(filter);
+// === Fetch Income & Expense Summary from Firebase ===
+async function fetchSummaryData(filter) {
+  if (!currentUserId) return;
+  
+  try {
+    // Calculate date range based on filter
+    const now = new Date();
+    let startDate, endDate;
+    
+    switch(filter) {
+      case 'today':
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        break;
+      case 'week':
+        const dayOfWeek = now.getDay();
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - dayOfWeek) + 1);
+        break;
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        endDate = new Date(now.getFullYear() + 1, 0, 1);
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    
+    // Fetch transactions for the period
+    const transactionsRef = db.collection("users").doc(currentUserId).collection("transactions");
+    const snapshot = await transactionsRef
+      .where("date", ">=", startDate)
+      .where("date", "<", endDate)
+      .get();
+    
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    const categoryExpenses = {};
+    
+    snapshot.forEach(doc => {
+      const transaction = doc.data();
+      if (transaction.type === "income") {
+        totalIncome += transaction.amount;
+      } else {
+        totalExpenses += transaction.amount;
+        
+        // Aggregate expenses by category
+        if (categoryExpenses[transaction.category]) {
+          categoryExpenses[transaction.category] += transaction.amount;
+        } else {
+          categoryExpenses[transaction.category] = transaction.amount;
+        }
+      }
+    });
+    
+    // Update UI
+    if (totalIncomeElem) totalIncomeElem.textContent = `₹${totalIncome.toLocaleString()}`;
+    if (totalExpensesElem) totalExpensesElem.textContent = `₹${totalExpenses.toLocaleString()}`;
+    
+    // Prepare data for chart
+    const labels = Object.keys(categoryExpenses);
+    const values = Object.values(categoryExpenses);
+    
+    renderSpendingChart(labels, values);
+    
+  } catch (error) {
+    console.error("Error fetching summary data:", error);
+  }
 }
 
 timeFilter?.addEventListener('change', (e) => {
   fetchSummaryData(e.target.value);
 });
 
-// === FullCalendar Setup ===
-let calendar;
-let currentEvents = [];
-
-function getReminderEvents() {
-  const today = new Date();
-  return [
-    {
-      title: 'Meeting with John',
-      start: today.toISOString().split('T')[0],
-      color: '#2196f3',
-      extendedProps: { type: 'meeting', time: '14:00', notes: 'Zoom call' },
-    },
-    {
-      title: 'Birthday - Alex',
-      start: new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // +2 days
-      color: '#ff9800',
-      extendedProps: { type: 'birthday', notes: 'Buy cake!' },
-    },
-  ];
-}
-
-document.addEventListener('DOMContentLoaded', () => {
+// === FullCalendar Setup with Firebase Events ===
+async function loadCalendarEvents() {
   const calendarEl = document.getElementById('calendarContainer');
   const chartContainer = document.getElementById("chartContainer");
 
@@ -180,17 +252,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (calendarEl) {
+    // Fetch reminders from Firebase
+    const reminders = await getReminderEvents();
+    
     calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
       height: 'auto',
-      events: getReminderEvents(),
+      events: reminders,
       eventClick: handleEventClick
     });
     calendar.render();
   }
+}
 
-  fetchSummaryData('month');
-});
+async function getReminderEvents() {
+  if (!currentUserId) return [];
+  
+  try {
+    const remindersRef = db.collection("reminders");
+    const snapshot = await remindersRef
+      .where("user", "==", currentUserId)
+      .get();
+    
+    const events = [];
+    snapshot.forEach(doc => {
+      const reminder = doc.data();
+      events.push({
+        id: doc.id,
+        title: reminder.title,
+        start: reminder.start,
+        color: reminder.color,
+        extendedProps: reminder.extendedProps
+      });
+    });
+    
+    return events;
+  } catch (error) {
+    console.error("Error fetching reminders:", error);
+    return [];
+  }
+}
 
 // === Reminder Modal Logic ===
 function openReminderModal() {
@@ -252,26 +353,23 @@ saveReminderBtn?.addEventListener("click", async () => {
     title,
     start: date,
     color: colorMap[type] || "#4caf50",
-    extendedProps: { time, notes, type }
+    extendedProps: { time, notes, type },
+    user: currentUserId
   };
 
   try {
-    // Save reminder in Firebase Firestore (ensure firebase initialized and imported)
-    const db = firebase.firestore();
-    await db.collection("reminders").add({
-      ...newEvent,
-      user: loggedInUser,
-      createdAt: new Date().toISOString(),
-    });
+    // Save reminder in Firebase Firestore
+    await db.collection("reminders").add(newEvent);
+    
+    if(calendar) {
+      calendar.addEvent(newEvent);
+    }
+    currentEvents.push(newEvent);
+    closeReminderModal();
   } catch (error) {
     console.error("Error saving reminder to Firebase:", error);
+    alert("Error saving reminder. Please try again.");
   }
-
-  if(calendar) {
-    calendar.addEvent(newEvent);
-  }
-  currentEvents.push(newEvent);
-  closeReminderModal();
 });
 
 // === Popup Detail + Delete Handler ===
@@ -299,21 +397,17 @@ function handleEventClick(info) {
 
   document.getElementById("deleteEventBtn")?.addEventListener("click", async () => {
     if (confirm("Are you sure you want to delete this reminder?")) {
-      // Remove event from calendar UI
-      event.remove();
-
-      // Remove from Firestore (optional enhancement)
       try {
-        const db = firebase.firestore();
-        const reminders = await db.collection("reminders").where("title", "==", event.title).get();
-        reminders.forEach(doc => {
-          doc.ref.delete();
-        });
+        // Remove from Firestore
+        await db.collection("reminders").doc(event.id).delete();
+        
+        // Remove event from calendar UI
+        event.remove();
+        popup.remove();
       } catch (error) {
         console.error("Error deleting reminder from Firebase:", error);
+        alert("Error deleting reminder. Please try again.");
       }
-
-      popup.remove();
     }
   });
 }
@@ -324,18 +418,24 @@ chartOfAccountsBtn?.addEventListener("click", () => {
 });
 
 // === Expense Tracker View Popup ===
-const expenseTrackerBtn = document.getElementById("ExpenseTrackerBtn");
-const expenseModal = document.getElementById("expenseModal"); // FIXED ID
-const closeExpenseModal = document.getElementById("closeExpenseModal"); // FIXED ID
-
 expenseTrackerBtn?.addEventListener("click", () => {
-  expenseModal.style.display = "flex"; // open popup
+  if (expenseModal) {
+    expenseModal.style.display = "flex";
+  }
 });
 
 closeExpenseModal?.addEventListener("click", () => {
-  expenseModal.style.display = "none";
+  if (expenseModal) {
+    expenseModal.style.display = "none";
+  }
 });
+
 // === Navigation to Report Section ===
 ReportsBtn?.addEventListener("click", () => {
   window.location.href = "Section.html";
+});
+
+// === Initialize Application ===
+document.addEventListener('DOMContentLoaded', () => {
+  checkAuthState();
 });
