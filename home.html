@@ -227,6 +227,33 @@
       transition: margin-left 0.3s;
     }
 
+    /* Quick Add Button */
+    .quick-add-container {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 20px;
+    }
+
+    .quick-add-btn {
+      background: linear-gradient(135deg, var(--accent), var(--secondary));
+      color: white;
+      border: none;
+      border-radius: 50px;
+      padding: 12px 25px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: 0 4px 15px rgba(247, 37, 133, 0.3);
+    }
+
+    .quick-add-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(247, 37, 133, 0.4);
+    }
+
     /* Dashboard Grid */
     .dashboard-grid {
       display: grid;
@@ -679,6 +706,10 @@
       .dashboard-grid {
         gap: 15px;
       }
+      
+      .quick-add-container {
+        justify-content: center;
+      }
     }
   </style>
 </head>
@@ -736,6 +767,13 @@
 
     <!-- Dashboard Content (initially hidden) -->
     <div id="dashboardContent">
+      <!-- Quick Add Button -->
+      <div class="quick-add-container">
+        <button class="quick-add-btn" id="quickAddBtn">
+          <i class="fas fa-plus-circle"></i> Quick Add Transaction
+        </button>
+      </div>
+
       <!-- Dashboard Grid -->
       <div class="dashboard-grid">
         <!-- Left Panel -->
@@ -815,6 +853,47 @@
     </div>
   </div>
 
+  <!-- Quick Add Transaction Modal -->
+  <div id="quickAddModal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" id="closeQuickAddModal">&times;</span>
+      <h3>Quick Add Transaction</h3>
+      
+      <div class="transaction-type-selector">
+        <button class="type-selector active" data-type="income">
+          <i class="fas fa-arrow-down"></i> Income
+        </button>
+        <button class="type-selector" data-type="expense">
+          <i class="fas fa-arrow-up"></i> Expense
+        </button>
+      </div>
+      
+      <label for="transactionTitle">Title</label>
+      <input type="text" id="transactionTitle" placeholder="Salary, Groceries, etc." required>
+      
+      <label for="transactionAmount">Amount (₹)</label>
+      <input type="number" id="transactionAmount" placeholder="0.00" min="0" step="0.01" required>
+      
+      <label for="transactionCategory">Category</label>
+      <select id="transactionCategory" required>
+        <option value="">Select Category</option>
+        <option value="salary">Salary</option>
+        <option value="freelance">Freelance</option>
+        <option value="investment">Investment</option>
+        <option value="food">Food & Dining</option>
+        <option value="transport">Transportation</option>
+        <option value="utilities">Utilities</option>
+        <option value="entertainment">Entertainment</option>
+        <option value="shopping">Shopping</option>
+      </select>
+      
+      <label for="transactionDate">Date</label>
+      <input type="date" id="transactionDate" required>
+      
+      <button id="saveTransaction">Save Transaction</button>
+    </div>
+  </div>
+
   <!-- Expense Tracker Choice Modal -->
   <div id="expenseModal" class="modal">
     <div class="modal-content">
@@ -878,6 +957,11 @@
     const closeExpenseModal = document.getElementById("closeExpenseModal");
     const ReportsBtn = document.getElementById("ReportsBtn");
     const loadingIndicator = document.getElementById("loadingIndicator");
+    const quickAddBtn = document.getElementById("quickAddBtn");
+    const quickAddModal = document.getElementById("quickAddModal");
+    const closeQuickAddModal = document.getElementById("closeQuickAddModal");
+    const saveTransactionBtn = document.getElementById("saveTransaction");
+    const typeSelectors = document.querySelectorAll('.type-selector');
 
     // === Global Variables ===
     let spendingChart;
@@ -886,6 +970,7 @@
     let currentUser = null;
     let currentUserId = null;
     let db;
+    let transactionType = 'income';
 
     // === Initialize Firebase ===
     function initializeFirebase() {
@@ -894,25 +979,68 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         
-        // Simulate loading for demo purposes
-        setTimeout(() => {
-          hideLoadingIndicator();
-          setupDemoData();
-        }, 1500);
-        
+        // Check authentication state
+        checkAuthState();
       } catch (error) {
         console.error("Firebase initialization error:", error);
         hideLoadingIndicator();
+        setupDemoData(); // Fallback to demo data
       }
+    }
+
+    // === Authentication and Session Management ===
+    function checkAuthState() {
+      firebase.auth().onAuthStateChanged((user) => {
+        if (user) {
+          currentUser = user;
+          currentUserId = user.uid;
+          
+          // Set user info in UI
+          if (usernameElem) {
+            usernameElem.textContent = user.displayName || user.email;
+          }
+          if (profileCircle) {
+            const name = user.displayName || user.email;
+            const initials = name
+              .split(" ")
+              .filter(part => part.length > 0)
+              .map(part => part[0])
+              .join("")
+              .toUpperCase();
+            profileCircle.textContent = initials;
+          }
+          
+          // Show dashboard content
+          if (dashboardContent) {
+            dashboardContent.style.display = "block";
+          }
+          
+          // Hide loading indicator
+          hideLoadingIndicator();
+          
+          // Load user data
+          loadUserData();
+        } else {
+          // No user signed in, redirect to login
+          window.location.href = "index.html";
+        }
+      }, (error) => {
+        console.error("Auth state error:", error);
+        hideLoadingIndicator();
+        setupDemoData(); // Fallback to demo data
+      });
     }
 
     function hideLoadingIndicator() {
       if (loadingIndicator) {
         loadingIndicator.style.display = "none";
       }
-      if (dashboardContent) {
-        dashboardContent.style.display = "block";
-      }
+    }
+
+    // === Load User Data from Firebase ===
+    function loadUserData() {
+      fetchSummaryData('month');
+      loadCalendarEvents();
     }
 
     // === Setup Demo Data (for demonstration) ===
@@ -923,6 +1051,11 @@
       }
       if (profileCircle) {
         profileCircle.textContent = "AJ";
+      }
+      
+      // Show dashboard content
+      if (dashboardContent) {
+        dashboardContent.style.display = "block";
       }
       
       // Initialize chart
@@ -976,8 +1109,11 @@
 
     // === Logout Handler ===
     logoutBtn.addEventListener('click', () => {
-      // In a real app, this would sign out from Firebase
-      alert('Logout functionality would be implemented here.');
+      firebase.auth().signOut().then(() => {
+        window.location.href = "index.html";
+      }).catch((error) => {
+        console.error("Logout error:", error);
+      });
     });
 
     // === Chart.js Setup ===
@@ -1020,6 +1156,97 @@
         },
       });
     }
+
+    // === Fetch Income & Expense Summary from Firebase ===
+    async function fetchSummaryData(filter) {
+      if (!currentUserId) {
+        // Demo data for non-authenticated users
+        const demoData = {
+          today: { income: 1250, expenses: 870 },
+          week: { income: 6850, expenses: 4320 },
+          month: { income: 12500, expenses: 8740 },
+          year: { income: 148500, expenses: 102300 }
+        };
+        
+        const selected = demoData[filter] || demoData.month;
+        totalIncomeElem.textContent = `₹${selected.income.toLocaleString()}`;
+        totalExpensesElem.textContent = `₹${selected.expenses.toLocaleString()}`;
+        return;
+      }
+      
+      try {
+        // Calculate date range based on filter
+        const now = new Date();
+        let startDate, endDate;
+        
+        switch(filter) {
+          case 'today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+            break;
+          case 'week':
+            const dayOfWeek = now.getDay();
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+            endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - dayOfWeek) + 1);
+            break;
+          case 'month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+            break;
+          case 'year':
+            startDate = new Date(now.getFullYear(), 0, 1);
+            endDate = new Date(now.getFullYear() + 1, 0, 1);
+            break;
+          default:
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        }
+        
+        // Fetch transactions for the period
+        const transactionsRef = db.collection("users").doc(currentUserId).collection("transactions");
+        const snapshot = await transactionsRef
+          .where("date", ">=", startDate)
+          .where("date", "<", endDate)
+          .get();
+        
+        let totalIncome = 0;
+        let totalExpenses = 0;
+        const categoryExpenses = {};
+        
+        snapshot.forEach(doc => {
+          const transaction = doc.data();
+          if (transaction.type === "income") {
+            totalIncome += transaction.amount;
+          } else {
+            totalExpenses += transaction.amount;
+            
+            // Aggregate expenses by category
+            if (categoryExpenses[transaction.category]) {
+              categoryExpenses[transaction.category] += transaction.amount;
+            } else {
+              categoryExpenses[transaction.category] = transaction.amount;
+            }
+          }
+        });
+        
+        // Update UI
+        if (totalIncomeElem) totalIncomeElem.textContent = `₹${totalIncome.toLocaleString()}`;
+        if (totalExpensesElem) totalExpensesElem.textContent = `₹${totalExpenses.toLocaleString()}`;
+        
+        // Prepare data for chart
+        const labels = Object.keys(categoryExpenses);
+        const values = Object.values(categoryExpenses);
+        
+        renderSpendingChart(labels, values);
+        
+      } catch (error) {
+        console.error("Error fetching summary data:", error);
+      }
+    }
+
+    timeFilter.addEventListener('change', (e) => {
+      fetchSummaryData(e.target.value);
+    });
 
     // === Calendar Functions ===
     function initializeCalendar() {
@@ -1100,7 +1327,7 @@
     closeModalBtn.addEventListener("click", closeReminderModal);
 
     // Save reminder function
-    saveReminderBtn.addEventListener("click", () => {
+    saveReminderBtn.addEventListener("click", async () => {
       const title = document.getElementById("reminderTitle").value.trim();
       const date = document.getElementById("reminderDate").value;
       
@@ -1127,21 +1354,103 @@
         }
       };
       
-      // Add to calendar
-      calendar.addEvent(newEvent);
-      
-      // Show success message
-      alert('Reminder added successfully!');
-      
-      // Close modal
-      closeReminderModal();
-      
-      // Reset form
-      document.getElementById("reminderTitle").value = '';
-      document.getElementById("reminderDate").value = '';
-      document.getElementById("reminderTime").value = '';
-      document.getElementById("reminderAmount").value = '';
-      document.getElementById("reminderNotes").value = '';
+      try {
+        // Save to Firebase if authenticated
+        if (currentUserId) {
+          await db.collection("reminders").add({
+            ...newEvent,
+            userId: currentUserId,
+            createdAt: new Date()
+          });
+        }
+        
+        // Add to calendar
+        calendar.addEvent(newEvent);
+        
+        // Show success message
+        alert('Reminder added successfully!');
+        
+        // Close modal
+        closeReminderModal();
+        
+        // Reset form
+        document.getElementById("reminderTitle").value = '';
+        document.getElementById("reminderDate").value = '';
+        document.getElementById("reminderTime").value = '';
+        document.getElementById("reminderAmount").value = '';
+        document.getElementById("reminderNotes").value = '';
+      } catch (error) {
+        console.error("Error saving reminder:", error);
+        alert("Error saving reminder. Please try again.");
+      }
+    });
+
+    // === Quick Add Transaction Functions ===
+    quickAddBtn.addEventListener("click", () => {
+      if (quickAddModal) {
+        quickAddModal.style.display = "flex";
+        // Set today's date as default
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('transactionDate').value = today;
+      }
+    });
+
+    closeQuickAddModal.addEventListener("click", () => {
+      if (quickAddModal) {
+        quickAddModal.style.display = "none";
+      }
+    });
+
+    // Transaction type selection
+    typeSelectors.forEach(selector => {
+      selector.addEventListener('click', () => {
+        typeSelectors.forEach(btn => btn.classList.remove('active'));
+        selector.classList.add('active');
+        transactionType = selector.dataset.type;
+      });
+    });
+
+    // Save transaction
+    saveTransactionBtn.addEventListener("click", async () => {
+      const title = document.getElementById("transactionTitle").value.trim();
+      const amount = parseFloat(document.getElementById("transactionAmount").value);
+      const category = document.getElementById("transactionCategory").value;
+      const date = document.getElementById("transactionDate").value;
+
+      if (!title || !amount || !category || !date) {
+        alert("Please fill in all required fields.");
+        return;
+      }
+
+      try {
+        // Save transaction to Firebase if authenticated
+        if (currentUserId) {
+          await db.collection("users").doc(currentUserId).collection("transactions").add({
+            title,
+            amount,
+            type: transactionType,
+            category,
+            date: new Date(date),
+            createdAt: new Date()
+          });
+        }
+
+        // Refresh the summary data
+        fetchSummaryData(timeFilter.value);
+        
+        // Close modal and show success message
+        if (quickAddModal) quickAddModal.style.display = "none";
+        alert("Transaction added successfully!");
+        
+        // Reset form
+        document.getElementById("transactionTitle").value = "";
+        document.getElementById("transactionAmount").value = "";
+        document.getElementById("transactionCategory").value = "";
+        
+      } catch (error) {
+        console.error("Error saving transaction:", error);
+        alert("Error saving transaction. Please try again.");
+      }
     });
 
     // === Event Click Handler ===
@@ -1168,17 +1477,28 @@
         popup.remove();
       });
 
-      document.getElementById("deleteEventBtn").addEventListener("click", () => {
+      document.getElementById("deleteEventBtn").addEventListener("click", async () => {
         if (confirm("Are you sure you want to delete this reminder?")) {
-          event.remove();
-          popup.remove();
+          try {
+            // Remove from Firebase if authenticated
+            if (currentUserId && event.id) {
+              await db.collection("reminders").doc(event.id).delete();
+            }
+            
+            // Remove event from calendar UI
+            event.remove();
+            popup.remove();
+          } catch (error) {
+            console.error("Error deleting reminder:", error);
+            alert("Error deleting reminder. Please try again.");
+          }
         }
       });
     }
 
     // === Navigation Handlers ===
     chartOfAccountsBtn.addEventListener("click", () => {
-      alert('Chart of Accounts section would open here.');
+      window.location.href = "coa.html";
     });
 
     expenseTrackerBtn.addEventListener("click", () => {
@@ -1204,6 +1524,9 @@
       }
       if (e.target === expenseModal) {
         expenseModal.style.display = "none";
+      }
+      if (e.target === quickAddModal) {
+        quickAddModal.style.display = "none";
       }
     });
 
