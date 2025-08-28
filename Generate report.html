@@ -14,13 +14,15 @@ body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:0}
 #username{font-weight:bold}
 #logoutBtn{background:#dc3545;color:white;border:none;border-radius:4px;padding:6px 12px;cursor:pointer}
 #logoutBtn:hover{background:#a71d2a}
-.container{max-width:1000px;margin:30px auto;background:#fff;padding:30px;border-radius:8px}
+.container{max-width:1200px;margin:30px auto;background:#fff;padding:30px;border-radius:8px}
 h2{text-align:center;margin-bottom:10px}
 table{width:100%;margin-top:20px;border-collapse:collapse}
 th,td{padding:12px;border:1px solid #ccc;text-align:left}
 th{background:#f1f1f1}
 button{background:#28a745;color:#fff;padding:8px 16px;border:none;border-radius:5px;cursor:pointer}
 button:hover{background:#218838}
+input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
+.pointer{cursor:pointer}
 </style>
 </head>
 <body>
@@ -41,7 +43,12 @@ button:hover{background:#218838}
 
 <div class="container">
 <h2>General Report (Bank-wise)</h2>
-<button id="exportBtn">Export CSV</button>
+
+<div style="margin-bottom:15px;">
+  <label>From: <input type="date" id="fromDate"></label>
+  <label style="margin-left:10px;">To: <input type="date" id="toDate"></label>
+</div>
+
 <table>
   <thead>
     <tr>
@@ -52,11 +59,25 @@ button:hover{background:#218838}
   </thead>
   <tbody id="reportTable"></tbody>
 </table>
+
+<h3 id="transactionsTitle" style="margin-top:30px;"></h3>
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Account</th>
+      <th>Amount</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody id="transactionsTable"></tbody>
+</table>
+
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
@@ -78,6 +99,10 @@ const profileCircle = document.getElementById("userInitials");
 const logoutBtn = document.getElementById("logoutBtn");
 const datetimeElem = document.getElementById("datetime");
 const reportTable = document.getElementById("reportTable");
+const transactionsTable = document.getElementById("transactionsTable");
+const transactionsTitle = document.getElementById("transactionsTitle");
+const fromDateInput = document.getElementById("fromDate");
+const toDateInput = document.getElementById("toDate");
 
 let currentUser = null;
 let transactions = [];
@@ -87,7 +112,6 @@ let coaAccounts = [];
 function updateTime(){datetimeElem.textContent=(new Date()).toLocaleString();}
 setInterval(updateTime,1000);updateTime();
 
-// Auth check
 onAuthStateChanged(auth,user=>{
   if(user){
     currentUser=user;
@@ -100,19 +124,13 @@ onAuthStateChanged(auth,user=>{
   }
 });
 
-logoutBtn.addEventListener("click", async()=>{
-  await signOut(auth);
-  window.location.href="index.html";
-});
+logoutBtn.addEventListener("click", async()=>{await signOut(auth);window.location.href="index.html";});
 
-// Load report
 async function loadReport(){
   try{
-    // Load CoA accounts (Bank types)
+    // Load CoA accounts (Bank type)
     const coaSnap = await getDocs(collection(db,"chartOfAccounts"));
-    coaAccounts = coaSnap.docs
-      .filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category))
-      .map(d=>({id:d.id,...d.data()}));
+    coaAccounts = coaSnap.docs.filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category)).map(d=>({id:d.id,...d.data()}));
 
     // Load transactions
     const txSnap = await getDocs(collection(db,"users",currentUser.uid,"transactions"));
@@ -122,7 +140,6 @@ async function loadReport(){
   }catch(err){console.error(err); alert("Failed to load report: "+err.message);}
 }
 
-// Render table
 function renderReport(){
   reportTable.innerHTML="";
   const bankTotals={};
@@ -139,23 +156,42 @@ function renderReport(){
 
   for(const bank in bankTotals){
     const tr=document.createElement("tr");
+    tr.classList.add("pointer");
     tr.innerHTML=`<td>${bank}</td><td>Bank</td><td>₹${bankTotals[bank].toFixed(2)}</td>`;
+    tr.addEventListener("click",()=>showTransactions(bank));
     reportTable.appendChild(tr);
   }
 }
 
-// Export CSV
-document.getElementById("exportBtn").addEventListener("click",()=>{
-  let csv="Bank Name,Type,Total Transactions\n";
-  for(const bank in bankTotals){
-    csv+=`${bank},Bank,${bankTotals[bank].toFixed(2)}\n`;
-  }
-  const blob=new Blob([csv],{type:"text/csv"});
-  const link=document.createElement("a");
-  link.href=URL.createObjectURL(blob);
-  link.download="bank_report.csv";
-  link.click();
-});
+function showTransactions(bankName){
+  transactionsTitle.textContent=`Transactions for ${bankName}`;
+  transactionsTable.innerHTML="";
+
+  const fromDate = fromDateInput.value ? new Date(fromDateInput.value) : null;
+  const toDate = toDateInput.value ? new Date(toDateInput.value) : null;
+
+  const filteredTx = transactions.filter(tx=>{
+    const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
+    if(!acc || acc.name!==bankName) return false;
+
+    if(fromDate || toDate){
+      const txDate = new Date(tx.date || tx.transactionDate || tx.createdAt?.seconds*1000);
+      if(fromDate && txDate<fromDate) return false;
+      if(toDate && txDate>toDate) return false;
+    }
+    return true;
+  });
+
+  filteredTx.forEach(tx=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${tx.date||tx.transactionDate||""}</td><td>${tx.ACCOUNT_HEADER||""}</td><td>₹${Number(tx.amount||0).toFixed(2)}</td><td>${tx.notes||""}</td>`;
+    transactionsTable.appendChild(tr);
+  });
+}
+
+// Reload transactions when date filter changes
+fromDateInput.addEventListener("change",()=>{const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank);});
+toDateInput.addEventListener("change",()=>{const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank);});
 </script>
 
 </body>
