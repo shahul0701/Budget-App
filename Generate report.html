@@ -8,7 +8,7 @@
 <style>
 body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:0}
 .header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.1)}
-.header-left{font-weight:bold}
+.header-left{font-weight:bold; display:flex; align-items:center; gap:15px;}
 .header-right{display:flex;align-items:center;gap:10px}
 #userInitials{background:#007bff;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:bold}
 #username{font-weight:bold}
@@ -23,6 +23,8 @@ button{background:#28a745;color:#fff;padding:8px 16px;border:none;border-radius:
 button:hover{background:#218838}
 input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
 .pointer{cursor:pointer}
+#totals{margin-top:20px;font-weight:bold;font-size:16px;}
+#totals span{margin-right:20px;}
 </style>
 </head>
 <body>
@@ -32,7 +34,7 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
     <a href="home.html" style="text-decoration:none;color:#007bff;font-weight:bold;">
       <i class="fa fa-home"></i> Home
     </a>
-    <span style="margin-left:20px;" id="datetime">Loading time...</span>
+    <span id="datetime">Loading time...</span>
   </div>
   <div class="header-right">
     <div id="userInitials">U</div>
@@ -53,12 +55,15 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
   <thead>
     <tr>
       <th>Bank Name</th>
-      <th>Type</th>
-      <th>Total Transactions</th>
+      <th>Total Income</th>
+      <th>Total Expenses</th>
+      <th>Net Balance</th>
     </tr>
   </thead>
   <tbody id="reportTable"></tbody>
 </table>
+
+<div id="totals"></div>
 
 <h3 id="transactionsTitle" style="margin-top:30px;"></h3>
 <table>
@@ -66,6 +71,7 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
     <tr>
       <th>Date</th>
       <th>Account</th>
+      <th>Type</th>
       <th>Amount</th>
       <th>Notes</th>
     </tr>
@@ -80,6 +86,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
+// Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
   authDomain: "budget-app-1365f.firebaseapp.com",
@@ -103,6 +110,7 @@ const transactionsTable = document.getElementById("transactionsTable");
 const transactionsTitle = document.getElementById("transactionsTitle");
 const fromDateInput = document.getElementById("fromDate");
 const toDateInput = document.getElementById("toDate");
+const totalsDiv = document.getElementById("totals");
 
 let currentUser = null;
 let transactions = [];
@@ -110,8 +118,9 @@ let coaAccounts = [];
 
 // Clock
 function updateTime(){datetimeElem.textContent=(new Date()).toLocaleString();}
-setInterval(updateTime,1000);updateTime();
+setInterval(updateTime,1000); updateTime();
 
+// Auth check
 onAuthStateChanged(auth,user=>{
   if(user){
     currentUser=user;
@@ -120,19 +129,21 @@ onAuthStateChanged(auth,user=>{
     profileCircle.textContent=storedUsername.charAt(0).toUpperCase();
     loadReport();
   }else{
-    setTimeout(()=>window.location.href="index.html",500);
+    window.location.href="login.html";
   }
 });
 
-logoutBtn.addEventListener("click", async()=>{await signOut(auth);window.location.href="index.html";});
+logoutBtn.addEventListener("click", async()=>{await signOut(auth);window.location.href="login.html";});
 
+// Load CoA (Bank accounts) & Transactions
 async function loadReport(){
   try{
-    // Load CoA accounts (Bank type)
+    // Load CoA accounts
     const coaSnap = await getDocs(collection(db,"chartOfAccounts"));
-    coaAccounts = coaSnap.docs.filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category)).map(d=>({id:d.id,...d.data()}));
+    coaAccounts = coaSnap.docs.filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category))
+                              .map(d=>({id:d.id,...d.data()}));
 
-    // Load transactions
+    // Load all transactions
     const txSnap = await getDocs(collection(db,"users",currentUser.uid,"transactions"));
     transactions = txSnap.docs.map(d=>({id:d.id,...d.data()}));
 
@@ -140,29 +151,50 @@ async function loadReport(){
   }catch(err){console.error(err); alert("Failed to load report: "+err.message);}
 }
 
+// Render Bank-wise summary
 function renderReport(){
   reportTable.innerHTML="";
-  const bankTotals={};
+  totalsDiv.innerHTML="";
+  const bankTotals = {};
 
-  coaAccounts.forEach(acc=>{bankTotals[acc.name]=0;});
+  coaAccounts.forEach(acc=>{
+    bankTotals[acc.name] = {income:0, expense:0};
+  });
 
   transactions.forEach(tx=>{
     const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
     if(acc){
-      const amt = Number(tx.amount || tx.INCOME || tx.EXPENSE || 0);
-      bankTotals[acc.name]+=amt;
+      const income = Number(tx.INCOME||0);
+      const expense = Number(tx.EXPENSE||0);
+      bankTotals[acc.name].income += income;
+      bankTotals[acc.name].expense += expense;
     }
   });
 
+  let totalIncome=0, totalExpenses=0;
+
   for(const bank in bankTotals){
-    const tr=document.createElement("tr");
+    const data = bankTotals[bank];
+    const net = data.income - data.expense;
+    totalIncome += data.income;
+    totalExpenses += data.expense;
+
+    const tr = document.createElement("tr");
     tr.classList.add("pointer");
-    tr.innerHTML=`<td>${bank}</td><td>Bank</td><td>₹${bankTotals[bank].toFixed(2)}</td>`;
+    tr.innerHTML = `<td>${bank}</td>
+                    <td>₹${data.income.toFixed(2)}</td>
+                    <td>₹${data.expense.toFixed(2)}</td>
+                    <td style="color:${net>=0?'green':'red'}">₹${net.toFixed(2)}</td>`;
     tr.addEventListener("click",()=>showTransactions(bank));
     reportTable.appendChild(tr);
   }
+
+  totalsDiv.innerHTML = `<span>Total Income: ₹${totalIncome.toFixed(2)}</span>
+                         <span>Total Expenses: ₹${totalExpenses.toFixed(2)}</span>
+                         <span>Net: ₹${(totalIncome-totalExpenses).toFixed(2)}</span>`;
 }
 
+// Show transactions for a bank with optional date filter
 function showTransactions(bankName){
   transactionsTitle.textContent=`Transactions for ${bankName}`;
   transactionsTable.innerHTML="";
@@ -175,88 +207,29 @@ function showTransactions(bankName){
     if(!acc || acc.name!==bankName) return false;
 
     if(fromDate || toDate){
-      const txDate = new Date(tx.date || tx.transactionDate || tx.createdAt?.seconds*1000);
-      if(fromDate && txDate<fromDate) return false;
-      if(toDate && txDate>toDate) return false;
+      const txDate = new Date(tx.date || tx.transactionDate || (tx.createdAt?.seconds?tx.createdAt.seconds*1000:null));
+      if(txDate){
+        if(fromDate && txDate<fromDate) return false;
+        if(toDate && txDate>toDate) return false;
+      }
     }
     return true;
   });
 
   filteredTx.forEach(tx=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${tx.date||tx.transactionDate||""}</td><td>${tx.ACCOUNT_HEADER||""}</td><td>₹${Number(tx.amount||0).toFixed(2)}</td><td>${tx.notes||""}</td>`;
+    const type = Number(tx.INCOME||0) > 0 ? "Income" : "Expense";
+    const amount = type==="Income"?Number(tx.INCOME||0):Number(tx.EXPENSE||0);
+    const dateStr = tx.date||tx.transactionDate||"";
+    const tr = document.createElement("tr");
+    tr.innerHTML=`<td>${dateStr}</td><td>${tx.ACCOUNT_HEADER||""}</td><td>${type}</td><td>₹${amount.toFixed(2)}</td><td>${tx.notes||""}</td>`;
     transactionsTable.appendChild(tr);
   });
 }
-  // ===== Load Transactions from Firebase =====
-async function loadTransactions(startDate, endDate) {
-    loadingModal.style.display = "flex";
-    try {
-        // Query all transactions for the current user, ordered by DATE
-        const txRef = collection(db, "users", currentUser.uid, "transactions");
-        const q = query(txRef, orderBy("DATE", "desc"));
-        const snap = await getDocs(q);
 
-        // Map and filter by date range
-        allTransactions = snap.docs.map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                DATE: data.DATE,
-                ACCOUNT_HEADER: data.ACCOUNT_HEADER,
-                INCOME: parseFloat(data.INCOME) || 0,
-                EXPENSE: parseFloat(data.EXPENSE) || 0,
-                NOTES: data.NOTES || ""
-            };
-        }).filter(tx => {
-            const txDate = new Date(tx.DATE);
-            return txDate >= startDate && txDate <= endDate;
-        });
+// Reload transactions on date change
+fromDateInput.addEventListener("change",()=>{ const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank); });
+toDateInput.addEventListener("change",()=>{ const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank); });
 
-        return allTransactions;
-    } catch (err) {
-        console.error("Error loading transactions:", err);
-        alert("Failed to load transactions: " + err.message);
-        return [];
-    } finally {
-        loadingModal.style.display = "none";
-    }
-}
-
-  async function generateReport() {
-    const { startDate, endDate } = getDateRange();
-    reportPeriodDisplay.textContent = `Report: ${formatDisplay(startDate)} to ${formatDisplay(endDate)}`;
-
-    // Load transactions dynamically from Firebase
-    const transactions = await loadTransactions(startDate, endDate);
-
-    if (transactions.length === 0) {
-        resetReport();
-        return;
-    }
-
-    // Total Income & Expenses
-    const totalIncome = transactions.reduce((sum, tx) => sum + (tx.INCOME || 0), 0);
-    const totalExpenses = transactions.reduce((sum, tx) => sum + (tx.EXPENSE || 0), 0);
-    const netProfit = totalIncome - totalExpenses;
-
-    totalIncomeElem.textContent = `₹${totalIncome.toFixed(2)}`;
-    totalExpensesElem.textContent = `₹${totalExpenses.toFixed(2)}`;
-    netProfitElem.textContent = `₹${netProfit.toFixed(2)}`;
-    netProfitElem.style.color = netProfit > 0 ? "#2ecc71" : netProfit < 0 ? "#e74c3c" : "#3498db";
-
-    // Breakdown by category
-    updateBreakdown(transactions, "INCOME", incomeBreakdownElem);
-    updateBreakdown(transactions, "EXPENSE", expenseBreakdownElem);
-
-    // Update Chart
-    updateChart(transactions);
-}
-
-
-// Reload transactions when date filter changes
-fromDateInput.addEventListener("change",()=>{const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank);});
-toDateInput.addEventListener("change",()=>{const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank);});
 </script>
 
 </body>
