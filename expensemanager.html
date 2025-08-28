@@ -206,6 +206,22 @@
     .expense-color {
       color: #c92a2a;
     }
+    
+    /* Upload progress bar */
+    .upload-progress {
+      height: 6px;
+      margin-top: 8px;
+      border-radius: 3px;
+      background: #f0f0f0;
+      display: none;
+    }
+    .upload-progress-bar {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s;
+    }
   </style>
 </head>
 <body>
@@ -419,6 +435,9 @@
                 <label class="form-label">Attachment</label>
                 <input id="formATTACHFILE" type="file" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,image/*" />
                 <input id="formATTACH" type="hidden" />
+                <div class="upload-progress" id="uploadProgress">
+                  <div class="upload-progress-bar" id="uploadProgressBar"></div>
+                </div>
                 <img id="attachmentPreview" class="attachment-preview" alt="Preview" />
                 <div id="attachmentInfo" class="small-muted mt-1"></div>
               </div>
@@ -532,6 +551,8 @@
     const attachmentPreview = document.getElementById("attachmentPreview");
     const attachmentInfo = document.getElementById("attachmentInfo");
     const saveTransactionBtn = document.getElementById("saveTransactionBtn");
+    const uploadProgress = document.getElementById("uploadProgress");
+    const uploadProgressBar = document.getElementById("uploadProgressBar");
 
     const attachmentModalEl = document.getElementById("attachmentModal");
     const attachmentModal = new bootstrap.Modal(attachmentModalEl);
@@ -561,15 +582,19 @@
     let coaAccounts = [];
     let coaBanks = [];
 
-function escapeHtml(text) {
-  if (!text) return "";
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+    // Cloudinary config
+    const CLOUDINARY_CLOUD_NAME = "dpwdsyvz8";
+    const CLOUDINARY_UPLOAD_PRESET = "my_app_uploads";
+
+    function escapeHtml(text) {
+      if (!text) return "";
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
 
     // Navigation button handlers
     backBtn.addEventListener("click", () => {
@@ -1000,51 +1025,51 @@ function escapeHtml(text) {
       buildPagination();
     }
 
-function buildPagination() {
-  const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
-  if (totalPages <= 1) {
-    paginationControls.innerHTML = "";
-    return;
-  }
-
-  let html = `<nav><ul class="pagination pagination-sm">`;
-
-  const startPage = Math.max(1, currentPage - 2);
-  const endPage = Math.min(totalPages, startPage + 4);
-
-  html += `
-    <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-      <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
-    </li>
-  `;
-
-  for (let i = startPage; i <= endPage; i++) {
-    html += `
-      <li class="page-item ${i === currentPage ? 'active' : ''}">
-        <a class="page-link" href="#" data-page="${i}">${i}</a>
-      </li>
-    `;
-  }
-
-  html += `
-    <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-      <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
-    </li>
-  </ul></nav>`;
-
-  paginationControls.innerHTML = html;
-
-  paginationControls.querySelectorAll(".page-link").forEach(link => {
-    link.addEventListener("click", e => {
-      e.preventDefault();
-      const page = parseInt(e.target.getAttribute("data-page"));
-      if (page && page !== currentPage && page > 0 && page <= totalPages) {
-        currentPage = page;
-        buildTable();
+    function buildPagination() {
+      const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+      if (totalPages <= 1) {
+        paginationControls.innerHTML = "";
+        return;
       }
-    });
-  });
-}
+
+      let html = `<nav><ul class="pagination pagination-sm">`;
+
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, startPage + 4);
+
+      html += `
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+          <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+        </li>
+      `;
+
+      for (let i = startPage; i <= endPage; i++) {
+        html += `
+          <li class="page-item ${i === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" data-page="${i}">${i}</a>
+          </li>
+        `;
+      }
+
+      html += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+          <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
+        </li>
+      `;
+
+      paginationControls.innerHTML = html;
+
+      paginationControls.querySelectorAll(".page-link").forEach(link => {
+        link.addEventListener("click", e => {
+          e.preventDefault();
+          const page = parseInt(e.target.getAttribute("data-page"));
+          if (page && page !== currentPage && page > 0 && page <= totalPages) {
+            currentPage = page;
+            buildTable();
+          }
+        });
+      });
+    }
 
     function updateStats(){
       const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
@@ -1074,6 +1099,7 @@ function buildPagination() {
       formATTACH.value = "";
       attachmentPreview.style.display = "none";
       attachmentInfo.textContent = "";
+      uploadProgress.style.display = "none";
       
       document.getElementById("transactionModalLabel").textContent = "Add Transaction";
       transactionModal.show();
@@ -1166,30 +1192,46 @@ function buildPagination() {
     });
 
     // Handle file attachment
-formATTACHFILE.addEventListener("change", async function () {
-  const file = this.files[0];
-  if (!file) return;
+    formATTACHFILE.addEventListener("change", async function () {
+      const file = this.files[0];
+      if (!file) return;
+      
+      // Check file size (limit to 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        Swal.fire({ icon: 'error', title: 'File too large', text: 'Please select a file smaller than 10MB' });
+        this.value = '';
+        return;
+      }
 
-  // Upload to Cloudinary
-  try {
-    const uploadedUrl = await uploadToCloudinary(file);
-    formATTACH.value = uploadedUrl;
-    attachmentInfo.textContent = "Uploaded: " + file.name;
+      // Upload to Cloudinary
+      try {
+        uploadProgress.style.display = "block";
+        uploadProgressBar.style.width = "0%";
+        
+        const uploadedUrl = await uploadToCloudinary(file, (progress) => {
+          uploadProgressBar.style.width = `${progress}%`;
+        });
+        
+        formATTACH.value = uploadedUrl;
+        attachmentInfo.textContent = "Uploaded: " + file.name;
 
-    // Show preview if it's an image
-    if (file.type.startsWith('image/')) {
-      attachmentPreview.src = uploadedUrl;
-      attachmentPreview.style.display = "block";
-    } else {
-      attachmentPreview.style.display = "none";
-    }
+        // Show preview if it's an image
+        if (file.type.startsWith('image/')) {
+          attachmentPreview.src = uploadedUrl;
+          attachmentPreview.style.display = "block";
+        } else {
+          attachmentPreview.style.display = "none";
+        }
+        
+        uploadProgress.style.display = "none";
 
-  } catch (err) {
-    console.error("Upload failed", err);
-    Swal.fire({ icon: 'error', title: 'Upload failed', text: 'Could not upload attachment.' });
-  }
-});
-
+      } catch (err) {
+        console.error("Upload failed", err);
+        uploadProgress.style.display = "none";
+        Swal.fire({ icon: 'error', title: 'Upload failed', text: 'Could not upload attachment.' });
+        this.value = '';
+      }
+    });
 
     // Save transaction
     saveTransactionBtn.addEventListener("click", async () => {
@@ -1237,45 +1279,68 @@ formATTACHFILE.addEventListener("change", async function () {
     });
 
     // View attachment
-function viewAttachment(attachmentUrl) {
-  if (!attachmentUrl) return;
+    function viewAttachment(attachmentUrl) {
+      if (!attachmentUrl) return;
 
-  const isPDF = attachmentUrl.toLowerCase().endsWith('.pdf');
+      const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(attachmentUrl);
+      const isPDF = /\.(pdf)$/i.test(attachmentUrl);
+      const isDocument = /\.(doc|docx|xls|xlsx|txt)$/i.test(attachmentUrl);
 
-  attachmentModalBody.innerHTML = `
-    <div class="mb-3">
-      <h6>Attachment Preview</h6>
-      ${isPDF
-        ? `<iframe src="${attachmentUrl}" width="100%" height="400px"></iframe>`
-        : `<a href="${attachmentUrl}" target="_blank">View File</a>`
-      }
-    </div>
-    <div>
-      <a class="btn btn-primary" href="${attachmentUrl}" download target="_blank">
-        <i class="fa fa-download me-1"></i> Download
-      </a>
-    </div>
-  `;
+      attachmentModalBody.innerHTML = `
+        <div class="mb-3">
+          <h6>Attachment Preview</h6>
+          ${isImage 
+            ? `<img src="${attachmentUrl}" class="img-fluid" style="max-height: 400px;" />`
+            : isPDF
+              ? `<iframe src="${attachmentUrl}" width="100%" height="400px"></iframe>`
+              : isDocument
+                ? `<div class="alert alert-info">Document files can be downloaded but not previewed</div>`
+                : `<div class="alert alert-info">File type not supported for preview</div>`
+          }
+        </div>
+        <div>
+          <a class="btn btn-primary" href="${attachmentUrl}" download target="_blank">
+            <i class="fa fa-download me-1"></i> Download
+          </a>
+        </div>
+      `;
 
-  attachmentModal.show();
-}
+      attachmentModal.show();
+    }
 
-
-async function uploadToCloudinary(file) {
-  const url = `https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/raw/upload`; // for PDFs and docs
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", "my_app_uploads");
-
-  const res = await fetch(url, {
-    method: "POST",
-    body: formData
-  });
-
-  const data = await res.json();
-  return data.secure_url; // This is what you'll store as attachment
-}
-
+    // Upload to Cloudinary with progress tracking
+    async function uploadToCloudinary(file, onProgress) {
+      return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+        
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            if (onProgress) onProgress(percent);
+          }
+        });
+        
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response.secure_url);
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        });
+        
+        xhr.addEventListener('error', () => {
+          reject(new Error('Upload failed'));
+        });
+        
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
+        xhr.send(formData);
+      });
+    }
     
     // Initialize with balance hidden
     updateBalanceVisibility();
