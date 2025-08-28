@@ -222,6 +222,12 @@
       width: 0%;
       transition: width 0.3s;
     }
+    
+    /* Loading spinner */
+    .spinner-border-sm {
+      width: 1rem;
+      height: 1rem;
+    }
   </style>
 </head>
 <body>
@@ -487,7 +493,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, where
+      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, where, limit
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -577,13 +583,14 @@
     const rowsPerPage = 5;
     let txToDelete = null;
     let balanceVisible = false; // Start with balance hidden
+    let isSubmitting = false;
+    let lastVoucherNumber = 0;
     
     // COA data
     let coaAccounts = [];
     let coaBanks = [];
 
     // Cloudinary config
-    // Cloudinary config - FIXED
     const CLOUDINARY_CLOUD_NAME = "dpwdsyvz8"; // Replace with your actual Cloudinary cloud name
     const CLOUDINARY_UPLOAD_PRESET = "my_app_uploads"; // Replace with your actual upload preset
 
@@ -747,9 +754,70 @@
         buildTable();
         updateStats();
         updateBankBalances();
+        
+        // Initialize voucher numbering
+        await initVoucherNumbering();
       } catch (err) {
         console.error("loadTransactions", err);
         transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+      }
+    }
+
+    // Add this function to initialize voucher numbering
+    async function initVoucherNumbering() {
+      try {
+        // Get the highest existing voucher number
+        const q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          orderBy("SINO", "desc"),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+          const lastTx = snap.docs[0].data();
+          if (lastTx.SINO) {
+            // Extract number from voucher format like "VOUCHER-001"
+            const match = lastTx.SINO.match(/\d+$/);
+            if (match) {
+              lastVoucherNumber = parseInt(match[0]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error initializing voucher numbering:", error);
+      }
+    }
+
+    // Add this function to generate voucher numbers
+    async function getNextVoucherNumber() {
+      try {
+        // Get the highest existing voucher number
+        const q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          orderBy("SINO", "desc"),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+          const lastTx = snap.docs[0].data();
+          if (lastTx.SINO) {
+            // Extract number from voucher format like "VOUCHER-001"
+            const match = lastTx.SINO.match(/\d+$/);
+            if (match) {
+              lastVoucherNumber = parseInt(match[0]);
+            }
+          }
+        }
+        
+        // Increment and format with leading zeros
+        lastVoucherNumber++;
+        return `VOUCHER-${lastVoucherNumber.toString().padStart(3, '0')}`;
+      } catch (error) {
+        console.error("Error getting voucher number:", error);
+        // Fallback: use timestamp
+        return `VOUCHER-${Date.now().toString().slice(-6)}`;
       }
     }
 
@@ -1087,12 +1155,44 @@
       statExpense.className = "stat-value expense-color";
     }
 
-    function openAddModal(){
+    // Add this function to handle income/expense field behavior
+    function setupIncomeExpenseBehavior() {
+      const typeSelect = document.getElementById("formTYPE");
+      const incomeInput = document.getElementById("formINCOME");
+      const expenseInput = document.getElementById("formEXPENSE");
+      
+      function updateFieldVisibility() {
+        if (typeSelect.value === "Income") {
+          incomeInput.disabled = false;
+          expenseInput.disabled = true;
+          expenseInput.value = "";
+        } else if (typeSelect.value === "Expense") {
+          incomeInput.disabled = true;
+          incomeInput.value = "";
+          expenseInput.disabled = false;
+        } else {
+          incomeInput.disabled = false;
+          expenseInput.disabled = false;
+        }
+      }
+      
+      // Set initial state
+      updateFieldVisibility();
+      
+      // Update on change
+      typeSelect.addEventListener("change", updateFieldVisibility);
+    }
+
+    async function openAddModal(){
       txIdInput.value = "";
       form.reset();
       formDATE.value = new Date().toISOString().split('T')[0];
       formTYPE.value = "Income";
       formVOUCHERTYPE.value = "Payment";
+      
+      // Auto-generate voucher number
+      formSINO.value = await getNextVoucherNumber();
+      
       formINCOME.value = "";
       formEXPENSE.value = "";
       formBALANCE.value = "";
@@ -1101,6 +1201,15 @@
       attachmentPreview.style.display = "none";
       attachmentInfo.textContent = "";
       uploadProgress.style.display = "none";
+      
+      // Enable all fields when opening modal
+      Array.from(form.elements).forEach(el => el.disabled = false);
+      saveTransactionBtn.style.display = "block";
+      saveTransactionBtn.disabled = false;
+      saveTransactionBtn.innerHTML = 'Save Transaction';
+      
+      // Set up income/expense field behavior
+      setupIncomeExpenseBehavior();
       
       document.getElementById("transactionModalLabel").textContent = "Add Transaction";
       transactionModal.show();
@@ -1164,11 +1273,16 @@
         attachmentInfo.textContent = "";
       }
       
+      // Set up income/expense field behavior
+      setupIncomeExpenseBehavior();
+      
       document.getElementById("transactionModalLabel").textContent = "Edit Transaction";
       
       // Enable all fields for edit mode
       Array.from(form.elements).forEach(el => el.disabled = false);
       saveTransactionBtn.style.display = "block";
+      saveTransactionBtn.disabled = false;
+      saveTransactionBtn.innerHTML = 'Save Transaction';
       
       transactionModal.show();
     }
@@ -1191,6 +1305,13 @@
         Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
       }
     });
+
+    // Add this function to reset the save button state
+    function resetSaveButton() {
+      isSubmitting = false;
+      saveTransactionBtn.disabled = false;
+      saveTransactionBtn.innerHTML = 'Save Transaction';
+    }
 
     // Handle file attachment
     formATTACHFILE.addEventListener("change", async function () {
@@ -1251,9 +1372,18 @@
 
     // Save transaction
     saveTransactionBtn.addEventListener("click", async () => {
+      // Prevent duplicate submissions
+      if (isSubmitting) return;
+      isSubmitting = true;
+      
+      // Show loading state
+      saveTransactionBtn.disabled = true;
+      saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+      
       // Validate form
       if (!formDATE.value) {
         Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
+        resetSaveButton();
         return;
       }
       
@@ -1291,6 +1421,8 @@
       } catch (err) {
         console.error("saveTransaction", err);
         Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
+      } finally {
+        resetSaveButton();
       }
     });
 
