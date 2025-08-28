@@ -147,13 +147,21 @@ companyViewBtn.addEventListener("click", ()=>{
   renderBalanceSheet("company");
 });
 
-// ===== Load Data =====
+let coaAccounts = []; // will store all accounts
+
 async function loadBalanceSheet(){
   loadingModal.style.display = "flex";
   try{
-    const q = query(collection(db,"users",currentUser.uid,"transactions"),orderBy("DATE","asc"));
+    // Load Chart of Accounts first
+    const coaSnap = await getDocs(collection(db, "chartOfAccounts"));
+    coaAccounts = coaSnap.docs
+      .filter(d => d.data().userId === currentUser.uid)
+      .map(d => ({ id: d.id, ...d.data() }));
+
+    // Load transactions
+    const q = query(collection(db,"users",currentUser.uid,"transactions"), orderBy("DATE","asc"));
     const snap = await getDocs(q);
-    transactions = snap.docs.map(d=>({id:d.id,...d.data()}));
+    transactions = snap.docs.map(d => ({id:d.id,...d.data()}));
 
     renderBalanceSheet("professional");
   } catch(err){
@@ -164,6 +172,7 @@ async function loadBalanceSheet(){
   }
 }
 
+
 // ===== Calculate Balances =====
 function calculateBalances(){
   let assets = {};
@@ -171,9 +180,11 @@ function calculateBalances(){
   let equity = {};
 
   transactions.forEach(tx=>{
-    const cat = tx.ACCOUNT_HEADER || "Uncategorized";
-    const amount = parseFloat(tx.INCOME || tx.EXPENSE || 0);
-    const type = tx.ACCOUNT_TYPE || "Asset"; // Make sure your Firestore has ACCOUNT_TYPE
+    // Find matching account from CoA
+    const acc = coaAccounts.find(a => a.id === tx.accountId || a.name === tx.ACCOUNT_HEADER);
+    const cat = acc ? acc.category : (tx.ACCOUNT_HEADER || "Uncategorized");
+    const type = acc ? acc.type : (tx.ACCOUNT_TYPE || "Asset");
+    const amount = parseFloat(tx.INCOME || tx.EXPENSE || tx.amount || 0);
 
     if(type === "Asset"){
       assets[cat] = (assets[cat]||0)+amount;
@@ -194,6 +205,7 @@ function calculateBalances(){
 
   return { assets, liabilities, equity };
 }
+
 
 // ===== Render Table =====
 function renderBalanceSheet(viewType){
