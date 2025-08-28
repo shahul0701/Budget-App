@@ -9,6 +9,11 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+  <!-- Export libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <style>
     :root{
@@ -199,6 +204,15 @@
       margin-top: 20px;
       justify-content: flex-end;
     }
+    
+    /* Transaction details modal */
+    .transaction-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .transaction-item:last-child {
+      border-bottom: none;
+    }
   </style>
 </head>
 <body>
@@ -349,6 +363,24 @@
     </div>
   </div>
 
+  <!-- Transaction Details Modal -->
+  <div class="modal fade" id="transactionDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="detailsModalTitle">Transaction Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="transactionDetailsBody">
+          <!-- Transaction details will be populated here -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Firebase + App logic -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -402,6 +434,11 @@
     const exportPDFBtn = document.getElementById("exportPDFBtn");
     const exportExcelBtn = document.getElementById("exportExcelBtn");
     const printReportBtn = document.getElementById("printReportBtn");
+
+    // Modal elements
+    const transactionDetailsModal = new bootstrap.Modal(document.getElementById('transactionDetailsModal'));
+    const detailsModalTitle = document.getElementById('detailsModalTitle');
+    const transactionDetailsBody = document.getElementById('transactionDetailsBody');
 
     // Stats
     const statIncome = document.getElementById("statIncome");
@@ -499,11 +536,11 @@
 
     // Export buttons
     exportPDFBtn.addEventListener("click", () => {
-      Swal.fire({ icon: 'info', title: 'Export PDF', text: 'PDF export functionality will be implemented here.' });
+      exportToPDF();
     });
     
     exportExcelBtn.addEventListener("click", () => {
-      Swal.fire({ icon: 'info', title: 'Export Excel', text: 'Excel export functionality will be implemented here.' });
+      exportToExcel();
     });
     
     printReportBtn.addEventListener("click", () => {
@@ -888,32 +925,68 @@
 
     // View bank details
     function viewBankDetails(bankName) {
-      Swal.fire({
-        title: `Transactions for ${bankName}`,
-        html: `Showing details for ${bankName} bank account.`,
-        icon: 'info',
-        confirmButtonText: 'OK'
-      });
+      const bankTransactions = filteredTransactions.filter(tx => 
+        (tx.BANK_NAME || tx.MODE || "") === bankName
+      );
+      
+      showTransactionDetails(bankTransactions, `Transactions for ${bankName}`);
     }
 
     // View category details
     function viewCategoryDetails(category) {
-      Swal.fire({
-        title: `Transactions for ${category}`,
-        html: `Showing details for ${category} category.`,
-        icon: 'info',
-        confirmButtonText: 'OK'
-      });
+      const categoryTransactions = filteredTransactions.filter(tx => 
+        (tx.ACCOUNT_HEADER || "") === category
+      );
+      
+      showTransactionDetails(categoryTransactions, `Transactions for ${category}`);
     }
 
     // View month details
     function viewMonthDetails(monthYear) {
-      Swal.fire({
-        title: `Transactions for ${monthYear}`,
-        html: `Showing details for ${monthYear}.`,
-        icon: 'info',
-        confirmButtonText: 'OK'
+      const [month, year] = monthYear.split(' ');
+      const monthTransactions = filteredTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const date = new Date(tx.DATE);
+        return date.toLocaleString('default', { month: 'long' }) === month && 
+               date.getFullYear().toString() === year;
       });
+      
+      showTransactionDetails(monthTransactions, `Transactions for ${monthYear}`);
+    }
+
+    // Show transaction details in modal
+    function showTransactionDetails(transactions, title) {
+      detailsModalTitle.textContent = title;
+      
+      if (transactions.length === 0) {
+        transactionDetailsBody.innerHTML = '<p class="text-center text-muted">No transactions found.</p>';
+      } else {
+        let html = '';
+        transactions.forEach(tx => {
+          const amount = parseFloat(tx.INCOME) || parseFloat(tx.EXPENSE) || 0;
+          const type = tx.INCOME ? 'income' : 'expense';
+          
+          html += `
+            <div class="transaction-item">
+              <div class="d-flex justify-content-between">
+                <div>
+                  <strong>${escapeHtml(tx.DESCRIPTION || 'No description')}</strong>
+                  <div class="small text-muted">${formatDate(tx.DATE)}</div>
+                </div>
+                <div class="text-end">
+                  <div class="${type === 'income' ? 'income-color' : 'expense-color'} fw-bold">
+                    ${type === 'income' ? '+' : '-'}$${amount.toFixed(2)}
+                  </div>
+                  <div class="small text-muted">${escapeHtml(tx.BANK_NAME || tx.MODE || '')}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        });
+        transactionDetailsBody.innerHTML = html;
+      }
+      
+      transactionDetailsModal.show();
     }
 
     // Build pagination
@@ -1005,6 +1078,223 @@
       // Update bank balances
       updateBankBalances();
     }
+    
+    // Export to PDF
+    function exportToPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      // Add title
+      doc.setFontSize(18);
+      doc.text('Financial Report', 14, 22);
+      
+      // Add date
+      doc.setFontSize(12);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+      
+      // Add summary
+      const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
+      const totalExpense = filteredTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
+      const balance = totalIncome - totalExpense;
+      
+      doc.text(`Total Income: $${totalIncome.toFixed(2)}`, 14, 40);
+      doc.text(`Total Expenses: $${totalExpense.toFixed(2)}`, 14, 48);
+      doc.text(`Net Balance: $${balance.toFixed(2)}`, 14, 56);
+      
+      // Add table
+      const tableColumn = [];
+      const tableRows = [];
+      
+      // Determine columns based on report type
+      switch(currentReportType) {
+        case 'bank':
+          tableColumn.push(['Bank Name', 'Income', 'Expenses', 'Balance']);
+          
+          const bankTotals = {};
+          coaBanks.forEach(bank => {
+            bankTotals[bank] = { income: 0, expense: 0, balance: 0 };
+          });
+          
+          filteredTransactions.forEach(tx => {
+            const bankName = tx.BANK_NAME || tx.MODE || "Unknown";
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!bankTotals[bankName]) {
+              bankTotals[bankName] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            bankTotals[bankName].income += income;
+            bankTotals[bankName].expense += expense;
+            bankTotals[bankName].balance += (income - expense);
+          });
+          
+          Object.entries(bankTotals).forEach(([bankName, data]) => {
+            if (data.income !== 0 || data.expense !== 0) {
+              tableRows.push([bankName, `$${data.income.toFixed(2)}`, `$${data.expense.toFixed(2)}`, `$${data.balance.toFixed(2)}`]);
+            }
+          });
+          break;
+          
+        case 'category':
+          tableColumn.push(['Category', 'Income', 'Expenses', 'Balance']);
+          
+          const categoryTotals = {};
+          filteredTransactions.forEach(tx => {
+            const category = tx.ACCOUNT_HEADER || "Uncategorized";
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!categoryTotals[category]) {
+              categoryTotals[category] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            categoryTotals[category].income += income;
+            categoryTotals[category].expense += expense;
+            categoryTotals[category].balance += (income - expense);
+          });
+          
+          Object.entries(categoryTotals).forEach(([category, data]) => {
+            tableRows.push([category, `$${data.income.toFixed(2)}`, `$${data.expense.toFixed(2)}`, `$${data.balance.toFixed(2)}`]);
+          });
+          break;
+          
+        case 'monthly':
+          tableColumn.push(['Month', 'Income', 'Expenses', 'Balance']);
+          
+          const monthlyTotals = {};
+          filteredTransactions.forEach(tx => {
+            if (!tx.DATE) return;
+            const date = new Date(tx.DATE);
+            const monthYear = `${date.toLocaleString('default', { month: 'long' })} ${date.getFullYear()}`;
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!monthlyTotals[monthYear]) {
+              monthlyTotals[monthYear] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            monthlyTotals[monthYear].income += income;
+            monthlyTotals[monthYear].expense += expense;
+            monthlyTotals[monthYear].balance += (income - expense);
+          });
+          
+          Object.entries(monthlyTotals).forEach(([monthYear, data]) => {
+            tableRows.push([monthYear, `$${data.income.toFixed(2)}`, `$${data.expense.toFixed(2)}`, `$${data.balance.toFixed(2)}`]);
+          });
+          break;
+      }
+      
+      // Add table to PDF
+      doc.autoTable({
+        head: tableColumn,
+        body: tableRows,
+        startY: 65,
+        theme: 'grid',
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [111, 66, 193] } // Purple color
+      });
+      
+      // Save the PDF
+      doc.save(`financial-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    }
+    
+    // Export to Excel
+    function exportToExcel() {
+      // Create a new workbook
+      const wb = XLSX.utils.book_new();
+      
+      // Prepare data based on report type
+      let data = [];
+      
+      switch(currentReportType) {
+        case 'bank':
+          data.push(['Bank Name', 'Income', 'Expenses', 'Balance']);
+          
+          const bankTotals = {};
+          coaBanks.forEach(bank => {
+            bankTotals[bank] = { income: 0, expense: 0, balance: 0 };
+          });
+          
+          filteredTransactions.forEach(tx => {
+            const bankName = tx.BANK_NAME || tx.MODE || "Unknown";
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!bankTotals[bankName]) {
+              bankTotals[bankName] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            bankTotals[bankName].income += income;
+            bankTotals[bankName].expense += expense;
+            bankTotals[bankName].balance += (income - expense);
+          });
+          
+          Object.entries(bankTotals).forEach(([bankName, totals]) => {
+            if (totals.income !== 0 || totals.expense !== 0) {
+              data.push([bankName, totals.income, totals.expense, totals.balance]);
+            }
+          });
+          break;
+          
+        case 'category':
+          data.push(['Category', 'Income', 'Expenses', 'Balance']);
+          
+          const categoryTotals = {};
+          filteredTransactions.forEach(tx => {
+            const category = tx.ACCOUNT_HEADER || "Uncategorized";
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!categoryTotals[category]) {
+              categoryTotals[category] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            categoryTotals[category].income += income;
+            categoryTotals[category].expense += expense;
+            categoryTotals[category].balance += (income - expense);
+          });
+          
+          Object.entries(categoryTotals).forEach(([category, totals]) => {
+            data.push([category, totals.income, totals.expense, totals.balance]);
+          });
+          break;
+          
+        case 'monthly':
+          data.push(['Month', 'Income', 'Expenses', 'Balance']);
+          
+          const monthlyTotals = {};
+          filteredTransactions.forEach(tx => {
+            if (!tx.DATE) return;
+            const date = new Date(tx.DATE);
+            const monthYear = `${date.toLocaleString('default', { month: 'long' })} ${date.getFullYear()}`;
+            const income = parseFloat(tx.INCOME) || 0;
+            const expense = parseFloat(tx.EXPENSE) || 0;
+            
+            if (!monthlyTotals[monthYear]) {
+              monthlyTotals[monthYear] = { income: 0, expense: 0, balance: 0 };
+            }
+            
+            monthlyTotals[monthYear].income += income;
+            monthlyTotals[monthYear].expense += expense;
+            monthlyTotals[monthYear].balance += (income - expense);
+          });
+          
+          Object.entries(monthlyTotals).forEach(([monthYear, totals]) => {
+            data.push([monthYear, totals.income, totals.expense, totals.balance]);
+          });
+          break;
+      }
+      
+      // Create worksheet
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "Financial Report");
+      
+      // Generate Excel file and trigger download
+      XLSX.writeFile(wb, `financial-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
 
     // Utility function to escape HTML
     function escapeHtml(text) {
@@ -1015,6 +1305,13 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+    }
+    
+    // Format date for display
+    function formatDate(dateString) {
+      if (!dateString) return "N/A";
+      const date = new Date(dateString);
+      return date.toLocaleDateString();
     }
     
     // Initialize with balance hidden
