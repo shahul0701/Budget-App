@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>General Report</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+<style>
+body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:0}
+.header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+.header-left{font-weight:bold}
+.header-right{display:flex;align-items:center;gap:10px}
+#userInitials{background:#007bff;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:bold}
+#username{font-weight:bold}
+#logoutBtn{background:#dc3545;color:white;border:none;border-radius:4px;padding:6px 12px;cursor:pointer}
+#logoutBtn:hover{background:#a71d2a}
+.container{max-width:1000px;margin:30px auto;background:#fff;padding:30px;border-radius:8px}
+h2{text-align:center;margin-bottom:10px}
+table{width:100%;margin-top:20px;border-collapse:collapse}
+th,td{padding:12px;border:1px solid #ccc;text-align:left}
+th{background:#f1f1f1}
+button{background:#28a745;color:#fff;padding:8px 16px;border:none;border-radius:5px;cursor:pointer}
+button:hover{background:#218838}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <a href="home.html" style="text-decoration:none;color:#007bff;font-weight:bold;">
+      <i class="fa fa-home"></i> Home
+    </a>
+    <span style="margin-left:20px;" id="datetime">Loading time...</span>
+  </div>
+  <div class="header-right">
+    <div id="userInitials">U</div>
+    <span id="username">User</span>
+    <button id="logoutBtn">Logout</button>
+  </div>
+</div>
+
+<div class="container">
+<h2>General Report (Bank-wise)</h2>
+<button id="exportBtn">Export CSV</button>
+<table>
+  <thead>
+    <tr>
+      <th>Bank Name</th>
+      <th>Type</th>
+      <th>Total Transactions</th>
+    </tr>
+  </thead>
+  <tbody id="reportTable"></tbody>
+</table>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+  authDomain: "budget-app-1365f.firebaseapp.com",
+  projectId: "budget-app-1365f",
+  storageBucket: "budget-app-1365f.appspot.com",
+  messagingSenderId: "1036194450411",
+  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+  measurementId: "G-YFFJL2H54X"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+const usernameElem = document.getElementById("username");
+const profileCircle = document.getElementById("userInitials");
+const logoutBtn = document.getElementById("logoutBtn");
+const datetimeElem = document.getElementById("datetime");
+const reportTable = document.getElementById("reportTable");
+
+let currentUser = null;
+let transactions = [];
+let coaAccounts = [];
+
+// Clock
+function updateTime(){datetimeElem.textContent=(new Date()).toLocaleString();}
+setInterval(updateTime,1000);updateTime();
+
+// Auth check
+onAuthStateChanged(auth,user=>{
+  if(user){
+    currentUser=user;
+    const storedUsername = user.displayName || user.email;
+    usernameElem.textContent=storedUsername;
+    profileCircle.textContent=storedUsername.charAt(0).toUpperCase();
+    loadReport();
+  }else{
+    setTimeout(()=>window.location.href="index.html",500);
+  }
+});
+
+logoutBtn.addEventListener("click", async()=>{
+  await signOut(auth);
+  window.location.href="index.html";
+});
+
+// Load report
+async function loadReport(){
+  try{
+    // Load CoA accounts (Bank types)
+    const coaSnap = await getDocs(collection(db,"chartOfAccounts"));
+    coaAccounts = coaSnap.docs
+      .filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category))
+      .map(d=>({id:d.id,...d.data()}));
+
+    // Load transactions
+    const txSnap = await getDocs(collection(db,"users",currentUser.uid,"transactions"));
+    transactions = txSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+    renderReport();
+  }catch(err){console.error(err); alert("Failed to load report: "+err.message);}
+}
+
+// Render table
+function renderReport(){
+  reportTable.innerHTML="";
+  const bankTotals={};
+
+  coaAccounts.forEach(acc=>{bankTotals[acc.name]=0;});
+
+  transactions.forEach(tx=>{
+    const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
+    if(acc){
+      const amt = Number(tx.amount || tx.INCOME || tx.EXPENSE || 0);
+      bankTotals[acc.name]+=amt;
+    }
+  });
+
+  for(const bank in bankTotals){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${bank}</td><td>Bank</td><td>₹${bankTotals[bank].toFixed(2)}</td>`;
+    reportTable.appendChild(tr);
+  }
+}
+
+// Export CSV
+document.getElementById("exportBtn").addEventListener("click",()=>{
+  let csv="Bank Name,Type,Total Transactions\n";
+  for(const bank in bankTotals){
+    csv+=`${bank},Bank,${bankTotals[bank].toFixed(2)}\n`;
+  }
+  const blob=new Blob([csv],{type:"text/csv"});
+  const link=document.createElement("a");
+  link.href=URL.createObjectURL(blob);
+  link.download="bank_report.csv";
+  link.click();
+});
+</script>
+
+</body>
+</html>
