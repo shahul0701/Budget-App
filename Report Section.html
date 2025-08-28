@@ -6,6 +6,9 @@
     <title>Profit & Loss Report</title>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     
     <style>
@@ -320,6 +323,20 @@
                     <option value="custom">Custom Range</option>
                 </select>
             </label>
+
+<div style="margin-bottom: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+    <label>
+        Chart Type:
+        <select id="chartTypeSelector">
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="pie">Pie</option>
+        </select>
+    </label>
+    <button id="exportPdfBtn">Export PDF</button>
+    <button id="exportCsvBtn">Export CSV</button>
+</div>
+
             
             <div id="customDateRange" style="display: none;">
                 <label>
@@ -783,6 +800,154 @@
             
             reportPeriodDisplay.textContent = "";
         }
+
+
+        function createOrUpdateChart(income, expenses) {
+    const ctx = document.getElementById('profitLossChart').getContext('2d');
+    const chartType = document.getElementById('chartTypeSelector').value;
+
+    if (profitLossChart) profitLossChart.destroy();
+
+    const data = {
+        labels: ['Income', 'Expenses', 'Net Profit/Loss'],
+        datasets: [{
+            label: 'Amount (₹)',
+            data: [income, expenses, income - expenses],
+            backgroundColor: [
+                'rgba(46, 204, 113, 0.7)',
+                'rgba(231, 76, 60, 0.7)',
+                'rgba(52, 152, 219, 0.7)'
+            ],
+            borderColor: [
+                'rgba(46, 204, 113, 1)',
+                'rgba(231, 76, 60, 1)',
+                'rgba(52, 152, 219, 1)'
+            ],
+            borderWidth: 1,
+            fill: false
+        }]
+    };
+
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: chartType === 'pie' ? {} : {
+            y: {
+                beginAtZero: true,
+                title: {
+                    display: true,
+                    text: 'Amount (₹)'
+                }
+            }
+        },
+        plugins: {
+            title: {
+                display: true,
+                text: 'Profit & Loss Overview',
+                font: {
+                    size: 16
+                }
+            },
+            legend: {
+                display: chartType === 'pie'
+            }
+        }
+    };
+
+    profitLossChart = new Chart(ctx, {
+        type: chartType,
+        data,
+        options
+    });
+}
+        document.getElementById("chartTypeSelector").addEventListener("change", () => {
+    const income = parseFloat(totalIncomeElem.textContent.replace(/[^\d.-]/g, ""));
+    const expenses = parseFloat(totalExpensesElem.textContent.replace(/[^\d.-]/g, ""));
+    createOrUpdateChart(income, expenses);
+});
+document.getElementById("exportPdfBtn").addEventListener("click", async () => {
+    const { jsPDF } = window.jspdf;
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+
+    pdf.setFontSize(18);
+    pdf.text("Profit & Loss Report", pageWidth / 2, 15, { align: 'center' });
+
+    pdf.setFontSize(12);
+    pdf.text(reportPeriodDisplay.textContent, pageWidth / 2, 25, { align: 'center' });
+
+    const canvas = await html2canvas(document.querySelector(".chart-container"));
+    const chartImg = canvas.toDataURL("image/png");
+
+    pdf.addImage(chartImg, "PNG", 10, 30, pageWidth - 20, 80);
+
+    let y = 115;
+
+    pdf.setFontSize(14);
+    pdf.text("Summary", 10, y);
+    y += 8;
+
+    pdf.setFontSize(12);
+    pdf.text(`Total Income: ${totalIncomeElem.textContent}`, 10, y); y += 8;
+    pdf.text(`Total Expenses: ${totalExpensesElem.textContent}`, 10, y); y += 8;
+    pdf.text(`Net Profit/Loss: ${netProfitElem.textContent}`, 10, y); y += 10;
+
+    const addBreakdown = (title, dataElem) => {
+        const items = dataElem.querySelectorAll(".transaction-item");
+        if (items.length === 0) return;
+
+        pdf.setFontSize(13);
+        pdf.text(title, 10, y); y += 7;
+
+        pdf.setFontSize(11);
+        items.forEach(item => {
+            const category = item.querySelector(".transaction-category").textContent;
+            const amount = item.querySelector(".transaction-amount").textContent;
+            pdf.text(`${category}: ${amount}`, 12, y);
+            y += 6;
+            if (y > 270) {
+                pdf.addPage();
+                y = 20;
+            }
+        });
+        y += 5;
+    };
+
+    addBreakdown("Income Breakdown", incomeBreakdownElem);
+    addBreakdown("Expense Breakdown", expenseBreakdownElem);
+
+    pdf.save("Profit-Loss-Report.pdf");
+});
+document.getElementById("exportCsvBtn").addEventListener("click", () => {
+    const rows = [
+        ["Category", "Type", "Amount"]
+    ];
+
+    const extractData = (elem, type) => {
+        const items = elem.querySelectorAll(".transaction-item");
+        items.forEach(item => {
+            const category = item.querySelector(".transaction-category").textContent;
+            const amount = item.querySelector(".transaction-amount").textContent.replace(/[^\d.-]/g, "");
+            rows.push([category, type, amount]);
+        });
+    };
+
+    extractData(incomeBreakdownElem, "Income");
+    extractData(expenseBreakdownElem, "Expense");
+
+    let csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "profit_loss_report.csv");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+});
+
+
     </script>
 </body>
 </html>
