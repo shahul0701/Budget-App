@@ -25,6 +25,11 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
 .pointer{cursor:pointer}
 #totals{margin-top:20px;font-weight:bold;font-size:16px;}
 #totals span{margin-right:20px;}
+.pagination{display:flex;justify-content:center;margin-top:20px;gap:5px}
+.pagination button{background:#007bff;color:white;border:none;padding:5px 10px;border-radius:3px;cursor:pointer}
+.pagination button:disabled{background:#6c757d;cursor:not-allowed}
+.pagination button:hover:not(:disabled){background:#0056b3}
+.loading{text-align:center;padding:20px;color:#6c757d}
 </style>
 </head>
 <body>
@@ -49,6 +54,7 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
 <div style="margin-bottom:15px;">
   <label>From: <input type="date" id="fromDate"></label>
   <label style="margin-left:10px;">To: <input type="date" id="toDate"></label>
+  <button id="applyFilterBtn" style="margin-left:10px;">Apply Filter</button>
 </div>
 
 <table>
@@ -60,7 +66,9 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
       <th>Net Balance</th>
     </tr>
   </thead>
-  <tbody id="reportTable"></tbody>
+  <tbody id="reportTable">
+    <tr><td colspan="4" class="loading">Loading bank data...</td></tr>
+  </tbody>
 </table>
 
 <div id="totals"></div>
@@ -78,12 +86,13 @@ input[type=date]{padding:6px;border-radius:4px;border:1px solid #ccc}
   </thead>
   <tbody id="transactionsTable"></tbody>
 </table>
+<div id="pagination" class="pagination"></div>
 
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // Firebase config
@@ -110,187 +119,315 @@ const transactionsTable = document.getElementById("transactionsTable");
 const transactionsTitle = document.getElementById("transactionsTitle");
 const fromDateInput = document.getElementById("fromDate");
 const toDateInput = document.getElementById("toDate");
+const applyFilterBtn = document.getElementById("applyFilterBtn");
 const totalsDiv = document.getElementById("totals");
+const paginationDiv = document.getElementById("pagination");
 
 let currentUser = null;
 let transactions = [];
 let coaAccounts = [];
+let currentBank = null;
+let currentPage = 1;
+const pageSize = 10;
+
+// Set default date range (current month)
+const today = new Date();
+const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+fromDateInput.value = formatDate(firstDayOfMonth);
+toDateInput.value = formatDate(lastDayOfMonth);
 
 // Clock
 function updateTime(){datetimeElem.textContent=(new Date()).toLocaleString();}
 setInterval(updateTime,1000); updateTime();
 
+// Format date to YYYY-MM-DD
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Auth check
-onAuthStateChanged(auth,user=>{
-  if(user){
-    currentUser=user;
+onAuthStateChanged(auth, user => {
+  if (user) {
+    currentUser = user;
     const storedUsername = user.displayName || user.email;
-    usernameElem.textContent=storedUsername;
-    profileCircle.textContent=storedUsername.charAt(0).toUpperCase();
+    usernameElem.textContent = storedUsername;
+    profileCircle.textContent = storedUsername.charAt(0).toUpperCase();
     loadReport();
-  }else{
-    window.location.href="login.html";
+  } else {
+    window.location.href = "login.html";
   }
 });
 
-logoutBtn.addEventListener("click", async()=>{await signOut(auth);window.location.href="login.html";});
+logoutBtn.addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+
+applyFilterBtn.addEventListener("click", () => {
+  if (currentBank) {
+    showTransactions(currentBank);
+  } else {
+    loadReport();
+  }
+});
 
 // Load CoA (Bank accounts) & Transactions
-async function loadReport(){
-  try{
-    // Load CoA accounts
-    const coaSnap = await getDocs(collection(db,"chartOfAccounts"));
-    coaAccounts = coaSnap.docs.filter(d=>d.data().userId===currentUser.uid && d.data().type==="Asset" && ["Bank","Cash"].includes(d.data().category))
-                              .map(d=>({id:d.id,...d.data()}));
+async function loadReport() {
+  try {
+    reportTable.innerHTML = '<tr><td colspan="4" class="loading">Loading bank data...</td></tr>';
+    
+    // Load CoA accounts (Bank and Cash types)
+    const coaQuery = query(
+      collection(db, "chartOfAccounts"),
+      where("userId", "==", currentUser.uid),
+      where("type", "==", "Asset")
+    );
+    
+    const coaSnap = await getDocs(coaQuery);
+    coaAccounts = coaSnap.docs
+      .filter(doc => ["Bank", "Cash"].includes(doc.data().category))
+      .map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    if (coaAccounts.length === 0) {
+      reportTable.innerHTML = '<tr><td colspan="4" class="loading">No bank accounts found.</td></tr>';
+      return;
+    }
 
-    // Load all transactions
-    const txSnap = await getDocs(collection(db,"users",currentUser.uid,"transactions"));
-    transactions = txSnap.docs.map(d=>({id:d.id,...d.data()}));
-
+    // Load transactions for the date range
+    await loadTransactions();
     renderReport();
-  }catch(err){console.error(err); alert("Failed to load report: "+err.message);}
+  } catch (err) {
+    console.error("Error loading report:", err);
+    reportTable.innerHTML = '<tr><td colspan="4" class="loading">Error loading data. Please try again.</td></tr>';
+  }
+}
+
+// Load transactions with date filtering
+async function loadTransactions() {
+  try {
+    const fromDate = fromDateInput.value ? new Date(fromDateInput.value) : null;
+    const toDate = toDateInput.value ? new Date(toDateInput.value) : null;
+    
+    // Adjust toDate to include the entire day
+    if (toDate) {
+      toDate.setHours(23, 59, 59, 999);
+    }
+    
+    // Create query constraints
+    const constraints = [where("userId", "==", currentUser.uid)];
+    
+    if (fromDate && toDate) {
+      constraints.push(where("date", ">=", fromDate));
+      constraints.push(where("date", "<=", toDate));
+    } else if (fromDate) {
+      constraints.push(where("date", ">=", fromDate));
+    } else if (toDate) {
+      constraints.push(where("date", "<=", toDate));
+    }
+    
+    // Query transactions
+    const txQuery = query(collection(db, "users", currentUser.uid, "transactions"), ...constraints);
+    const txSnap = await getDocs(txQuery);
+    
+    transactions = txSnap.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        // Convert Firestore Timestamp to Date if needed
+        date: data.date ? (data.date.toDate ? data.date.toDate() : new Date(data.date)) : null
+      };
+    });
+  } catch (err) {
+    console.error("Error loading transactions:", err);
+    transactions = [];
+  }
 }
 
 // Render Bank-wise summary
-function renderReport(){
-  reportTable.innerHTML="";
-  totalsDiv.innerHTML="";
+function renderReport() {
+  reportTable.innerHTML = "";
+  totalsDiv.innerHTML = "";
   const bankTotals = {};
 
-  coaAccounts.forEach(acc=>{
-    bankTotals[acc.name] = {income:0, expense:0};
+  // Initialize bank totals
+  coaAccounts.forEach(acc => {
+    bankTotals[acc.id] = {
+      name: acc.name,
+      income: 0,
+      expense: 0
+    };
   });
 
-  transactions.forEach(tx=>{
-    const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
-    if(acc){
-      const income = Number(tx.INCOME||0);
-      const expense = Number(tx.EXPENSE||0);
-      bankTotals[acc.name].income += income;
-      bankTotals[acc.name].expense += expense;
+  // Calculate totals
+  transactions.forEach(tx => {
+    const bankId = tx.accountId;
+    if (bankTotals[bankId]) {
+      const income = Number(tx.INCOME || 0);
+      const expense = Number(tx.EXPENSE || 0);
+      bankTotals[bankId].income += income;
+      bankTotals[bankId].expense += expense;
     }
   });
 
-  let totalIncome=0, totalExpenses=0;
+  let totalIncome = 0, totalExpenses = 0;
 
-  for(const bank in bankTotals){
-    const data = bankTotals[bank];
+  // Create table rows
+  for (const bankId in bankTotals) {
+    const data = bankTotals[bankId];
     const net = data.income - data.expense;
     totalIncome += data.income;
     totalExpenses += data.expense;
 
     const tr = document.createElement("tr");
     tr.classList.add("pointer");
-    tr.innerHTML = `<td>${bank}</td>
+    tr.innerHTML = `<td>${data.name}</td>
                     <td>₹${data.income.toFixed(2)}</td>
                     <td>₹${data.expense.toFixed(2)}</td>
-                    <td style="color:${net>=0?'green':'red'}">₹${net.toFixed(2)}</td>`;
-    tr.addEventListener("click",()=>showTransactions(bank));
+                    <td style="color:${net >= 0 ? 'green' : 'red'}">₹${net.toFixed(2)}</td>`;
+    tr.addEventListener("click", () => showTransactions(bankId));
     reportTable.appendChild(tr);
   }
 
+  // Display totals
   totalsDiv.innerHTML = `<span>Total Income: ₹${totalIncome.toFixed(2)}</span>
                          <span>Total Expenses: ₹${totalExpenses.toFixed(2)}</span>
-                         <span>Net: ₹${(totalIncome-totalExpenses).toFixed(2)}</span>`;
+                         <span>Net: ₹${(totalIncome - totalExpenses).toFixed(2)}</span>`;
 }
 
-// Show transactions for a bank with optional date filter
-function showTransactions(bankName){
-  transactionsTitle.textContent=`Transactions for ${bankName}`;
-  transactionsTable.innerHTML="";
-
+// Show transactions for a bank with pagination
+function showTransactions(bankId) {
+  currentBank = bankId;
+  const bank = coaAccounts.find(acc => acc.id === bankId);
+  if (!bank) return;
+  
+  transactionsTitle.textContent = `Transactions for ${bank.name}`;
+  transactionsTable.innerHTML = '<tr><td colspan="5" class="loading">Loading transactions...</td></tr>';
+  
   const fromDate = fromDateInput.value ? new Date(fromDateInput.value) : null;
   const toDate = toDateInput.value ? new Date(toDateInput.value) : null;
-
-  const filteredTx = transactions.filter(tx=>{
-    const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
-    if(!acc || acc.name!==bankName) return false;
-
-    if(fromDate || toDate){
-      const txDate = new Date(tx.date || tx.transactionDate || (tx.createdAt?.seconds?tx.createdAt.seconds*1000:null));
-      if(txDate){
-        if(fromDate && txDate<fromDate) return false;
-        if(toDate && txDate>toDate) return false;
-      }
+  
+  // Adjust toDate to include the entire day
+  if (toDate) {
+    toDate.setHours(23, 59, 59, 999);
+  }
+  
+  // Filter transactions by bank and date
+  const filteredTx = transactions.filter(tx => {
+    if (tx.accountId !== bankId) return false;
+    
+    if (fromDate || toDate) {
+      const txDate = tx.date ? new Date(tx.date) : null;
+      if (!txDate) return false;
+      
+      if (fromDate && txDate < fromDate) return false;
+      if (toDate && txDate > toDate) return false;
     }
+    
     return true;
   });
-
-  filteredTx.forEach(tx=>{
-    const type = Number(tx.INCOME||0) > 0 ? "Income" : "Expense";
-    const amount = type==="Income"?Number(tx.INCOME||0):Number(tx.EXPENSE||0);
-    const dateStr = tx.date||tx.transactionDate||"";
-    const tr = document.createElement("tr");
-    tr.innerHTML=`<td>${dateStr}</td><td>${tx.ACCOUNT_HEADER||""}</td><td>${type}</td><td>₹${amount.toFixed(2)}</td><td>${tx.notes||""}</td>`;
-    transactionsTable.appendChild(tr);
+  
+  // Sort by date (newest first)
+  filteredTx.sort((a, b) => {
+    const dateA = a.date ? new Date(a.date) : new Date(0);
+    const dateB = b.date ? new Date(b.date) : new Date(0);
+    return dateB - dateA;
   });
-}
-
-// Reload transactions on date change
-fromDateInput.addEventListener("change",()=>{ const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank); });
-toDateInput.addEventListener("change",()=>{ const firstBank = reportTable.querySelector("tr")?.children[0].textContent; if(firstBank) showTransactions(firstBank); });
-
-  let currentPage = 1;
-const pageSize = 10; // 10 transactions per page
-
-function showTransactions(bankName){
-  transactionsTitle.textContent=`Transactions for ${bankName}`;
-  const fromDate = fromDateInput.value ? new Date(fromDateInput.value) : null;
-  const toDate = toDateInput.value ? new Date(toDateInput.value) : null;
-
-  const filteredTx = transactions.filter(tx=>{
-    const acc = coaAccounts.find(a=>a.id===tx.accountId || a.name===tx.ACCOUNT_HEADER);
-    if(!acc || acc.name!==bankName) return false;
-
-    const txDate = new Date(tx.date || tx.transactionDate || (tx.createdAt?.seconds*1000));
-    if(fromDate && txDate<fromDate) return false;
-    if(toDate && txDate>toDate) return false;
-
-    return true;
-  });
-
+  
   const totalPages = Math.ceil(filteredTx.length / pageSize);
   currentPage = 1;
+  
+  renderTransactionPage(filteredTx, currentPage, totalPages);
+}
 
-  function renderPage(page){
-    transactionsTable.innerHTML="";
-    const start = (page-1)*pageSize;
-    const end = start + pageSize;
-    const pageTx = filteredTx.slice(start,end);
-
-    pageTx.forEach(tx=>{
-      const type = Number(tx.INCOME||0)>0?"Income":"Expense";
-      const amount = type==="Income"?Number(tx.INCOME||0):Number(tx.EXPENSE||0);
-      const dateStr = tx.date||tx.transactionDate||"";
-      const tr = document.createElement("tr");
-      tr.innerHTML=`<td>${dateStr}</td>
-                    <td>${tx.ACCOUNT_HEADER||""}</td>
+// Render a page of transactions
+function renderTransactionPage(transactions, page, totalPages) {
+  transactionsTable.innerHTML = "";
+  
+  if (transactions.length === 0) {
+    transactionsTable.innerHTML = '<tr><td colspan="5" class="loading">No transactions found.</td></tr>';
+    paginationDiv.innerHTML = "";
+    return;
+  }
+  
+  const start = (page - 1) * pageSize;
+  const end = Math.min(start + pageSize, transactions.length);
+  const pageTx = transactions.slice(start, end);
+  
+  pageTx.forEach(tx => {
+    const type = Number(tx.INCOME || 0) > 0 ? "Income" : "Expense";
+    const amount = type === "Income" ? Number(tx.INCOME || 0) : Number(tx.EXPENSE || 0);
+    const dateStr = tx.date ? formatDateDisplay(tx.date) : "No date";
+    
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${dateStr}</td>
+                    <td>${tx.ACCOUNT_HEADER || ""}</td>
                     <td>${type}</td>
                     <td>₹${amount.toFixed(2)}</td>
-                    <td>${tx.notes||""}</td>`;
-      transactionsTable.appendChild(tr);
+                    <td>${tx.notes || ""}</td>`;
+    transactionsTable.appendChild(tr);
+  });
+  
+  renderPagination(page, totalPages);
+}
+
+// Format date for display
+function formatDateDisplay(date) {
+  if (!date) return "";
+  
+  const d = new Date(date);
+  return d.toLocaleDateString();
+}
+
+// Render pagination controls
+function renderPagination(currentPage, totalPages) {
+  paginationDiv.innerHTML = "";
+  
+  if (totalPages <= 1) return;
+  
+  // Previous button
+  const prevBtn = document.createElement("button");
+  prevBtn.innerHTML = "&laquo;";
+  prevBtn.disabled = currentPage === 1;
+  prevBtn.addEventListener("click", () => {
+    if (currentPage > 1) {
+      currentPage--;
+      showTransactions(currentBank);
+    }
+  });
+  paginationDiv.appendChild(prevBtn);
+  
+  // Page buttons
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, startPage + 4);
+  
+  for (let i = startPage; i <= endPage; i++) {
+    const pageBtn = document.createElement("button");
+    pageBtn.textContent = i;
+    pageBtn.disabled = i === currentPage;
+    pageBtn.addEventListener("click", () => {
+      currentPage = i;
+      showTransactions(currentBank);
     });
-
-    // Pagination controls
-    let paginationDiv = document.getElementById("pagination");
-    if(!paginationDiv){
-      paginationDiv = document.createElement("div");
-      paginationDiv.id="pagination";
-      paginationDiv.style.margin="15px 0";
-      transactionsTable.parentNode.insertBefore(paginationDiv, transactionsTable.nextSibling);
-    }
-    paginationDiv.innerHTML="";
-    for(let i=1;i<=totalPages;i++){
-      const btn = document.createElement("button");
-      btn.textContent=i;
-      btn.style.marginRight="5px";
-      btn.disabled = (i===page);
-      btn.addEventListener("click",()=>renderPage(i));
-      paginationDiv.appendChild(btn);
-    }
+    paginationDiv.appendChild(pageBtn);
   }
-
-  renderPage(currentPage);
+  
+  // Next button
+  const nextBtn = document.createElement("button");
+  nextBtn.innerHTML = "&raquo;";
+  nextBtn.disabled = currentPage === totalPages;
+  nextBtn.addEventListener("click", () => {
+    if (currentPage < totalPages) {
+      currentPage++;
+      showTransactions(currentBank);
+    }
+  });
+  paginationDiv.appendChild(nextBtn);
 }
 </script>
 
