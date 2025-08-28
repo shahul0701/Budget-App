@@ -335,3 +335,7 @@ expenseTrackerBtn?.addEventListener("click", () => {
 closeExpenseModal?.addEventListener("click", () => {
   expenseModal.style.display = "none";
 });
+// === Navigation to Report Section ===
+ReportsBtn?.addEventListener("click", () => {
+  window.location.href = "Report Section.html.html";
+});
