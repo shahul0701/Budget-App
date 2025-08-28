@@ -337,5 +337,5 @@ closeExpenseModal?.addEventListener("click", () => {
 });
 // === Navigation to Report Section ===
 ReportsBtn?.addEventListener("click", () => {
-  window.location.href = "Report Section.html.html";
+  window.location.href = "Section.html";
 });
