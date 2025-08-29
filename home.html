@@ -347,6 +347,26 @@
       100% { transform: rotate(360deg); }
     }
 
+    /* Quick Transaction Button */
+    .quick-add-btn {
+      position: fixed;
+      right: 30px;
+      bottom: 100px;
+      background: var(--success);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      font-size: 20px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      z-index: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .grid {
@@ -367,6 +387,11 @@
 
       .main {
         margin-left: 0;
+      }
+      
+      .quick-add-btn {
+        bottom: 110px;
+        right: 25px;
       }
     }
   </style>
@@ -424,6 +449,11 @@
       </div>
     </div>
 
+    <!-- Quick Add Transaction Button -->
+    <button class="quick-add-btn" id="quickAddBtn">
+      <i class="fa fa-dollar-sign"></i>
+    </button>
+
     <!-- Add Reminder Button -->
     <button class="add-btn" id="addReminderBtn">
       <i class="fa fa-plus"></i>
@@ -471,6 +501,47 @@
         <button class="close-btn" onclick="closeReminderModal()">Cancel</button>
       </div>
     </div>
+
+    <!-- Quick Transaction Modal -->
+    <div class="popup" id="transactionModal">
+      <div class="popup-content">
+        <h2>Quick Add Transaction</h2>
+        <div class="form-group">
+          <label for="transactionType">Type</label>
+          <select id="transactionType">
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="transactionAmount">Amount</label>
+          <input type="number" id="transactionAmount" placeholder="Enter amount" step="0.01">
+        </div>
+        <div class="form-group">
+          <label for="transactionCategory">Category</label>
+          <select id="transactionCategory">
+            <option value="salary">Salary</option>
+            <option value="freelance">Freelance</option>
+            <option value="investment">Investment</option>
+            <option value="food">Food</option>
+            <option value="transport">Transport</option>
+            <option value="utilities">Utilities</option>
+            <option value="entertainment">Entertainment</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="transactionDescription">Description (optional)</label>
+          <input type="text" id="transactionDescription" placeholder="Enter description">
+        </div>
+        <div class="form-group">
+          <label for="transactionDate">Date</label>
+          <input type="date" id="transactionDate">
+        </div>
+        <button class="classic-btn" id="saveTransactionBtn">Save Transaction</button>
+        <button class="close-btn" onclick="closeTransactionModal()">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -499,15 +570,34 @@
     const profileMenu = document.getElementById("profileMenu");
     const userInitials = document.getElementById("userInitials");
     const addReminderBtn = document.getElementById("addReminderBtn");
+    const quickAddBtn = document.getElementById("quickAddBtn");
     const expensePopup = document.getElementById("expensePopup");
     const reminderModal = document.getElementById("reminderModal");
+    const transactionModal = document.getElementById("transactionModal");
     const saveReminderBtn = document.getElementById("saveReminderBtn");
+    const saveTransactionBtn = document.getElementById("saveTransactionBtn");
     
     // Stats elements
     const totalTransactionsEl = document.getElementById("totalTransactions");
     const currentBalanceEl = document.getElementById("currentBalance");
     const totalIncomeEl = document.getElementById("totalIncome");
     const totalExpensesEl = document.getElementById("totalExpenses");
+
+    // Calendar initialization
+    let calendar;
+    document.addEventListener('DOMContentLoaded', function() {
+      const calendarEl = document.getElementById('calendar');
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+          left: 'prev,next today',
+          center: 'title',
+          right: 'dayGridMonth,timeGridWeek,timeGridDay'
+        },
+        events: []
+      });
+      calendar.render();
+    });
 
     // Check if user is logged in
     auth.onAuthStateChanged((user) => {
@@ -601,6 +691,17 @@
       reminderModal.classList.remove("active");
     }
 
+    // Transaction Modal
+    quickAddBtn.addEventListener("click", () => {
+      // Set default date to today
+      document.getElementById("transactionDate").value = new Date().toISOString().split('T')[0];
+      transactionModal.classList.add("active");
+    });
+    
+    function closeTransactionModal() {
+      transactionModal.classList.remove("active");
+    }
+
     // Save reminder
     saveReminderBtn.addEventListener("click", async () => {
       const type = document.getElementById("reminderType").value;
@@ -635,20 +736,47 @@
       }
     });
 
-    // Calendar
-    let calendar;
-    document.addEventListener("DOMContentLoaded", function() {
-      let calendarEl = document.getElementById("calendar");
-      calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: "dayGridMonth",
-        headerToolbar: {
-          left: 'prev,next today',
-          center: 'title',
-          right: 'dayGridMonth,timeGridWeek,timeGridDay'
-        },
-        events: []
-      });
-      calendar.render();
+    // Save transaction
+    saveTransactionBtn.addEventListener("click", async () => {
+      const type = document.getElementById("transactionType").value;
+      const amount = parseFloat(document.getElementById("transactionAmount").value);
+      const category = document.getElementById("transactionCategory").value;
+      const description = document.getElementById("transactionDescription").value;
+      const date = document.getElementById("transactionDate").value;
+      const user = auth.currentUser;
+
+      if (!amount || amount <= 0 || !date) {
+        alert("Please enter a valid amount and date");
+        return;
+      }
+
+      try {
+        const transactionData = {
+          userId: user.uid,
+          type,
+          amount,
+          category,
+          description,
+          date,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        // Add to transactions collection
+        await db.collection("users").doc(user.uid).collection("transactions").add({
+          [type.toUpperCase()]: amount,
+          category,
+          description,
+          date,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        closeTransactionModal();
+        alert("Transaction added successfully!");
+        loadFinancialData(user.uid); // Refresh financial data
+      } catch (error) {
+        console.error("Error adding transaction: ", error);
+        alert("Error adding transaction. Please try again.");
+      }
     });
 
     // Load calendar events
@@ -682,6 +810,7 @@
         
         calendar.removeAllEvents();
         calendar.addEventSource(events);
+        calendar.refetchEvents();
       } catch (error) {
         console.error("Error loading reminders: ", error);
       }
