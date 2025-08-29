@@ -44,66 +44,6 @@
       min-height: 100vh;
     }
 
-    /* Auth Container */
-    .auth-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-
-    .auth-box {
-      background: white;
-      padding: 2rem;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-      width: 90%;
-      max-width: 400px;
-      text-align: center;
-    }
-
-    .auth-box h2 {
-      margin-bottom: 1.5rem;
-      color: var(--dark);
-    }
-
-    .auth-box input {
-      width: 100%;
-      padding: 12px;
-      margin: 8px 0;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 16px;
-    }
-
-    .auth-btn {
-      width: 100%;
-      padding: 12px;
-      margin: 10px 0;
-      border: none;
-      border-radius: 6px;
-      background: var(--primary);
-      color: white;
-      font-size: 16px;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-
-    .auth-btn:hover {
-      background: var(--secondary);
-    }
-
-    .auth-switch {
-      margin-top: 1rem;
-      color: #666;
-      cursor: pointer;
-    }
-
-    .auth-switch:hover {
-      text-decoration: underline;
-    }
-
     /* Dashboard */
     .dashboard {
       display: none;
@@ -432,26 +372,6 @@
   </style>
 </head>
 <body>
-  <!-- Auth Container -->
-  <div class="auth-container" id="authContainer">
-    <div class="auth-box">
-      <h2>Welcome to BudgetFlow</h2>
-      <div id="loginForm">
-        <input type="email" id="loginEmail" placeholder="Email">
-        <input type="password" id="loginPassword" placeholder="Password">
-        <button class="auth-btn" onclick="login()">Login</button>
-        <p class="auth-switch" onclick="showRegisterForm()">Don't have an account? Register</p>
-      </div>
-      <div id="registerForm" style="display: none;">
-        <input type="text" id="registerName" placeholder="Full Name">
-        <input type="email" id="registerEmail" placeholder="Email">
-        <input type="password" id="registerPassword" placeholder="Password">
-        <button class="auth-btn" onclick="register()">Register</button>
-        <p class="auth-switch" onclick="showLoginForm()">Already have an account? Login</p>
-      </div>
-    </div>
-  </div>
-
   <!-- Dashboard -->
   <div class="dashboard" id="dashboard">
     <!-- Sidebar -->
@@ -480,20 +400,20 @@
     <div class="main" id="main">
       <div class="grid">
         <div class="card dark">
-          <h3>Sales Statistics</h3>
-          <div class="value">2,025</div>
+          <h3>Total Transactions</h3>
+          <div class="value" id="totalTransactions">0</div>
         </div>
         <div class="card green">
           <h3>Current Balance</h3>
-          <div class="value">$15,368</div>
+          <div class="value" id="currentBalance">$0.00</div>
         </div>
         <div class="card purple">
-          <h3>Market Forecast</h3>
-          <div class="value">$21,105</div>
+          <h3>Total Income</h3>
+          <div class="value" id="totalIncome">$0.00</div>
         </div>
         <div class="card">
-          <h3>Recent Transactions</h3>
-          <div class="value">+ $3,200</div>
+          <h3>Total Expenses</h3>
+          <div class="value" id="totalExpenses">$0.00</div>
         </div>
       </div>
 
@@ -571,7 +491,6 @@
     const auth = firebase.auth();
 
     // DOM Elements
-    const authContainer = document.getElementById("authContainer");
     const dashboard = document.getElementById("dashboard");
     const sidebar = document.getElementById("sidebar");
     const menuToggle = document.getElementById("menuToggle");
@@ -583,79 +502,62 @@
     const expensePopup = document.getElementById("expensePopup");
     const reminderModal = document.getElementById("reminderModal");
     const saveReminderBtn = document.getElementById("saveReminderBtn");
-    const loginForm = document.getElementById("loginForm");
-    const registerForm = document.getElementById("registerForm");
+    
+    // Stats elements
+    const totalTransactionsEl = document.getElementById("totalTransactions");
+    const currentBalanceEl = document.getElementById("currentBalance");
+    const totalIncomeEl = document.getElementById("totalIncome");
+    const totalExpensesEl = document.getElementById("totalExpenses");
 
     // Check if user is logged in
     auth.onAuthStateChanged((user) => {
       if (user) {
         // User is signed in
-        authContainer.style.display = "none";
         dashboard.style.display = "block";
         userInitials.textContent = user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase();
-        loadCalendarEvents();
+        loadFinancialData(user.uid);
+        loadCalendarEvents(user.uid);
       } else {
-        // User is signed out
-        authContainer.style.display = "flex";
-        dashboard.style.display = "none";
+        // User is signed out - redirect to login
+        window.location.href = "index.html";
       }
     });
 
-    // Auth functions
-    function showRegisterForm() {
-      loginForm.style.display = "none";
-      registerForm.style.display = "block";
-    }
-
-    function showLoginForm() {
-      registerForm.style.display = "none";
-      loginForm.style.display = "block";
-    }
-
-    function login() {
-      const email = document.getElementById("loginEmail").value;
-      const password = document.getElementById("loginPassword").value;
-      
-      auth.signInWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          // Signed in
-          console.log("User logged in:", userCredential.user);
-        })
-        .catch((error) => {
-          alert("Login error: " + error.message);
+    // Load financial data from transactions
+    async function loadFinancialData(userId) {
+      try {
+        // Query transactions for this user
+        const transactionsQuery = db.collection("users").doc(userId).collection("transactions");
+        const snapshot = await transactionsQuery.get();
+        
+        let totalIncome = 0;
+        let totalExpenses = 0;
+        let totalTransactions = 0;
+        
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          totalIncome += parseFloat(data.INCOME || 0);
+          totalExpenses += parseFloat(data.EXPENSE || 0);
+          totalTransactions++;
         });
-    }
-
-    function register() {
-      const name = document.getElementById("registerName").value;
-      const email = document.getElementById("registerEmail").value;
-      const password = document.getElementById("registerPassword").value;
-      
-      auth.createUserWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          // Signed up
-          const user = userCredential.user;
-          return user.updateProfile({
-            displayName: name
-          });
-        })
-        .then(() => {
-          // Create user document in Firestore
-          const user = auth.currentUser;
-          return db.collection("users").doc(user.uid).set({
-            name: name,
-            email: email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        })
-        .catch((error) => {
-          alert("Registration error: " + error.message);
-        });
+        
+        const currentBalance = totalIncome - totalExpenses;
+        
+        // Update the dashboard with real data
+        totalTransactionsEl.textContent = totalTransactions;
+        currentBalanceEl.textContent = `$${currentBalance.toFixed(2)}`;
+        totalIncomeEl.textContent = `$${totalIncome.toFixed(2)}`;
+        totalExpensesEl.textContent = `$${totalExpenses.toFixed(2)}`;
+        
+      } catch (error) {
+        console.error("Error loading financial data:", error);
+      }
     }
 
     function logout() {
       auth.signOut().then(() => {
         console.log("User signed out");
+        window.location.href = "index.html";
       }).catch((error) => {
         alert("Logout error: " + error.message);
       });
@@ -690,6 +592,8 @@
 
     // Reminder Modal
     addReminderBtn.addEventListener("click", () => {
+      // Set default date to today
+      document.getElementById("reminderDate").value = new Date().toISOString().split('T')[0];
       reminderModal.classList.add("active");
     });
     
@@ -724,7 +628,7 @@
         
         closeReminderModal();
         alert("Reminder added successfully!");
-        loadCalendarEvents(); // Refresh calendar
+        loadCalendarEvents(user.uid); // Refresh calendar
       } catch (error) {
         console.error("Error adding reminder: ", error);
         alert("Error adding reminder. Please try again.");
@@ -748,13 +652,10 @@
     });
 
     // Load calendar events
-    async function loadCalendarEvents() {
-      const user = auth.currentUser;
-      if (!user) return;
-      
+    async function loadCalendarEvents(userId) {
       try {
         const snapshot = await db.collection("reminders")
-          .where("userId", "==", user.uid)
+          .where("userId", "==", userId)
           .get();
         
         const events = [];
