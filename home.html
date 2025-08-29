@@ -17,6 +17,13 @@
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <!-- Firebase Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <!-- Firebase Auth -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+
   <style>
     :root {
       --purple-1: #6f42c1;
@@ -682,6 +689,22 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.firebasestorage.app",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
     // DOM references
     const sidebar = document.getElementById('sidebar');
     const menuToggle = document.getElementById('menuToggle');
@@ -697,6 +720,9 @@
     const dashboardView = document.querySelector('.dashboard-view');
     const transactionFormContainer = document.getElementById('transactionFormContainer');
     const datetimeElement = document.getElementById('datetime');
+    const usernameElement = document.getElementById('username');
+    const userInitialsElement = document.getElementById('userInitials');
+    const timeFilter = document.getElementById('timeFilter');
     
     // Transaction form DOM refs
     const form = document.getElementById("transactionForm");
@@ -722,10 +748,18 @@
     const CLOUDINARY_CLOUD_NAME = "your_cloud_name_here";
     const CLOUDINARY_UPLOAD_PRESET = "your_upload_preset_here";
 
+    // Global variables
+    let currentUser = null;
+    let transactions = [];
+    let spendingChart = null;
+
     // Initialize the application
     function initApp() {
       updateDateTime();
       setInterval(updateDateTime, 1000);
+      
+      // Initialize authentication
+      initAuthentication();
       
       // Initialize sidebar toggle
       menuToggle.addEventListener('click', toggleSidebar);
@@ -760,11 +794,43 @@
         item.addEventListener('click', handleSidebarNavigation);
       });
       
-      // Initialize transaction form
-      initTransactionForm();
+      // Initialize time filter change
+      timeFilter.addEventListener('change', loadTransactions);
+    }
+
+    // Initialize authentication
+    function initAuthentication() {
+      auth.onAuthStateChanged((user) => {
+        if (user) {
+          currentUser = user;
+          usernameElement.textContent = user.displayName || user.email;
+          userInitialsElement.textContent = getUserInitials(user.displayName || user.email);
+          
+          // Load user data
+          loadTransactions();
+        } else {
+          // Redirect to login or use anonymous auth
+          auth.signInAnonymously().catch((error) => {
+            console.error("Anonymous auth failed:", error);
+            Swal.fire({
+              icon: 'error',
+              title: 'Authentication Error',
+              text: 'Failed to initialize the application. Please refresh the page.'
+            });
+          });
+        }
+      });
+    }
+
+    // Get user initials from name/email
+    function getUserInitials(name) {
+      if (!name) return "U";
       
-      // Initialize dashboard charts and calendar
-      initDashboard();
+      const parts = name.split(' ');
+      if (parts.length > 1) {
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+      }
+      return name.charAt(0).toUpperCase();
     }
 
     // Update date and time
@@ -810,8 +876,12 @@
         confirmButtonText: 'Yes, logout!'
       }).then((result) => {
         if (result.isConfirmed) {
-          // Perform logout actions here
-          Swal.fire('Logged out!', 'You have been successfully logged out.', 'success');
+          auth.signOut().then(() => {
+            Swal.fire('Logged out!', 'You have been successfully logged out.', 'success');
+          }).catch((error) => {
+            console.error("Logout error:", error);
+            Swal.fire('Error!', 'Failed to logout. Please try again.', 'error');
+          });
         }
       });
     }
@@ -831,6 +901,7 @@
       } else if (view === 'transaction-form') {
         dashboardView.style.display = 'none';
         transactionFormContainer.style.display = 'block';
+        initTransactionForm();
       }
       
       // On mobile, close sidebar after selection
@@ -962,7 +1033,8 @@
         DESCRIPTION: formNOTES.value,
         ATTACHMENT: formATTACH.value,
         MODE: formBANKNAME.value,
-        UPDATED_AT: new Date().toISOString()
+        UPDATED_AT: new Date().toISOString(),
+        userId: currentUser.uid
       };
       
       // Show loading state
@@ -972,9 +1044,14 @@
       submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
       
       try {
-        // In a real implementation, you would save to your database here
-        // For demo, we'll simulate a delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Save to Firestore
+        if (txIdInput.value) {
+          // Update existing transaction
+          await db.collection("transactions").doc(txIdInput.value).update(txData);
+        } else {
+          // Add new transaction
+          await db.collection("transactions").add(txData);
+        }
         
         // Success message
         Swal.fire({ icon: 'success', title: 'Success', text: 'Transaction saved successfully' });
@@ -982,6 +1059,9 @@
         // Reset form
         form.reset();
         initTransactionForm();
+        
+        // Reload transactions to update dashboard
+        loadTransactions();
         
       } catch (err) {
         console.error("Save failed", err);
@@ -993,63 +1073,145 @@
       }
     }
 
-    // Initialize dashboard
-    function initDashboard() {
-      // Mock data for the dashboard
-      document.getElementById('totalIncome').textContent = '₹12,345.67';
-      document.getElementById('totalExpenses').textContent = '₹8,901.23';
-      
-      // Initialize spending chart
-      initSpendingChart();
-      
-      // Initialize calendar
-      initCalendar();
+    // Load transactions from Firestore
+    async function loadTransactions() {
+      try {
+        const timeFilterValue = timeFilter.value;
+        const now = new Date();
+        let startDate;
+        
+        // Calculate start date based on filter
+        switch(timeFilterValue) {
+          case 'today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+          case 'week':
+            startDate = new Date(now);
+            startDate.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
+            break;
+          case 'month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            break;
+          case 'year':
+            startDate = new Date(now.getFullYear(), 0, 1);
+            break;
+          default:
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        }
+        
+        // Query transactions for the current user and time period
+        const transactionsSnapshot = await db.collection("transactions")
+          .where("userId", "==", currentUser.uid)
+          .where("DATE", ">=", startDate.toISOString().split('T')[0])
+          .orderBy("DATE", "desc")
+          .get();
+        
+        transactions = [];
+        let totalIncome = 0;
+        let totalExpenses = 0;
+        
+        transactionsSnapshot.forEach(doc => {
+          const data = doc.data();
+          transactions.push({
+            id: doc.id,
+            ...data
+          });
+          
+          // Calculate totals
+          totalIncome += data.INCOME || 0;
+          totalExpenses += data.EXPENSE || 0;
+        });
+        
+        // Update UI with calculated totals
+        document.getElementById('totalIncome').textContent = `₹${totalIncome.toFixed(2)}`;
+        document.getElementById('totalExpenses').textContent = `₹${totalExpenses.toFixed(2)}`;
+        
+        // Update the spending chart
+        updateSpendingChart();
+        
+      } catch (error) {
+        console.error("Error loading transactions:", error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to load transactions. Please try again.'
+        });
+      }
     }
 
-    // Initialize spending chart
-    function initSpendingChart() {
+    // Update spending chart with transaction data
+    function updateSpendingChart() {
       const ctx = document.getElementById('spendingChart').getContext('2d');
       
-      // Mock data
-      const data = {
-        labels: ['Rent', 'Food', 'Transport', 'Entertainment', 'Utilities', 'Other'],
-        datasets: [{
-          label: 'Expenses by Category',
-          data: [3000, 1500, 800, 500, 700, 1000],
-          backgroundColor: [
-            'rgba(111, 66, 193, 0.8)',
-            'rgba(54, 162, 235, 0.8)',
-            'rgba(255, 206, 86, 0.8)',
-            'rgba(75, 192, 192, 0.8)',
-            'rgba(153, 102, 255, 0.8)',
-            'rgba(255, 159, 64, 0.8)'
-          ],
-          borderColor: [
-            'rgba(111, 66, 193, 1)',
-            'rgba(54, 162, 235, 1)',
-            'rgba(255, 206, 86, 1)',
-            'rgba(75, 192, 192, 1)',
-            'rgba(153, 102, 255, 1)',
-            'rgba(255, 159, 64, 1)'
-          ],
-          borderWidth: 1
-        }]
-      };
-      
-      // Create chart
-      new Chart(ctx, {
-        type: 'doughnut',
-        data: data,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            }
-          }
+      // Categorize expenses
+      const categories = {};
+      transactions.forEach(tx => {
+        if (tx.EXPENSE > 0) {
+          const category = tx.ACCOUNT_HEADER || 'Uncategorized';
+          categories[category] = (categories[category] || 0) + tx.EXPENSE;
         }
       });
+      
+      // Prepare chart data
+      const labels = Object.keys(categories);
+      const data = Object.values(categories);
+      
+      // If no data, show a message
+      if (data.length === 0) {
+        ctx.font = "16px Arial";
+        ctx.fillStyle = "#999";
+        ctx.textAlign = "center";
+        ctx.fillText("No expense data available", ctx.canvas.width / 2, ctx.canvas.height / 2);
+        return;
+      }
+      
+      // Create or update chart
+      if (spendingChart) {
+        spendingChart.data.labels = labels;
+        spendingChart.data.datasets[0].data = data;
+        spendingChart.update();
+      } else {
+        spendingChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Expenses by Category',
+              data: data,
+              backgroundColor: [
+                'rgba(111, 66, 193, 0.8)',
+                'rgba(54, 162, 235, 0.8)',
+                'rgba(255, 206, 86, 0.8)',
+                'rgba(75, 192, 192, 0.8)',
+                'rgba(153, 102, 255, 0.8)',
+                'rgba(255, 159, 64, 0.8)',
+                'rgba(220, 53, 69, 0.8)',
+                'rgba(40, 167, 69, 0.8)'
+              ],
+              borderColor: [
+                'rgba(111, 66, 193, 1)',
+                'rgba(54, 162, 235, 1)',
+                'rgba(255, 206, 86, 1)',
+                'rgba(75, 192, 192, 1)',
+                'rgba(153, 102, 255, 1)',
+                'rgba(255, 159, 64, 1)',
+                'rgba(220, 53, 69, 1)',
+                'rgba(40, 167, 69, 1)'
+              ],
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom'
+              }
+            }
+          }
+        });
+      }
     }
 
     // Initialize calendar
