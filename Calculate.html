@@ -43,6 +43,7 @@
   .delete{color:var(--danger);cursor:pointer}
   @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
   footer{padding:10px 18px;background:#f8fafc;border-top:1px solid #eef5fb;font-size:0.9rem;color:var(--muted)}
+  .note {font-size:0.85rem;color:#374151;margin-top:8px}
 </style>
 </head>
 <body>
@@ -165,7 +166,7 @@
 
       <!-- Mileage -->
       <section id="mileage" class="panel section" aria-hidden="true">
-        <div class="small">Mileage tracker (saved in browser)</div>
+        <div class="small">Mileage tracker (saved to Firebase & localStorage)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <input id="vehicle" class="input" placeholder="Vehicle name">
           <input id="odo" class="input" placeholder="Odometer (km)" type="number" step="any">
@@ -319,11 +320,12 @@
 
       <div class="live-card">
         <strong>Mileage Export</strong>
-        <div class="small muted" style="margin-top:8px">Export or clear local mileage</div>
+        <div class="small muted" style="margin-top:8px">Export or clear mileage (local fallback)</div>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn" onclick="exportMileageCSV()">Export CSV</button>
           <button class="btn ghost" onclick="clearMileageStorage()">Clear</button>
         </div>
+        <div class="note">If Firestore is accessible you'll see saved records from your Firebase project; otherwise localStorage backup is used.</div>
       </div>
     </aside>
   </div>
@@ -332,11 +334,14 @@
 </div>
 
 <script type="module">
-/* ---------------- Firebase ---------------- */
+/* ======================= MODULE SCRIPT - single script only ======================= */
+/* Firebase SDK */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } 
-  from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import {
+  getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
+/* ------------------ CONFIG: Use your Firebase config here (you provided it) ------------------ */
 const firebaseConfig = {
   apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
   authDomain: "budget-app-1365f.firebaseapp.com",
@@ -346,25 +351,32 @@ const firebaseConfig = {
   appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
   measurementId: "G-YFFJL2H54X"
 };
+/* Initialize Firebase (wrapped in try in case user blocks it) */
+let db = null;
+try {
+  const app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+} catch (e) {
+  console.warn('Firebase init failed or blocked:', e);
+}
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-/* ---------------- API constants ---------------- */
+/* ------------------ API endpoints ------------------ */
 const API = {
   SYMBOLS: "https://api.exchangerate.host/symbols",
   CONVERT: "https://api.exchangerate.host/convert",
-  LATEST: "https://api.exchangerate.host/latest"
+  LATEST: "https://api.exchangerate.host/latest",
+  GOLDPRICE: "https://data-asg.goldprice.org/dbXRates/USD",
+  COINGECKO_SIMPLE: "https://api.coingecko.com/api/v3/simple/price"
 };
 
-/* ---------------- Helpers ---------------- */
+/* ------------------ small fetch wrapper ------------------ */
 async function fetchJson(url, opts = {}, timeout = 12000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
     const res = await fetch(url, { ...opts, signal: controller.signal });
     clearTimeout(id);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
     return await res.json();
   } catch (err) {
     clearTimeout(id);
@@ -372,98 +384,373 @@ async function fetchJson(url, opts = {}, timeout = 12000) {
   }
 }
 
-/* ---------------- Tabs switching ---------------- */
+/* ------------------ Tabs switching ------------------ */
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    document.getElementById(t.dataset.tab).classList.add('active');
+    const id = t.dataset.tab;
+    const p = document.getElementById(id);
+    if (p) p.classList.add('active');
   });
 });
 
-/* ---------------- Mileage with Firebase ---------------- */
-async function addMileage() {
-  const vehicle = document.getElementById("vehicle").value;
+/* ------------------ History UI ------------------ */
+const historyEl = document.getElementById('history');
+function addHistory(txt){
+  const el = document.createElement('div'); el.className = 'tiny'; el.textContent = new Date().toLocaleString() + ' — ' + txt;
+  historyEl.prepend(el);
+  while(historyEl.children.length > 200) historyEl.removeChild(historyEl.lastChild);
+}
+function copyHistory(){ navigator.clipboard?.writeText(Array.from(historyEl.children).map(c=>c.textContent).join('\n')).then(()=>alert('Copied')) }
+function downloadHistory(){
+  const rows = [['timestamp','entry']];
+  Array.from(historyEl.children).forEach(ch => rows.push([new Date().toISOString(), ch.textContent]));
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'calc_history.csv'; a.click(); URL.revokeObjectURL(url);
+}
+
+/* ------------------ STANDARD calculator ------------------ */
+let stdVal = '0'; const stdDisplay = document.getElementById('std-display');
+function stdUpdate(){ stdDisplay.value = stdVal; }
+function stdAppend(v){ if(stdVal==='0' && v!=='.') stdVal = v; else stdVal += v; stdUpdate(); }
+function stdClear(){ stdVal = '0'; stdUpdate(); }
+function stdBack(){ stdVal = stdVal.length>1 ? stdVal.slice(0,-1) : '0'; stdUpdate(); }
+function stdCalculate(){
+  try {
+    let expr = stdVal.replace(/×/g,'*').replace(/÷/g,'/');
+    expr = expr.replace(/(\d+(\.\d+)?)%/g,'($1/100)');
+    const res = Function('"use strict";return ('+expr+')')();
+    addHistory(`${stdVal} = ${res}`);
+    stdVal = String(res); stdUpdate();
+  } catch (e) {
+    stdVal = 'Error'; stdUpdate();
+    setTimeout(()=>{ stdVal='0'; stdUpdate(); },1500);
+  }
+}
+
+/* ------------------ SCIENTIFIC ------------------ */
+let sciVal = '0'; const sciDisplay = document.getElementById('sci-display');
+function sciUpdate(){ sciDisplay.value = sciVal; }
+function sciAppend(v){ if(sciVal==='0' && v!=='.') sciVal = v; else sciVal += v; sciUpdate(); }
+function sciClear(){ sciVal='0'; sciUpdate(); }
+function sciBack(){ sciVal = sciVal.length>1 ? sciVal.slice(0,-1) : '0'; sciUpdate(); }
+function sciCalculate(){ try { let expr = sciVal.replace(/π/g,'Math.PI').replace(/\^/g,'**'); const res = Function('"use strict";return ('+expr+')')(); addHistory(`${sciVal} = ${res}`); sciVal = String(res); sciUpdate(); } catch(e){ sciVal='Error'; sciUpdate(); setTimeout(()=>sciVal='0',1200); } }
+function sciFunc(fn){ try{ let v = parseFloat(sciVal); if(isNaN(v)) v = 0; let r; switch(fn){ case 'sin': r = Math.sin(v*Math.PI/180); break; case 'cos': r = Math.cos(v*Math.PI/180); break; case 'tan': r = Math.tan(v*Math.PI/180); break; case 'sqrt': r = Math.sqrt(v); break; case 'log': r = Math.log10(v); break; case 'ln': r = Math.log(v); break; default: r = v; } addHistory(`${fn}(${v}) = ${r}`); sciVal = String(r); sciUpdate(); }catch(e){ sciVal='Error'; sciUpdate(); } }
+function sciFact(){ const n = parseInt(sciVal); if(isNaN(n)||n<0){ sciVal='Error'; sciUpdate(); return; } let r=1; for(let i=2;i<=n;i++) r*=i; addHistory(`${n}! = ${r}`); sciVal = String(r); sciUpdate(); }
+
+/* ------------------ CURRENCY symbols + convert ------------------ */
+const fromSelect = document.getElementById('from-currency'), toSelect = document.getElementById('to-currency'), amtInput = document.getElementById('cur-amount');
+const quickFrom = document.getElementById('quick-from'), quickTo = document.getElementById('quick-to'), quickAmt = document.getElementById('quick-amt');
+
+async function loadSymbols(){
+  try {
+    const j = await fetchJson(API.SYMBOLS);
+    if(j && j.symbols){
+      const codes = Object.keys(j.symbols).sort();
+      const html = codes.map(c=>`<option value="${c}">${c}</option>`).join('');
+      fromSelect.innerHTML = html; toSelect.innerHTML = html; quickFrom.innerHTML = html; quickTo.innerHTML = html;
+      fromSelect.value='USD'; toSelect.value='INR'; quickFrom.value='USD'; quickTo.value='INR';
+    } else throw new Error('No symbols');
+  } catch (err) {
+    console.warn('loadSymbols failed:', err);
+    const fallback = ['USD','EUR','GBP','INR','JPY','CAD','AUD'];
+    const html = fallback.map(c=>`<option value="${c}">${c}</option>`).join('');
+    fromSelect.innerHTML = html; toSelect.innerHTML = html; quickFrom.innerHTML = html; quickTo.innerHTML = html;
+    fromSelect.value='USD'; toSelect.value='INR';
+  }
+}
+
+async function convertCurrency(){
+  const amount = parseFloat(amtInput.value);
+  const from = fromSelect.value;
+  const to = toSelect.value;
+  if(isNaN(amount)){ document.getElementById('cur-result').textContent = 'Enter valid amount'; return; }
+  document.getElementById('cur-result').textContent = 'Converting…';
+  try {
+    const url = `${API.CONVERT}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${encodeURIComponent(amount)}`;
+    const j = await fetchJson(url, {}, 10000);
+    if(j && j.result !== undefined){
+      document.getElementById('cur-result').innerHTML = `${amount} ${from} = <strong>${Number(j.result).toFixed(4)} ${to}</strong>
+        <div class="tiny muted">Rate: 1 ${from} = ${Number(j.info?.rate || (j.result/amount)).toFixed(6)} ${to}</div>`;
+      addHistory(`Currency: ${amount} ${from} = ${Number(j.result).toFixed(4)} ${to}`);
+      return;
+    } else throw new Error('convert endpoint returned no result');
+  } catch (err) {
+    console.warn('convert endpoint failed, fallback to latest:', err);
+    try {
+      const j2 = await fetchJson(`${API.LATEST}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`, {}, 10000);
+      if(j2 && j2.rates && j2.rates[to] !== undefined){
+        const rate = Number(j2.rates[to]);
+        const result = amount * rate;
+        document.getElementById('cur-result').innerHTML = `${amount} ${from} = <strong>${result.toFixed(4)} ${to}</strong>
+          <div class="tiny muted">Rate: 1 ${from} = ${rate.toFixed(6)} ${to} (latest)</div>`;
+        addHistory(`Currency (fallback): ${amount} ${from} = ${result.toFixed(4)} ${to}`);
+        return;
+      } else throw new Error('latest endpoint no rate');
+    } catch (err2) {
+      console.error('currency fallback failed', err2);
+      document.getElementById('cur-result').textContent = 'Conversion failed — network or CORS issue. See console and try running via local server.';
+    }
+  }
+}
+function swapCurrency(){ const t = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = t; }
+
+/* Quick converter */
+function fillQuick(){ quickFrom.value = fromSelect.value; quickTo.value = toSelect.value; quickAmt.value = amtInput.value; }
+async function quickConvert(){ const a = parseFloat(quickAmt.value); const f = quickFrom.value; const t = quickTo.value; if(isNaN(a)){ alert('Enter amount'); return; } document.getElementById('quick-result').textContent = 'Converting…'; try{ const j = await fetchJson(`${API.CONVERT}?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}&amount=${encodeURIComponent(a)}`, {}, 10000); if(j && j.result !== undefined){ document.getElementById('quick-result').innerHTML = `${a} ${f} = <strong>${Number(j.result).toFixed(4)} ${t}</strong>`; addHistory(`Quick: ${a} ${f} => ${Number(j.result).toFixed(4)} ${t}`); } else document.getElementById('quick-result').textContent = 'Conversion failed'; } catch(e){ console.error(e); document.getElementById('quick-result').textContent = 'Error converting (check console)'; } }
+
+/* ------------------ Mileage (Firestore + localStorage fallback) ------------------ */
+const mileageKey = 'all_in_one_mileage_v1';
+let localRecords = JSON.parse(localStorage.getItem(mileageKey) || '[]');
+const mtbody = document.querySelector('#mileage-table tbody');
+
+function renderMileageFromLocal(){
+  mtbody.innerHTML = '';
+  if(localRecords.length === 0){ document.getElementById('mileage-summary').textContent = 'No local records'; return; }
+  localRecords.forEach((r, index) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.date}</td><td>${r.vehicle}</td><td>${r.odo}</td><td>${r.fuel}</td><td>₹${r.cost || '-'}</td><td>${r.mileage || '-'}</td><td><span class="delete" onclick="deleteLocalRecord(${index})">✖</span></td>`;
+    mtbody.appendChild(tr);
+  });
+  const last = localRecords[localRecords.length-1];
+  document.getElementById('mileage-summary').innerHTML = `Latest local: <strong>${last.vehicle}</strong> — ${last.mileage || '-'} km/L`;
+}
+
+function saveLocalRecord(rec){
+  localRecords.push(rec);
+  localStorage.setItem(mileageKey, JSON.stringify(localRecords));
+  renderMileageFromLocal();
+}
+
+function deleteLocalRecord(i){
+  if(!confirm('Delete local record?')) return;
+  localRecords.splice(i,1);
+  localStorage.setItem(mileageKey, JSON.stringify(localRecords));
+  renderMileageFromLocal();
+  addHistory('Local mileage record deleted');
+}
+
+/* Firestore: save & load. If Firestore not available, we use localStorage only. */
+async function addMileage(){
+  const vehicle = document.getElementById("vehicle").value.trim();
   const odo = parseFloat(document.getElementById("odo").value);
   const fuel = parseFloat(document.getElementById("fuel").value);
   const cost = parseFloat(document.getElementById("cost").value);
-  const date = document.getElementById("mdate").value;
+  const date = document.getElementById("mdate").value || new Date().toISOString().slice(0,10);
 
-  if (!vehicle || isNaN(odo) || isNaN(fuel)) {
-    alert("Enter valid details");
-    return;
+  if (!vehicle || isNaN(odo) || isNaN(fuel) || fuel <= 0){ alert("Enter valid values"); return; }
+  // if there's previous record, compute distance and mileage; else store entered odo/fuel ratio as mileage
+  let mileageVal = (odo / fuel).toFixed(2);
+  const rec = { vehicle, odo, fuel, cost: isNaN(cost)?0:cost, date, mileage: mileageVal, createdAt: new Date().toISOString() };
+
+  // Save to localStorage as a backup
+  saveLocalRecord(rec);
+  addHistory(`Mileage saved locally: ${vehicle} — ${mileageVal} km/L`);
+
+  if (db) {
+    try {
+      await addDoc(collection(db, "mileage"), {
+        vehicle, odo, fuel, cost: isNaN(cost)?0:cost, mileage: Number(mileageVal), date, createdAt: new Date()
+      });
+      addHistory('Mileage saved to Firebase');
+      // refresh Firestore list to show latest if desired
+      await loadMileageFromFirestore();
+    } catch (e) {
+      console.warn('Failed save to Firestore', e);
+    }
+  } else {
+    console.warn('Firestore not available; data saved to localStorage only.');
   }
-  const mileage = odo / fuel;
-  await addDoc(collection(db, "mileage"), {
-    vehicle, odo, fuel, cost, mileage, date, createdAt: new Date()
-  });
-  alert("Saved in Firebase!");
-  loadMileage();
+
+  // clear form
+  clearMileageForm();
 }
 
-async function loadMileage() {
-  const tbody = document.querySelector("#mileage-table tbody");
-  tbody.innerHTML = "";
-  const snapshot = await getDocs(collection(db, "mileage"));
-  snapshot.forEach(docSnap => {
-    const d = docSnap.data();
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${d.date || ""}</td>
-      <td>${d.vehicle}</td>
-      <td>${d.odo}</td>
-      <td>${d.fuel}</td>
-      <td>${d.cost || "-"}</td>
-      <td>${d.mileage.toFixed(2)}</td>
-      <td><span class="delete" onclick="deleteMileage('${docSnap.id}')">✖</span></td>`;
-    tbody.appendChild(tr);
-  });
-}
-
-async function deleteMileage(id) {
-  await deleteDoc(doc(db, "mileage", id));
-  loadMileage();
-}
-
-window.addMileage = addMileage;
-window.deleteMileage = deleteMileage;
-
-/* ---------------- Currency ---------------- */
-async function loadSymbols() {
+async function loadMileageFromFirestore(){
+  if (!db) { renderMileageFromLocal(); return; }
   try {
-    const j = await fetchJson(API.SYMBOLS);
-    if (j && j.symbols) {
-      const codes = Object.keys(j.symbols).sort();
-      document.getElementById("from-currency").innerHTML =
-        codes.map(c => `<option value="${c}">${c}</option>`).join("");
-      document.getElementById("to-currency").innerHTML =
-        document.getElementById("from-currency").innerHTML;
-      document.getElementById("from-currency").value = "USD";
-      document.getElementById("to-currency").value = "INR";
+    const q = query(collection(db, "mileage"), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    // If there are firestore records display them (and also keep local as fallback)
+    const arr = [];
+    snap.forEach(s => {
+      const d = s.data();
+      arr.push({
+        id: s.id,
+        date: d.date || '',
+        vehicle: d.vehicle || '',
+        odo: d.odo || '',
+        fuel: d.fuel || '',
+        cost: d.cost || '',
+        mileage: (d.mileage !== undefined) ? Number(d.mileage).toFixed(2) : '-'
+      });
+    });
+    if (arr.length > 0) {
+      // Render Firestore records in table
+      mtbody.innerHTML = '';
+      arr.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.date}</td><td>${r.vehicle}</td><td>${r.odo}</td><td>${r.fuel}</td><td>₹${r.cost}</td><td>${r.mileage}</td><td><span class="delete" onclick="deleteMileageFirestore('${r.id}')">✖</span></td>`;
+        mtbody.appendChild(tr);
+      });
+      document.getElementById('mileage-summary').innerHTML = `Latest remote: <strong>${arr[0].vehicle}</strong> — ${arr[0].mileage} km/L`;
+      return;
+    } else {
+      // no firestore data, show local
+      renderMileageFromLocal();
     }
   } catch (e) {
-    console.error("Failed to load symbols", e);
+    console.error('Failed load firestore mileage', e);
+    renderMileageFromLocal();
   }
 }
 
-async function convertCurrency() {
-  const amount = parseFloat(document.getElementById("cur-amount").value);
-  const from = document.getElementById("from-currency").value;
-  const to = document.getElementById("to-currency").value;
-  const out = document.getElementById("cur-result");
+async function deleteMileageFirestore(id){
+  if(!confirm('Delete Firestore record?')) return;
   try {
-    const j = await fetchJson(`${API.CONVERT}?from=${from}&to=${to}&amount=${amount}`);
-    out.innerHTML = `${amount} ${from} = <b>${j.result.toFixed(2)} ${to}</b>`;
+    await deleteDoc(doc(db, "mileage", id));
+    addHistory('Deleted remote mileage record');
+    await loadMileageFromFirestore();
   } catch (e) {
-    out.textContent = "Conversion failed: " + e.message;
+    console.error('Failed to delete firestore doc', e);
   }
 }
-window.convertCurrency = convertCurrency;
 
-/* ---------------- Init ---------------- */
-loadSymbols();
-loadMileage();
+function clearMileageForm(){ document.getElementById('vehicle').value=''; document.getElementById('odo').value=''; document.getElementById('fuel').value=''; document.getElementById('cost').value=''; document.getElementById('mdate').value=''; }
+
+/* Local export/clear utilities */
+function exportMileageCSV(){
+  // prefer firestore if available and loaded, else local
+  if (db) {
+    // attempt to export localRecords (these include local saves) for simplicity
+  }
+  const rows=[['date','vehicle','odometer','fuel','cost','mileage']];
+  const source = (localRecords.length>0) ? localRecords : [];
+  if(source.length===0){ alert('No local mileage to export'); return; }
+  source.forEach(r=>rows.push([r.date,r.vehicle,r.odo,r.fuel,r.cost,r.mileage]));
+  const csv = rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'mileage.csv'; a.click(); URL.revokeObjectURL(url);
+}
+function clearMileageStorage(){ if(!confirm('Clear local mileage storage?')) return; localRecords=[]; localStorage.removeItem(mileageKey); renderMileageFromLocal(); addHistory('Local mileage cleared'); }
+
+/* ------------------ Loan/EMI ------------------ */
+function calcLoan(){
+  const P = parseFloat(document.getElementById('loan-p').value);
+  const rAnnual = parseFloat(document.getElementById('loan-r').value);
+  const years = parseFloat(document.getElementById('loan-n').value);
+  if(isNaN(P)||isNaN(rAnnual)||isNaN(years)||P<=0){ alert('Invalid loan inputs'); return; }
+  const r = rAnnual/100/12; const n = years*12;
+  const monthly = r===0 ? P/n : (P*r)/(1-Math.pow(1+r,-n));
+  const total = monthly * n; const interest = total - P;
+  document.getElementById('loan-result').innerHTML = `Monthly EMI: <strong>₹${monthly.toFixed(2)}</strong><br>Total paid: ₹${total.toFixed(2)} · Interest: ₹${interest.toFixed(2)}`;
+  addHistory(`Loan: P=${P} r=${rAnnual}% -> EMI ₹${monthly.toFixed(2)}`);
+}
+function clearLoan(){ document.getElementById('loan-p').value=''; document.getElementById('loan-r').value=''; document.getElementById('loan-n').value=''; document.getElementById('loan-result').textContent='EMI result'; }
+
+/* ------------------ Tax ------------------ */
+function calcTax(){ const income = parseFloat(document.getElementById('tax-income').value); const rate = parseFloat(document.getElementById('tax-rate').value); if(isNaN(income)||isNaN(rate)){ alert('Invalid'); return; } const tax = income * (rate/100); document.getElementById('tax-result').textContent = `Tax: ₹${tax.toFixed(2)} (${rate}%)`; addHistory(`Tax: ${income} @ ${rate}% => ${tax.toFixed(2)}`); }
+function calcTaxSlab(){ const income = parseFloat(document.getElementById('tax-income').value)||0; const slabs=[{limit:250000,rate:0},{limit:500000,rate:5},{limit:750000,rate:10},{limit:1000000,rate:15},{limit:Infinity,rate:20}]; let rem=income,lower=0,tax=0; for(const s of slabs){ const amt = Math.max(0, Math.min(rem, s.limit - lower)); if(amt>0) tax+= amt*(s.rate/100); lower=s.limit; rem-=amt; if(rem<=0) break; } document.getElementById('tax-result').textContent = `Estimated slab tax: ₹${tax.toFixed(2)} (demo)`; addHistory(`Tax slab: ${income} => ${tax.toFixed(2)}`); }
+
+/* ------------------ Date utilities ------------------ */
+function calcAge(){ const v=document.getElementById('dob').value; if(!v){ alert('Pick DOB'); return; } const b=new Date(v), now=new Date(); if(b>now){ document.getElementById('age-result').textContent='DOB in future'; return; } let y=now.getFullYear()-b.getFullYear(), m=now.getMonth()-b.getMonth(), d=now.getDate()-b.getDate(); if(d<0){ m--; d += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); } if(m<0){ y--; m+=12; } document.getElementById('age-result').textContent = `${y} years, ${m} months, ${d} days`; addHistory(`Age for ${v}: ${y}y ${m}m ${d}d`); }
+function clearAge(){ document.getElementById('dob').value=''; document.getElementById('age-result').textContent='Age result'; }
+function daysBetween(){ const s=document.getElementById('start-date').value, e=document.getElementById('end-date').value; if(!s||!e){ alert('Pick dates'); return; } const a=new Date(s), b=new Date(e), diff=Math.abs(b-a), days=Math.floor(diff/(1000*60*60*24)); document.getElementById('date-diff-result').textContent = `${days} days`; addHistory(`Days: ${s} ↔ ${e} = ${days}`); }
+function clearDates(){ document.getElementById('start-date').value=''; document.getElementById('end-date').value=''; document.getElementById('date-diff-result').textContent='Days difference'; }
+function addDays(){ const base=document.getElementById('base-date').value, d=parseInt(document.getElementById('days-add').value,10); if(!base||isNaN(d)){ alert('Pick base & days'); return; } const dt=new Date(base); dt.setDate(dt.getDate()+d); document.getElementById('add-days-result').textContent = dt.toISOString().slice(0,10); addHistory(`AddDays: ${base} + ${d} => ${dt.toISOString().slice(0,10)}`); }
+function clearAddDays(){ document.getElementById('base-date').value=''; document.getElementById('days-add').value='0'; document.getElementById('add-days-result').textContent='Add/Sub result'; }
+
+/* ------------------ Measure conversions ------------------ */
+const measures = { length:{units:['m','km','cm','mm','in','ft'],conv:{m:1,km:1000,cm:0.01,mm:0.001,in:0.0254,ft:0.3048}}, weight:{units:['kg','g','lb','oz'],conv:{kg:1,g:0.001,lb:0.45359237,oz:0.0283495}}, temperature:{units:['C','F','K']} };
+function populateUnits(){ const t=document.getElementById('measure-type').value; const f=document.getElementById('measure-from'), to=document.getElementById('measure-to'); f.innerHTML=''; to.innerHTML=''; if(t==='temperature'){ ['C','F','K'].forEach(u=>{ f.innerHTML += `<option>${u}</option>`; to.innerHTML += `<option>${u}</option>`; }); } else { measures[t].units.forEach(u=>{ f.innerHTML += `<option>${u}</option>`; to.innerHTML += `<option>${u}</option>`; }); } }
+function convertMeasure(){ const t=document.getElementById('measure-type').value; const v=parseFloat(document.getElementById('measure-value').value); const from=document.getElementById('measure-from').value, to=document.getElementById('measure-to').value; if(isNaN(v)){ alert('Enter value'); return; } let res=v; if(t==='temperature'){ let c; if(from==='C') c=v; else if(from==='F') c=(v-32)*5/9; else c=v-273.15; if(to==='C') res=c; else if(to==='F') res=c*9/5+32; else res=c+273.15; } else { const conv=measures[t].conv; res = v * conv[from] / conv[to]; } document.getElementById('measure-result').textContent = `${v} ${from} = ${Number(res).toFixed(6)} ${to}`; addHistory(`Measure: ${v}${from} -> ${Number(res).toFixed(6)}${to}`); }
+function resetMeasure(){ document.getElementById('measure-value').value='1'; populateUnits(); document.getElementById('measure-result').textContent='Conversion result'; }
+
+/* ------------------ Live data aggregator (rates, gold, crypto) ------------------ */
+let auto = true, autoTimer = null;
+const autoLabel = document.getElementById('auto-status');
+
+async function refreshLive(){
+  document.getElementById('live-updated').textContent = 'Refreshing...';
+  try {
+    // exchange rates snapshot
+    try {
+      const cur = await fetchJson(`${API.LATEST}?base=USD&symbols=INR,EUR,GBP,JPY,CAD,AUD`);
+      if(cur && cur.rates){
+        if(cur.rates.INR) document.getElementById('usd-inr').textContent = '₹' + Number(cur.rates.INR).toFixed(4);
+        if(cur.rates.EUR) document.getElementById('eur-usd').textContent = Number(1/(cur.rates.EUR||1)).toFixed(4);
+      }
+    } catch(e){ console.warn('exchange rate failed', e); }
+
+    // gold & silver from GoldPrice.org (public JSON)
+    try {
+      const goldJson = await fetchJson(API.GOLDPRICE);
+      if(goldJson && goldJson.items && goldJson.items[0]){
+        const it = goldJson.items[0];
+        if(it.xauPrice !== undefined) document.getElementById('gold').textContent = '$' + Number(it.xauPrice).toFixed(2) + ' / oz';
+        if(it.xagPrice !== undefined) document.getElementById('silver').textContent = '$' + Number(it.xagPrice).toFixed(3) + ' / oz';
+      }
+    } catch (gerr) {
+      console.warn('goldprice failed, falling back to CoinGecko token price', gerr);
+      try {
+        const cgGold = await fetchJson(API.COINGECKO_SIMPLE + '?ids=tether-gold&vs_currencies=usd');
+        if(cgGold && cgGold['tether-gold'] && cgGold['tether-gold'].usd) document.getElementById('gold').textContent = '$' + Number(cgGold['tether-gold'].usd).toFixed(2) + ' (token)';
+        else document.getElementById('gold').textContent = 'N/A';
+        document.getElementById('silver').textContent = 'N/A';
+      } catch(e2){
+        console.error('both gold endpoints failed', e2);
+        document.getElementById('gold').textContent = 'Error';
+        document.getElementById('silver').textContent = 'Error';
+      }
+    }
+
+    // crypto prices (CoinGecko)
+    try {
+      const cg = await fetchJson(API.COINGECKO_SIMPLE + '?ids=bitcoin,ethereum&vs_currencies=usd');
+      if(cg){
+        if(cg.bitcoin && cg.bitcoin.usd) document.getElementById('btc').textContent = '$' + Number(cg.bitcoin.usd).toLocaleString();
+        if(cg.ethereum && cg.ethereum.usd) document.getElementById('eth').textContent = '$' + Number(cg.ethereum.usd).toLocaleString();
+      }
+    } catch(e){ console.warn('coingecko crypto failed', e); document.getElementById('btc').textContent = 'N/A'; document.getElementById('eth').textContent = 'N/A'; }
+
+    document.getElementById('live-updated').textContent = new Date().toLocaleTimeString();
+  } catch (err) {
+    console.error('refreshLive error', err);
+    document.getElementById('live-updated').textContent = 'Error';
+  }
+}
+
+function toggleAuto(){ auto = !auto; autoLabel.textContent = auto ? 'ON' : 'OFF'; if(auto) startAuto(); else stopAuto(); }
+function startAuto(){ if(autoTimer) clearInterval(autoTimer); autoTimer = setInterval(refreshLive, 60_000); refreshLive(); }
+function stopAuto(){ if(autoTimer) clearInterval(autoTimer); autoTimer = null; }
+
+/* ------------------ Utilities ------------------ */
+function resetAll(){ if(!confirm('Reset history and local data?')) return; localStorage.clear(); localRecords=[]; renderMileageFromLocal(); historyEl.innerHTML=''; addHistory('App reset'); }
+
+/* ------------------ Init (on load) ------------------ */
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadSymbols(); // currency symbols
+  populateUnits(); // measurement units
+  renderMileageFromLocal(); // show local saved records
+  await loadMileageFromFirestore(); // attempt to load firestore records (overwrites local table if remote exists)
+  startAuto(); // start live auto refresh
+  addHistory('App loaded');
+});
+
+/* ------------------ Expose handlers to global scope for HTML inline onclicks ------------------ */
+window.stdAppend = stdAppend; window.stdClear = stdClear; window.stdBack = stdBack; window.stdCalculate = stdCalculate;
+window.sciAppend = sciAppend; window.sciClear = sciClear; window.sciBack = sciBack; window.sciCalculate = sciCalculate; window.sciFunc = sciFunc; window.sciFact = sciFact;
+window.convertCurrency = convertCurrency; window.swapCurrency = swapCurrency; window.fillQuick = fillQuick; window.quickConvert = quickConvert; window.loadSymbols = loadSymbols;
+window.addMileage = addMileage; window.clearMileageForm = clearMileageForm; window.exportMileageCSV = exportMileageCSV; window.clearMileageStorage = clearMileageStorage;
+window.deleteLocalRecord = deleteLocalRecord; window.deleteMileageFirestore = deleteMileageFirestore;
+window.calcLoan = calcLoan; window.clearLoan = clearLoan;
+window.calcTax = calcTax; window.calcTaxSlab = calcTaxSlab;
+window.calcAge = calcAge; window.clearAge = clearAge; window.daysBetween = daysBetween; window.clearDates = clearDates; window.addDays = addDays; window.clearAddDays = clearAddDays;
+window.populateUnits = populateUnits; window.convertMeasure = convertMeasure; window.resetMeasure = resetMeasure;
+window.copyHistory = copyHistory; window.downloadHistory = downloadHistory; window.resetAll = resetAll;
+window.refreshLive = refreshLive; window.toggleAuto = toggleAuto; window.exportMileageCSV = exportMileageCSV;
+
 </script>
 </body>
 </html>
