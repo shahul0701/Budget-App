@@ -10,9 +10,24 @@
   <!-- FullCalendar -->
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/main.min.css" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/main.min.js"></script>
-  <!-- Firebase -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js"></script>
+  <!-- Firebase (Modular v9) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+
+    // Firebase Config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    window.db = db; // Expose globally
+    window.firestoreFns = { collection, addDoc, getDocs, query, where };
+  </script>
 
   <style>
     body {
@@ -41,8 +56,10 @@
       display: block;
       margin: 5px 0;
       text-decoration: none;
+      transition: background 0.3s;
     }
     .sidebar a:hover { background: #3a3a52; }
+
     /* Main */
     .main {
       margin-left: 260px;
@@ -76,6 +93,7 @@
       background: white;
       border-radius: 8px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      overflow: hidden;
     }
     .dropdown a {
       display: block;
@@ -95,8 +113,10 @@
       background: white;
       padding: 20px;
       border-radius: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+      transition: transform 0.2s;
     }
+    .card:hover { transform: translateY(-5px); }
     .card h3 { margin: 0 0 10px; }
     .card.green { background: linear-gradient(135deg,#a8e6cf,#dcedc1); }
     .card.purple { background: linear-gradient(135deg,#d4a5ff,#cbb6f6); color:white; }
@@ -107,7 +127,7 @@
       background: white;
       border-radius: 20px;
       padding: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
       margin-top: 20px;
     }
 
@@ -129,15 +149,17 @@
     .modal {
       display: none;
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
+      inset: 0;
       background: rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
+      justify-content: center; align-items: center;
+      z-index: 10000;
     }
     .modal-content {
       background: white;
       padding: 20px;
-      border-radius: 12px;
+      border-radius: 16px;
       width: 400px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     }
     .modal-content h3 { margin-top: 0; }
     .modal-content input, .modal-content select, .modal-content textarea {
@@ -155,6 +177,7 @@
       border-radius: 8px;
       cursor: pointer;
     }
+    .modal-content button:hover { background:#5141a3; }
   </style>
 </head>
 <body>
@@ -233,72 +256,64 @@
     </div>
   </div>
 
-  <script>
-    // Firebase Config
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT",
-    };
-    const app = firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+  <script type="module">
+    import { addDoc, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+    import { db } from "./"; // already initialized in header
 
     // Profile Dropdown
-    document.getElementById("profileMenu").addEventListener("click", () => {
-      document.getElementById("profileDropdown").style.display =
-        document.getElementById("profileDropdown").style.display === "block" ? "none" : "block";
-    });
-    document.getElementById("logoutBtn").addEventListener("click", () => {
-      localStorage.clear();
-      window.location.href = "index.html";
-    });
+    const profileMenu=document.getElementById("profileMenu");
+    const profileDropdown=document.getElementById("profileDropdown");
+    profileMenu.addEventListener("click",()=>profileDropdown.style.display=profileDropdown.style.display==="block"?"none":"block");
+    document.getElementById("logoutBtn").addEventListener("click",()=>{localStorage.clear();window.location.href="index.html";});
 
     // Expense Tracker Popup
-    document.getElementById("expenseTrackerBtn").addEventListener("click", () => {
-      document.getElementById("expenseTrackerModal").style.display = "flex";
-    });
+    const expenseTrackerModal=document.getElementById("expenseTrackerModal");
+    document.getElementById("expenseTrackerBtn").onclick=()=>expenseTrackerModal.style.display="flex";
 
     // Reminder Modal
-    const reminderModal = document.getElementById("reminderModal");
-    document.getElementById("addReminderBtn").onclick = () => reminderModal.style.display = "flex";
-    document.getElementById("saveReminderBtn").onclick = async () => {
-      const type = document.getElementById("reminderType").value;
-      const title = document.getElementById("reminderTitle").value;
-      const date = document.getElementById("reminderDate").value;
-      const time = document.getElementById("reminderTime").value;
-      const notes = document.getElementById("reminderNotes").value;
-      const user = localStorage.getItem("username");
+    const reminderModal=document.getElementById("reminderModal");
+    document.getElementById("addReminderBtn").onclick=()=>reminderModal.style.display="flex";
 
-      if (!title || !date) { alert("Fill all fields!"); return; }
+    // Close modal if click outside
+    window.onclick=(e)=>{
+      if(e.target===reminderModal) reminderModal.style.display="none";
+      if(e.target===expenseTrackerModal) expenseTrackerModal.style.display="none";
+    };
+    document.addEventListener("keydown",(e)=>{
+      if(e.key==="Escape"){ reminderModal.style.display="none"; expenseTrackerModal.style.display="none"; }
+    });
 
-      await db.collection("reminders").add({
-        user, type, title, date, time, notes,
-        createdAt: new Date()
-      });
-      reminderModal.style.display = "none";
+    // Save Reminder
+    document.getElementById("saveReminderBtn").onclick=async()=>{
+      const type=document.getElementById("reminderType").value;
+      const title=document.getElementById("reminderTitle").value;
+      const date=document.getElementById("reminderDate").value;
+      const time=document.getElementById("reminderTime").value;
+      const notes=document.getElementById("reminderNotes").value;
+      const user=localStorage.getItem("username")||"guest";
+
+      if(!title||!date){alert("Fill all fields!");return;}
+      await addDoc(collection(db,"reminders"),{user,type,title,date,time,notes,createdAt:new Date()});
+      reminderModal.style.display="none";
       location.reload();
     };
 
     // Calendar Load
-    document.addEventListener("DOMContentLoaded", async function() {
-      const user = localStorage.getItem("username");
-      const snapshot = await db.collection("reminders").where("user","==",user).get();
-      const events = [];
-      snapshot.forEach(doc => {
-        let data = doc.data();
-        if (data.type === "birthday") {
-          events.push({ title: "🎂 " + data.title, start: data.date, allDay:true, display:'background' });
-        } else if (data.type === "meeting") {
-          events.push({ title: "📅 " + data.title, start: data.date + "T" + data.time });
-        } else {
-          events.push({ title: data.title, start: data.date });
-        }
+    document.addEventListener("DOMContentLoaded", async ()=>{
+      const user=localStorage.getItem("username")||"guest";
+      const q=query(collection(db,"reminders"),where("user","==",user));
+      const snapshot=await getDocs(q);
+      const events=[];
+      snapshot.forEach(doc=>{
+        let data=doc.data();
+        if(data.type==="birthday"){ events.push({title:"🎂 "+data.title,start:data.date,allDay:true,color:"#ff7675"}); }
+        else if(data.type==="meeting"){ events.push({title:"📅 "+data.title,start:data.date+"T"+data.time,color:"#74b9ff"}); }
+        else{ events.push({title:data.title,start:data.date,color:"#55efc4"}); }
       });
 
-      let calendarEl = document.getElementById('calendar');
-      let calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'dayGridMonth',
-        events: events
+      let calendar=new FullCalendar.Calendar(document.getElementById('calendar'),{
+        initialView:'dayGridMonth',
+        events:events
       });
       calendar.render();
     });
