@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Budgeting App Dashboard</title>
 
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <!-- Firebase Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <!-- Firebase Auth -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   
@@ -16,13 +23,6 @@
   
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-  <!-- Firebase App (the core Firebase SDK) -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-  <!-- Firebase Firestore -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-  <!-- Firebase Auth -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 
   <style>
     :root {
@@ -478,6 +478,23 @@
         gap: 15px;
       }
     }
+
+    /* Loading spinner */
+    .spinner {
+      border: 4px solid rgba(0, 0, 0, 0.1);
+      border-left: 4px solid var(--purple-1);
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+      display: none;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -550,6 +567,7 @@
           <div class="chart-section">
             <h3>Spending Chart</h3>
             <div id="chartContainer">
+              <div class="spinner" id="chartSpinner"></div>
               <canvas id="spendingChart"></canvas>
             </div>
           </div>
@@ -723,6 +741,7 @@
     const usernameElement = document.getElementById('username');
     const userInitialsElement = document.getElementById('userInitials');
     const timeFilter = document.getElementById('timeFilter');
+    const chartSpinner = document.getElementById('chartSpinner');
     
     // Transaction form DOM refs
     const form = document.getElementById("transactionForm");
@@ -744,14 +763,11 @@
     const uploadProgress = document.getElementById("uploadProgress");
     const uploadProgressBar = document.getElementById("uploadProgressBar");
 
-    // Cloudinary config (replace with your own)
-    const CLOUDINARY_CLOUD_NAME = "your_cloud_name_here";
-    const CLOUDINARY_UPLOAD_PRESET = "your_upload_preset_here";
-
     // Global variables
     let currentUser = null;
     let transactions = [];
     let spendingChart = null;
+    let transactionsListener = null;
 
     // Initialize the application
     function initApp() {
@@ -809,15 +825,24 @@
           // Load user data
           loadTransactions();
         } else {
-          // Redirect to login or use anonymous auth
-          auth.signInAnonymously().catch((error) => {
-            console.error("Anonymous auth failed:", error);
-            Swal.fire({
-              icon: 'error',
-              title: 'Authentication Error',
-              text: 'Failed to initialize the application. Please refresh the page.'
+          // Try to sign in anonymously
+          auth.signInAnonymously()
+            .then((userCredential) => {
+              currentUser = userCredential.user;
+              usernameElement.textContent = "Guest User";
+              userInitialsElement.textContent = "G";
+              
+              // Load user data
+              loadTransactions();
+            })
+            .catch((error) => {
+              console.error("Anonymous auth failed:", error);
+              Swal.fire({
+                icon: 'error',
+                title: 'Authentication Error',
+                text: 'Failed to initialize the application. Please refresh the page.'
+              });
             });
-          });
         }
       });
     }
@@ -1018,6 +1043,12 @@
         return;
       }
       
+      // Check if user is authenticated
+      if (!currentUser) {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'You must be logged in to save transactions' });
+        return;
+      }
+      
       // Prepare transaction data
       const txData = {
         DATE: formDATE.value,
@@ -1060,12 +1091,13 @@
         form.reset();
         initTransactionForm();
         
-        // Reload transactions to update dashboard
-        loadTransactions();
-        
       } catch (err) {
         console.error("Save failed", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
+        Swal.fire({ 
+          icon: 'error', 
+          title: 'Error', 
+          text: 'Failed to save transaction: ' + err.message 
+        });
       } finally {
         // Restore button state
         submitBtn.disabled = false;
@@ -1074,8 +1106,17 @@
     }
 
     // Load transactions from Firestore
-    async function loadTransactions() {
+    function loadTransactions() {
+      if (!currentUser) return;
+      
       try {
+        chartSpinner.style.display = 'block';
+        
+        // Remove existing listener if any
+        if (transactionsListener) {
+          transactionsListener();
+        }
+        
         const timeFilterValue = timeFilter.value;
         const now = new Date();
         let startDate;
@@ -1099,38 +1140,52 @@
             startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         }
         
-        // Query transactions for the current user and time period
-        const transactionsSnapshot = await db.collection("transactions")
+        // Format date for comparison (YYYY-MM-DD)
+        const startDateStr = startDate.toISOString().split('T')[0];
+        
+        // Set up real-time listener for transactions
+        transactionsListener = db.collection("transactions")
           .where("userId", "==", currentUser.uid)
-          .where("DATE", ">=", startDate.toISOString().split('T')[0])
+          .where("DATE", ">=", startDateStr)
           .orderBy("DATE", "desc")
-          .get();
-        
-        transactions = [];
-        let totalIncome = 0;
-        let totalExpenses = 0;
-        
-        transactionsSnapshot.forEach(doc => {
-          const data = doc.data();
-          transactions.push({
-            id: doc.id,
-            ...data
+          .onSnapshot((snapshot) => {
+            transactions = [];
+            let totalIncome = 0;
+            let totalExpenses = 0;
+            
+            snapshot.forEach(doc => {
+              const data = doc.data();
+              transactions.push({
+                id: doc.id,
+                ...data
+              });
+              
+              // Calculate totals
+              totalIncome += data.INCOME || 0;
+              totalExpenses += data.EXPENSE || 0;
+            });
+            
+            // Update UI with calculated totals
+            document.getElementById('totalIncome').textContent = `₹${totalIncome.toFixed(2)}`;
+            document.getElementById('totalExpenses').textContent = `₹${totalExpenses.toFixed(2)}`;
+            
+            // Update the spending chart
+            updateSpendingChart();
+            
+            chartSpinner.style.display = 'none';
+          }, (error) => {
+            console.error("Error loading transactions:", error);
+            chartSpinner.style.display = 'none';
+            Swal.fire({
+              icon: 'error',
+              title: 'Error',
+              text: 'Failed to load transactions. Please try again.'
+            });
           });
-          
-          // Calculate totals
-          totalIncome += data.INCOME || 0;
-          totalExpenses += data.EXPENSE || 0;
-        });
-        
-        // Update UI with calculated totals
-        document.getElementById('totalIncome').textContent = `₹${totalIncome.toFixed(2)}`;
-        document.getElementById('totalExpenses').textContent = `₹${totalExpenses.toFixed(2)}`;
-        
-        // Update the spending chart
-        updateSpendingChart();
         
       } catch (error) {
-        console.error("Error loading transactions:", error);
+        console.error("Error setting up transactions listener:", error);
+        chartSpinner.style.display = 'none';
         Swal.fire({
           icon: 'error',
           title: 'Error',
@@ -1141,7 +1196,12 @@
 
     // Update spending chart with transaction data
     function updateSpendingChart() {
-      const ctx = document.getElementById('spendingChart').getContext('2d');
+      const ctx = document.getElementById('spendingChart');
+      
+      // Clear previous chart if it exists
+      if (spendingChart) {
+        spendingChart.destroy();
+      }
       
       // Categorize expenses
       const categories = {};
@@ -1158,60 +1218,54 @@
       
       // If no data, show a message
       if (data.length === 0) {
-        ctx.font = "16px Arial";
-        ctx.fillStyle = "#999";
-        ctx.textAlign = "center";
-        ctx.fillText("No expense data available", ctx.canvas.width / 2, ctx.canvas.height / 2);
+        ctx.getContext('2d').font = "16px Arial";
+        ctx.getContext('2d').fillStyle = "#999";
+        ctx.getContext('2d').textAlign = "center";
+        ctx.getContext('2d').fillText("No expense data available", ctx.width / 2, ctx.height / 2);
         return;
       }
       
-      // Create or update chart
-      if (spendingChart) {
-        spendingChart.data.labels = labels;
-        spendingChart.data.datasets[0].data = data;
-        spendingChart.update();
-      } else {
-        spendingChart = new Chart(ctx, {
-          type: 'doughnut',
-          data: {
-            labels: labels,
-            datasets: [{
-              label: 'Expenses by Category',
-              data: data,
-              backgroundColor: [
-                'rgba(111, 66, 193, 0.8)',
-                'rgba(54, 162, 235, 0.8)',
-                'rgba(255, 206, 86, 0.8)',
-                'rgba(75, 192, 192, 0.8)',
-                'rgba(153, 102, 255, 0.8)',
-                'rgba(255, 159, 64, 0.8)',
-                'rgba(220, 53, 69, 0.8)',
-                'rgba(40, 167, 69, 0.8)'
-              ],
-              borderColor: [
-                'rgba(111, 66, 193, 1)',
-                'rgba(54, 162, 235, 1)',
-                'rgba(255, 206, 86, 1)',
-                'rgba(75, 192, 192, 1)',
-                'rgba(153, 102, 255, 1)',
-                'rgba(255, 159, 64, 1)',
-                'rgba(220, 53, 69, 1)',
-                'rgba(40, 167, 69, 1)'
-              ],
-              borderWidth: 1
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: 'bottom'
-              }
+      // Create new chart
+      spendingChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Expenses by Category',
+            data: data,
+            backgroundColor: [
+              'rgba(111, 66, 193, 0.8)',
+              'rgba(54, 162, 235, 0.8)',
+              'rgba(255, 206, 86, 0.8)',
+              'rgba(75, 192, 192, 0.8)',
+              'rgba(153, 102, 255, 0.8)',
+              'rgba(255, 159, 64, 0.8)',
+              'rgba(220, 53, 69, 0.8)',
+              'rgba(40, 167, 69, 0.8)'
+            ],
+            borderColor: [
+              'rgba(111, 66, 193, 1)',
+              'rgba(54, 162, 235, 1)',
+              'rgba(255, 206, 86, 1)',
+              'rgba(75, 192, 192, 1)',
+              'rgba(153, 102, 255, 1)',
+              'rgba(255, 159, 64, 1)',
+              'rgba(220, 53, 69, 1)',
+              'rgba(40, 167, 69, 1)'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
             }
           }
-        });
-      }
+        }
+      });
     }
 
     // Initialize calendar
