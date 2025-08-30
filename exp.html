@@ -638,9 +638,7 @@
     });
 
 
-    // CSV Import functionality
-const csvInput = document.getElementById('csvInput');
-
+// Replace your current CSV event listener with this improved version
 csvInput.addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -650,7 +648,18 @@ csvInput.addEventListener('change', async (event) => {
     
     try {
         const text = await readFileAsText(file);
-        const transactions = parseCSV(text);
+        const {transactions, errors} = parseCSV(text);
+        
+        if (errors.length > 0) {
+            Swal.fire({
+                title: 'CSV Import Issues',
+                html: `Found ${errors.length} errors in your CSV file.<br>
+                      ${transactions.length} valid transactions will be imported.<br><br>
+                      <details><summary>View Errors</summary>${errors.join('<br>')}</details>`,
+                icon: 'warning',
+                confirmButtonText: 'Continue Import'
+            });
+        }
         
         if (transactions.length === 0) {
             Swal.fire("Info", "No valid transactions found in the CSV file.", "info");
@@ -671,9 +680,16 @@ csvInput.addEventListener('change', async (event) => {
         if (!result.isConfirmed) return;
         
         // Process and import transactions
-        await importTransactions(transactions);
+        const importResult = await importTransactions(transactions);
         
-        Swal.fire("Success", `Successfully imported ${transactions.length} transactions!`, "success");
+        if (importResult.failed > 0) {
+            Swal.fire("Partial Success", 
+                     `Imported ${importResult.successful} transactions, ${importResult.failed} failed.`, 
+                     "warning");
+        } else {
+            Swal.fire("Success", `Successfully imported ${importResult.successful} transactions!`, "success");
+        }
+        
         await loadTransactions(); // Refresh the table
         
     } catch (error) {
@@ -686,23 +702,51 @@ csvInput.addEventListener('change', async (event) => {
     }
 });
 
-// Helper function to read file as text
-function readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = e => resolve(e.target.result);
-        reader.onerror = e => reject(reader.error);
-        reader.readAsText(file);
-    });
-}
-
-// Parse CSV content
+// Enhanced CSV parser with better field mapping
 function parseCSV(csvText) {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
-    if (lines.length <= 1) return []; // No data or just headers
+    if (lines.length <= 1) return {transactions: [], errors: ["CSV file is empty or has only headers"]};
     
     // Extract headers (assuming first line is header row)
     const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
+    
+    // Define expected fields and their possible CSV header names
+    const fieldMappings = {
+        'SINO': ['SINO', 'VOUCHER', 'ID', 'REFERENCE'],
+        'DATE': ['DATE', 'TRANSACTION DATE', 'DATE'],
+        'TIME': ['TIME', 'TRANSACTION TIME'],
+        'ACCOUNT_HEADER': ['ACCOUNT', 'ACCOUNT HEADER', 'CATEGORY', 'ACCOUNT_HEADER'],
+        'MODE': ['MODE', 'PAYMENT MODE', 'TYPE'],
+        'BANK_NAME': ['BANK', 'BANK NAME', 'ACCOUNT'],
+        'INCOME': ['INCOME', 'CREDIT', 'DEPOSIT'],
+        'EXPENSE': ['EXPENSE', 'DEBIT', 'WITHDRAWAL'],
+        'DESCRIPTION': ['DESCRIPTION', 'DETAILS', 'NOTES'],
+        'BALANCE': ['BALANCE', 'RUNNING BALANCE']
+    };
+    
+    // Map CSV headers to our field names
+    const headerMap = {};
+    headers.forEach((header, index) => {
+        for (const [field, possibleNames] of Object.entries(fieldMappings)) {
+            if (possibleNames.includes(header)) {
+                headerMap[field] = index;
+                break;
+            }
+        }
+    });
+    
+    // Check if we have required fields
+    const errors = [];
+    if (typeof headerMap['DATE'] === 'undefined') {
+        errors.push("Missing DATE column in CSV");
+    }
+    if (typeof headerMap['ACCOUNT_HEADER'] === 'undefined') {
+        errors.push("Missing ACCOUNT HEADER column in CSV");
+    }
+    
+    if (errors.length > 0) {
+        return {transactions: [], errors};
+    }
     
     // Process data rows
     const transactions = [];
@@ -711,57 +755,130 @@ function parseCSV(csvText) {
         const values = lines[i].split(',').map(v => v.trim());
         if (values.length === 0 || values.every(v => v === '')) continue;
         
-        // Create transaction object by mapping headers to values
-        const transaction = {};
-        headers.forEach((header, index) => {
-            if (index < values.length) {
-                transaction[header] = values[index];
+        try {
+            // Create transaction object by mapping headers to values
+            const transaction = {};
+            
+            // Map fields
+            for (const [field, index] of Object.entries(headerMap)) {
+                if (index < values.length) {
+                    transaction[field] = values[index];
+                }
             }
-        });
-        
-        // Validate required fields
-        if (transaction.DATE && transaction.ACCOUNT_HEADER) {
+            
+            // Parse and validate date
+            if (transaction.DATE) {
+                const parsedDate = parseDate(transaction.DATE);
+                if (!parsedDate) {
+                    errors.push(`Row ${i+1}: Invalid date format '${transaction.DATE}'`);
+                    continue;
+                }
+                transaction.DATE = formatDateForStorage(parsedDate);
+            }
+            
+            // Set default time if not provided
+            if (!transaction.TIME) {
+                transaction.TIME = new Date().toTimeString().slice(0, 5);
+            }
+            
+            // Parse numeric values
+            transaction.INCOME = parseFloat(transaction.INCOME || 0);
+            transaction.EXPENSE = parseFloat(transaction.EXPENSE || 0);
+            
+            // Validate that we have at least one amount
+            if (transaction.INCOME === 0 && transaction.EXPENSE === 0) {
+                errors.push(`Row ${i+1}: Both income and expense are zero`);
+                continue;
+            }
+            
+            // Generate SINO if not provided
+            if (!transaction.SINO) {
+                transaction.SINO = `CSV-${Date.now()}-${i}`;
+            }
+            
+            // Set default mode if not provided
+            if (!transaction.MODE) {
+                transaction.MODE = 'Cash';
+            }
+            
             transactions.push(transaction);
+        } catch (e) {
+            errors.push(`Row ${i+1}: Error processing - ${e.message}`);
         }
     }
     
-    return transactions;
+    return {transactions, errors};
 }
 
-// Import transactions to Firebase
-async function importTransactions(transactions) {
-    const batch = [];
+// Helper function to parse various date formats
+function parseDate(dateStr) {
+    if (!dateStr) return null;
     
-    for (const tx of transactions) {
-        // Map CSV fields to your transaction structure
-        const transactionData = {
-            SINO: tx.SINO || `IMPORT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            DATE: tx.DATE,
-            TIME: tx.TIME || new Date().toTimeString().slice(0, 5),
-            ACCOUNT_HEADER: tx.ACCOUNT_HEADER,
-            MODE: tx.MODE || 'Cash',
-            BANK_NAME: tx.BANK_NAME || '',
-            INCOME: parseFloat(tx.INCOME) || 0,
-            EXPENSE: parseFloat(tx.EXPENSE) || 0,
-            DESCRIPTION: tx.DESCRIPTION || '',
-            BALANCE: 0, // Will be calculated after import
-            userId: currentUser.uid,
-            createdAt: new Date()
-        };
-        
-        // Add to batch
-        batch.push(transactionData);
+    // Try different date formats
+    const formats = [
+        /^(\d{4})-(\d{1,2})-(\d{1,2})$/, // YYYY-MM-DD
+        /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, // MM/DD/YYYY
+        /^(\d{1,2})-(\d{1,2})-(\d{4})$/, // DD-MM-YYYY
+    ];
+    
+    for (const format of formats) {
+        const match = dateStr.match(format);
+        if (match) {
+            if (format === formats[0]) { // YYYY-MM-DD
+                return new Date(match[1], match[2] - 1, match[3]);
+            } else { // MM/DD/YYYY or DD-MM-YYYY
+                return new Date(match[3], match[1] - 1, match[2]);
+            }
+        }
     }
     
-    // Upload all transactions
-    for (const txData of batch) {
+    // Try native Date parsing as fallback
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
+}
+
+// Format date for storage (YYYY-MM-DD)
+function formatDateForStorage(date) {
+    return date.toISOString().slice(0, 10);
+}
+
+// Enhanced import function with better error reporting
+async function importTransactions(transactions) {
+    const result = {
+        successful: 0,
+        failed: 0,
+        errors: []
+    };
+    
+    for (const [index, tx] of transactions.entries()) {
         try {
-            await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+            const transactionData = {
+                SINO: tx.SINO,
+                DATE: tx.DATE,
+                TIME: tx.TIME,
+                ACCOUNT_HEADER: tx.ACCOUNT_HEADER,
+                MODE: tx.MODE,
+                BANK_NAME: tx.BANK_NAME || '',
+                INCOME: tx.INCOME,
+                EXPENSE: tx.EXPENSE,
+                DESCRIPTION: tx.DESCRIPTION || '',
+                BALANCE: 0, // Will be recalculated after all imports
+                userId: currentUser.uid,
+                createdAt: new Date()
+            };
+            
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), transactionData);
+            result.successful++;
         } catch (error) {
+            result.failed++;
+            result.errors.push(`Row ${index + 1}: ${error.message}`);
             console.error("Error importing transaction:", error);
         }
     }
+    
+    return result;
 }
+
     // Load chart of accounts for dropdown
     async function loadAccounts() {
         try {
