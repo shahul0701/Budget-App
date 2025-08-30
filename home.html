@@ -884,6 +884,7 @@
         loadFinancialData(user.uid);
         loadCalendarEvents(user.uid);
         loadAccountHeaders(user.uid);
+        loadBankNamesFromCOA(user.uid);
       } else {
         // User is signed out - redirect to login
         window.location.href = "index.html";
@@ -966,8 +967,9 @@
     }
 
     // Load account headers from Chart of Accounts
-    async function loadAccountHeaders(userId) {
-      try {
+   // Load account headers from Chart of Accounts
+async function loadAccountHeaders(userId) {
+    try {
         showLoading('Loading account headers...');
         
         const coaSnapshot = await db.collection("users").doc(userId).collection("chartOfAccounts").get();
@@ -975,27 +977,27 @@
         
         // Clear existing options except the first one
         while (accountHeaderSelect.options.length > 1) {
-          accountHeaderSelect.remove(1);
+            accountHeaderSelect.remove(1);
         }
         
         // Add options from COA
         coaSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.name) {
-            const option = document.createElement("option");
-            option.value = data.name;
-            option.textContent = data.name;
-            accountHeaderSelect.appendChild(option);
-          }
+            const data = doc.data();
+            if (data.name) {
+                const option = document.createElement("option");
+                option.value = data.name;
+                option.textContent = data.name;
+                accountHeaderSelect.appendChild(option);
+            }
         });
         
         hideLoading();
-      } catch (error) {
+    } catch (error) {
         console.error("Error loading account headers:", error);
         hideLoading();
         showToast('Error loading account headers', 'error');
-      }
     }
+}
 
     function logout() {
       auth.signOut().then(() => {
@@ -1082,31 +1084,35 @@
     }
 
     // Transaction Modal
-    quickAddBtn.addEventListener("click", async () => {
-      // Set default date to today
-      transactionDate.value = new Date().toISOString().split('T')[0];
-      
-      // Generate voucher number
-      const user = auth.currentUser;
-      if (user) {
+    // Transaction Modal
+quickAddBtn.addEventListener("click", async () => {
+    // Set default date to today
+    transactionDate.value = new Date().toISOString().split('T')[0];
+    
+    // Generate voucher number
+    const user = auth.currentUser;
+    if (user) {
         const voucherNumber = await getNextVoucherNumber(user.uid);
         transactionSino.value = voucherNumber;
-      }
-      
-      // Clear previous values
-      transactionAccountHeader.value = "";
-      transactionVoucherType.value = "Payment";
-      transactionType.value = "Income";
-      transactionBankName.value = "";
-      transactionIncome.value = "";
-      transactionExpense.value = "";
-      transactionBalance.value = "";
-      transactionNotes.value = "";
-      transactionAttachment.value = "";
-      fileName.textContent = "No file chosen";
-      
-      transactionModal.classList.add("active");
-    });
+        
+        // Refresh bank names in case new banks were added
+        loadBankNamesFromCOA(user.uid);
+    }
+    
+    // Clear previous values
+    transactionAccountHeader.value = "";
+    transactionVoucherType.value = "Payment";
+    transactionType.value = "Income";
+    transactionBankName.value = "";
+    transactionIncome.value = "";
+    transactionExpense.value = "";
+    transactionBalance.value = "";
+    transactionNotes.value = "";
+    transactionAttachment.value = "";
+    fileName.textContent = "No file chosen";
+    
+    transactionModal.classList.add("active");
+});
     
     function closeTransactionModal() {
       transactionModal.classList.remove("active");
@@ -1372,6 +1378,59 @@
         showToast('Error loading calendar events', 'error');
       }
     }
+
+    // Function to load bank names from COA where type is Asset and category is Bank
+async function loadBankNamesFromCOA(userId) {
+    try {
+        const bankSelect = document.getElementById("transactionBankName");
+        
+        // Clear existing options except the first one
+        while (bankSelect.options.length > 1) {
+            bankSelect.remove(1);
+        }
+        
+        // Query COA for Asset -> Bank accounts
+        const coaSnapshot = await db.collection("users")
+            .doc(userId)
+            .collection("chartOfAccounts")
+            .where("type", "==", "Asset")
+            .where("category", "==", "Bank")
+            .get();
+        
+        // Add bank accounts to the dropdown
+        coaSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.name) {
+                const option = document.createElement("option");
+                option.value = data.name;
+                option.textContent = data.name;
+                bankSelect.appendChild(option);
+            }
+        });
+        
+        // If no bank accounts found, add a default option
+        if (coaSnapshot.empty) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "No bank accounts found";
+            option.disabled = true;
+            bankSelect.appendChild(option);
+        }
+    } catch (error) {
+        console.error("Error loading bank names:", error);
+        showToast('Error loading bank accounts', 'error');
+    }
+}
+
+    document.getElementById("refreshBanksBtn").addEventListener("click", async () => {
+    const user = auth.currentUser;
+    if (user) {
+        showLoading('Refreshing bank accounts...');
+        await loadBankNamesFromCOA(user.uid);
+        hideLoading();
+        showToast('Bank accounts refreshed', 'success');
+    }
+});
   </script>
 </body>
 </html>
