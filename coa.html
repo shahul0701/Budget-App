@@ -359,18 +359,17 @@
   });
 
   async function loadCategories() {
-    categories = {};
-    categorySelect.innerHTML = '<option value="">Select Category</option><option value="add-new">➕ Add new category...</option>';
+  const categoriesTable = document.getElementById("categoriesTable");
+  categoriesTable.innerHTML = ""; // Clear previous data
+  
+  const q = query(collection(db, "users", currentUser.uid, "categories"));
+  const snapshot = await getDocs(q);
 
-    const catSnapshot = await getDocs(query(collection(db, "Categories"), where("userId", "==", currentUser.uid)));
-    catSnapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      if (!categories[data.accountType]) categories[data.accountType] = [];
-      if (!categories[data.accountType].includes(data.categoryName)) {
-        categories[data.accountType].push(data.categoryName);
-      }
-    });
-  }
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data();
+    addCategoryRow(docSnap.id, data.name, data.type);
+  });
+}
 
   const starterAccounts = [
     { type: "Asset", category: "Bank", name: "Bank Account" },
@@ -385,74 +384,72 @@
   ];
 
   // Button click listener for smart add account
-  document.getElementById("starterAccountsBtn").addEventListener("click", async () => {
-    if (!currentUser) {
-      alert("You must be logged in!");
-      return;
+  // When the user clicks to add a starter account
+document.getElementById("starterAccountsBtn").addEventListener("click", async () => {
+  if (!currentUser) {
+    alert("You must be logged in!");
+    return;
+  }
+
+  const input = prompt("Enter an account name (e.g., 'Axis Bank', 'Office Expense'):");
+  if (!input || !input.trim()) {
+    alert("Input was empty.");
+    return;
+  }
+
+  const enteredName = input.trim();
+  const words = enteredName.toLowerCase().split(/\s+/); // Split input by space
+
+  // Define matching logic
+  const keywordMappings = {
+    bank: { type: "Asset", category: "Bank" },
+    cash: { type: "Asset", category: "Cash" },
+    credit: { type: "Liability", category: "Credit Card" },
+    expense: { type: "Expense", category: "General Expense" },
+    salary: { type: "Expense", category: "Salaries" },
+    sales: { type: "Income", category: "Sales" },
+    income: { type: "Income", category: "Sales" },
+    equity: { type: "Equity", category: "Owner's Equity" },
+    materials: { type: "COGS", category: "Raw Materials" },
+  };
+
+  // Attempt to match any word with predefined keywords
+  let matched = null;
+  for (const word of words) {
+    if (keywordMappings[word]) {
+      matched = keywordMappings[word];
+      break; // Use the first match found
     }
+  }
 
-    const input = prompt("Enter an account name (e.g., 'Axis Bank', 'Office Expense'):");
-    if (!input || !input.trim()) {
-      alert("Input was empty.");
-      return;
-    }
+  // Default if no match found
+  if (!matched) {
+    matched = { type: "Asset", category: "Miscellaneous" };
+  }
 
-    const enteredName = input.trim();
-    const words = enteredName.toLowerCase().split(/\s+/); // Split input by space
+  // Confirm with the user
+  const confirmMsg = `Detected:\nAccount Name: ${enteredName}\nType: ${matched.type}\nCategory: ${matched.category}\n\nAdd this account?`;
+  if (!confirm(confirmMsg)) return;
 
-    // Smart matching keywords (you can expand this)
-    const keywordMappings = {
-      bank:        { type: "Asset", category: "Bank" },
-      cash:        { type: "Asset", category: "Cash" },
-      credit:      { type: "Liability", category: "Credit Card" },
-      card:        { type: "Liability", category: "Credit Card" },
-      expense:     { type: "Expense", category: "General Expense" },
-      rent:        { type: "Expense", category: "Rent" },
-      utilities:   { type: "Expense", category: "Utilities" },
-      office:      { type: "Expense", category: "Office Expense" },
-      supplies:    { type: "Expense", category: "Supplies" },
-      salary:      { type: "Expense", category: "Salaries" },
-      sales:       { type: "Income", category: "Sales" },
-      revenue:     { type: "Income", category: "Sales" },
-      income:      { type: "Income", category: "Sales" },
-      materials:   { type: "COGS", category: "Raw Materials" },
-      labor:       { type: "COGS", category: "Direct Labor" },
-      equity:      { type: "Equity", category: "Owner's Equity" },
-      axis:        { type: "Asset", category: "Bank" }, // specific brand example
-    };
+ // When adding a new category
+async function addCategory(categoryName, categoryType) {
+  if (!currentUser) {
+    alert("You must be logged in!");
+    return;
+  }
 
-    // Try matching any word in the input
-    let matched = null;
-    for (const word of words) {
-      if (keywordMappings[word]) {
-        matched = keywordMappings[word];
-        break; // Use the first match found
-      }
-    }
-
-    // If no keyword matched, set default
-    if (!matched) {
-      matched = { type: "Asset", category: "Miscellaneous" };
-    }
-
-    const confirmMsg = `Detected:\nAccount Name: ${enteredName}\nType: ${matched.type}\nCategory: ${matched.category}\n\nAdd this account?`;
-    if (!confirm(confirmMsg)) return;
-
-    try {
-      await addDoc(collection(db, "users", currentUser.uid, "chartOfAccounts")
-, {
-        userId: currentUser.uid,
-        type: matched.type,
-        category: matched.category,
-        name: enteredName,
-        createdAt: serverTimestamp(),
-      });
-      await loadAccounts();
-      alert("Account added successfully!");
-    } catch (err) {
-      alert("Error adding account: " + err.message);
-    }
-  });
+  // Add category to the categories subcollection
+  try {
+    await addDoc(collection(db, "users", currentUser.uid, "categories"), {
+      name: categoryName,
+      type: categoryType,
+      createdAt: serverTimestamp(),
+    });
+    alert("Category added successfully!");
+  } catch (err) {
+    alert("Error adding category: " + err.message);
+  }
+}
 
   function updateCategoryOptions(type) {
     // Default categories for each account type
@@ -552,12 +549,15 @@ categorySelect.addEventListener("change", async () => {
 
 
 async function loadAccounts() {
-  accountsTable.innerHTML = "";
-  const q = query(collection(db, "chartOfAccounts"), where("userId", "==", currentUser.uid));
+  const accountsTable = document.getElementById("accountsTable");
+  accountsTable.innerHTML = ""; // Clear previous data
+
+  const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"));
   const snapshot = await getDocs(q);
+  
   snapshot.forEach((docSnap) => {
     const data = docSnap.data();
-    addAccountRow(docSnap.id, data.type, data.category, data.name);  // <-- Here "name" is the Account Name
+    addAccountRow(docSnap.id, data.type, data.category, data.name);
   });
 }
 
