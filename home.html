@@ -735,35 +735,42 @@ onclick="location.href='calculate.html'"><i class="fa fa-file"></i> Calculate</l
     });
 
     // Load financial data from transactions
-    async function loadFinancialData(userId) {
-      try {
-        // Query transactions for this user
-        const transactionsQuery = db.collection("users").doc(userId).collection("transactions");
-        const snapshot = await transactionsQuery.get();
-        
-        let totalIncome = 0;
-        let totalExpenses = 0;
-        let totalTransactions = 0;
-        
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          totalIncome += parseFloat(data.INCOME || 0);
-          totalExpenses += parseFloat(data.EXPENSE || 0);
-          totalTransactions++;
-        });
-        
-        const currentBalance = totalIncome - totalExpenses;
-        
-        // Update the dashboard with real data
-        totalTransactionsEl.textContent = totalTransactions;
-        currentBalanceEl.textContent = `$${currentBalance.toFixed(2)}`;
-        totalIncomeEl.textContent = `$${totalIncome.toFixed(2)}`;
-        totalExpensesEl.textContent = `$${totalExpenses.toFixed(2)}`;
-        
-      } catch (error) {
-        console.error("Error loading financial data:", error);
+    // Replace the entire loadFinancialData function with this improved version:
+async function loadFinancialData(userId) {
+  try {
+    // Query transactions for this user
+    const transactionsQuery = db.collection("users").doc(userId).collection("transactions");
+    const snapshot = await transactionsQuery.orderBy("DATE", "desc").get();
+    
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    let totalTransactions = 0;
+    let latestBalance = 0;
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      totalIncome += parseFloat(data.INCOME || 0);
+      totalExpenses += parseFloat(data.EXPENSE || 0);
+      totalTransactions++;
+      
+      // Get the latest balance (assuming transactions are ordered by date)
+      if (latestBalance === 0 && data.BALANCE) {
+        latestBalance = parseFloat(data.BALANCE);
       }
-    }
+    });
+    
+    const currentBalance = latestBalance || (totalIncome - totalExpenses);
+    
+    // Update the dashboard with real data
+    totalTransactionsEl.textContent = totalTransactions;
+    currentBalanceEl.textContent = `$${currentBalance.toFixed(2)}`;
+    totalIncomeEl.textContent = `$${totalIncome.toFixed(2)}`;
+    totalExpensesEl.textContent = `$${totalExpenses.toFixed(2)}`;
+    
+  } catch (error) {
+    console.error("Error loading financial data:", error);
+  }
+}
 
     function logout() {
       auth.signOut().then(() => {
@@ -861,7 +868,7 @@ onclick="location.href='calculate.html'"><i class="fa fa-file"></i> Calculate</l
       }
 
       try {
-        await db.collection("reminders").add({
+        await db.collection("users").doc(user.uid).collection("reminders").add({
           userId: user.uid,
           type,
           title,
@@ -931,9 +938,8 @@ onclick="location.href='calculate.html'"><i class="fa fa-file"></i> Calculate</l
     // Load calendar events
     async function loadCalendarEvents(userId) {
       try {
-        const snapshot = await db.collection("reminders")
-          .where("userId", "==", userId)
-          .get();
+        const snapshot = await db.collection("users").doc(userId).collection("reminders").get();
+
         
         const events = [];
         snapshot.forEach(doc => {
@@ -967,6 +973,66 @@ onclick="location.href='calculate.html'"><i class="fa fa-file"></i> Calculate</l
         console.error("Error loading reminders: ", error);
       }
     }
+
+    // Add this function to generate sequential voucher numbers
+async function getNextVoucherNumber(userId) {
+  try {
+    const transactionsQuery = db.collection("users").doc(userId).collection("transactions")
+      .orderBy("SINO", "desc").limit(1);
+    
+    const snapshot = await transactionsQuery.get();
+    
+    if (snapshot.empty) {
+      return "VOUCHER-001";
+    }
+    
+    let lastVoucher = "";
+    snapshot.forEach(doc => {
+      lastVoucher = doc.data().SINO || "";
+    });
+    
+    if (!lastVoucher) return "VOUCHER-001";
+    
+    // Extract number and increment
+    const matches = lastVoucher.match(/\d+$/);
+    if (matches) {
+      const num = parseInt(matches[0]) + 1;
+      return `VOUCHER-${num.toString().padStart(3, '0')}`;
+    }
+    
+    return "VOUCHER-001";
+  } catch (error) {
+    console.error("Error getting voucher number:", error);
+    return "VOUCHER-001";
+  }
+}
+
+// Then modify the quickAddBtn event listener to auto-generate voucher numbers:
+quickAddBtn.addEventListener("click", async () => {
+  // Set default date to today
+  transactionDate.value = new Date().toISOString().split('T')[0];
+  
+  // Generate voucher number
+  const user = auth.currentUser;
+  if (user) {
+    const voucherNumber = await getNextVoucherNumber(user.uid);
+    transactionSino.value = voucherNumber;
+  }
+  
+  // Clear previous values
+  transactionAccountHeader.value = "";
+  transactionVoucherType.value = "Payment";
+  transactionType.value = "Income";
+  transactionBankName.value = "";
+  transactionIncome.value = "";
+  transactionExpense.value = "";
+  transactionBalance.value = "";
+  transactionNotes.value = "";
+  transactionAttachment.value = "";
+  fileName.textContent = "No file chosen";
+  
+  transactionModal.classList.add("active");
+});
   </script>
 </body>
 </html>
