@@ -358,6 +358,54 @@
       .floating-button:hover {
           background-color: #218838;
       }
+
+        // Add CSS for CSV preview
+        const style = document.createElement('style');
+        style.textContent = `
+            .preview-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 10px 0;
+                font-size: 12px;
+            }
+            
+            .preview-table th, 
+            .preview-table td {
+                padding: 6px;
+                border: 1px solid #ddd;
+                text-align: left;
+            }
+            
+            .preview-table th {
+                background-color: #f5f5f5;
+                font-weight: bold;
+            }
+            
+            .preview-table tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+            
+            .table-container {
+                max-height: 300px;
+                overflow-y: auto;
+                border: 1px solid #ddd;
+                margin: 10px 0;
+            }
+            
+            .preview-info {
+                font-size: 12px;
+                color: #666;
+                margin: 5px 0;
+            }
+            
+            .form-note {
+                font-size: 12px;
+                color: #666;
+                margin-top: 10px;
+                padding: 10px;
+                background-color: #f9f9f9;
+                border-radius: 4px;
+            }
     </style>
 </head>
 <body>
@@ -1668,6 +1716,308 @@
             loadingModal.style.display = "none";
         }
     });
+
+
+    // CSV Upload Functionality
+    function setupCSVUpload() {
+        const csvUploadBtn = document.getElementById('csvUploadBtn');
+        const csvFileInput = document.getElementById('csvFileInput');
+        const csvUploadModal = document.getElementById('csvUploadModal');
+        const csvPreview = document.getElementById('csvPreview');
+        const processCSVBtn = document.getElementById('processCSVBtn');
+        const cancelCSVBtn = document.getElementById('cancelCSVBtn');
+        const closeCSVBtn = document.querySelector('.close-csv-btn');
+        const csvMappingForm = document.getElementById('csvMappingForm');
+
+        if (!csvUploadBtn) return;
+
+        csvUploadBtn.addEventListener('click', () => {
+            csvFileInput.value = '';
+            csvPreview.innerHTML = '';
+            csvUploadModal.style.display = 'flex';
+        });
+
+        closeCSVBtn.addEventListener('click', () => {
+            csvUploadModal.style.display = 'none';
+        });
+
+        cancelCSVBtn.addEventListener('click', () => {
+            csvUploadModal.style.display = 'none';
+        });
+
+        csvUploadModal.addEventListener('click', (e) => {
+            if (e.target === csvUploadModal) {
+                csvUploadModal.style.display = 'none';
+            }
+        });
+
+        csvFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                parseCSVFile(file);
+            }
+        });
+
+        processCSVBtn.addEventListener('click', async () => {
+            await processCSVData();
+        });
+    }
+
+    function parseCSVFile(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const csvData = e.target.result;
+            parseCSVData(csvData);
+        };
+        reader.readAsText(file);
+    }
+
+    function parseCSVData(csvData) {
+        const lines = csvData.split('\n').filter(line => line.trim() !== '');
+        if (lines.length < 2) {
+            Swal.fire("Error", "CSV file is empty or invalid", "error");
+            return;
+        }
+
+        const headers = lines[0].split(',').map(header => header.trim());
+        const rows = lines.slice(1, 11); // Preview first 10 rows
+
+        // Generate preview table
+        let previewHTML = `
+            <h3>CSV Preview (first 10 rows)</h3>
+            <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+            <table class="preview-table">
+                <thead>
+                    <tr>
+                        ${headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        rows.forEach(row => {
+            const cells = row.split(',').map(cell => cell.trim());
+            previewHTML += `
+                <tr>
+                    ${cells.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
+                </tr>
+            `;
+        });
+
+        previewHTML += `
+                </tbody>
+            </table>
+            </div>
+            <p class="preview-info">Total rows found: ${lines.length - 1}</p>
+        `;
+
+        document.getElementById('csvPreview').innerHTML = previewHTML;
+
+        // Generate mapping options
+        generateMappingOptions(headers);
+    }
+
+    function generateMappingOptions(headers) {
+        const mappingForm = document.getElementById('csvMappingForm');
+        mappingForm.innerHTML = '';
+
+        const requiredFields = [
+            { id: 'sinoMapping', label: 'Voucher Number (SINO)', required: true },
+            { id: 'dateMapping', label: 'Date', required: true },
+            { id: 'accountMapping', label: 'Account Header', required: true },
+            { id: 'modeMapping', label: 'Mode', required: true },
+            { id: 'incomeMapping', label: 'Income Amount', required: false },
+            { id: 'expenseMapping', label: 'Expense Amount', required: false },
+            { id: 'descMapping', label: 'Description', required: false },
+            { id: 'bankMapping', label: 'Bank Name', required: false },
+            { id: 'timeMapping', label: 'Time', required: false }
+        ];
+
+        requiredFields.forEach(field => {
+            const fieldDiv = document.createElement('div');
+            fieldDiv.className = 'form-group';
+            
+            fieldDiv.innerHTML = `
+                <label for="${field.id}">${field.label}${field.required ? ' *' : ''}</label>
+                <select id="${field.id}" class="form-select" ${field.required ? 'required' : ''}>
+                    <option value="">Select CSV Column</option>
+                    ${headers.map((header, index) => 
+                        `<option value="${index}">${escapeHtml(header)}</option>`
+                    ).join('')}
+                </select>
+            `;
+            
+            mappingForm.appendChild(fieldDiv);
+        });
+
+        // Add note about required fields
+        const note = document.createElement('p');
+        note.className = 'form-note';
+        note.innerHTML = '<strong>Note:</strong> At least one of Income or Expense amount must be mapped.';
+        mappingForm.appendChild(note);
+    }
+
+    async function processCSVData() {
+        const file = document.getElementById('csvFileInput').files[0];
+        if (!file) {
+            Swal.fire("Error", "Please select a CSV file first", "error");
+            return;
+        }
+
+        // Validate mappings
+        const sinoMapping = document.getElementById('sinoMapping').value;
+        const dateMapping = document.getElementById('dateMapping').value;
+        const accountMapping = document.getElementById('accountMapping').value;
+        const modeMapping = document.getElementById('modeMapping').value;
+        const incomeMapping = document.getElementById('incomeMapping').value;
+        const expenseMapping = document.getElementById('expenseMapping').value;
+
+        if (!sinoMapping || !dateMapping || !accountMapping || !modeMapping || 
+            (!incomeMapping && !expenseMapping)) {
+            Swal.fire("Error", "Please map all required fields", "error");
+            return;
+        }
+
+        loadingModal.style.display = "flex";
+
+        try {
+            const csvData = await readFileAsText(file);
+            const lines = csvData.split('\n').filter(line => line.trim() !== '');
+            const headers = lines[0].split(',').map(header => header.trim());
+            const rows = lines.slice(1);
+
+            let successCount = 0;
+            let errorCount = 0;
+            const errors = [];
+
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].trim() === '') continue;
+
+                const cells = rows[i].split(',').map(cell => cell.trim());
+                
+                try {
+                    // Extract values based on mappings
+                    const transactionData = {
+                        SINO: cells[sinoMapping] || '',
+                        DATE: cells[dateMapping] || '',
+                        TIME: cells[document.getElementById('timeMapping').value] || '00:00',
+                        ACCOUNT_HEADER: cells[accountMapping] || '',
+                        MODE: cells[modeMapping] || '',
+                        BANK_NAME: cells[document.getElementById('bankMapping').value] || '',
+                        INCOME: parseFloat(cells[incomeMapping] || 0) || 0,
+                        EXPENSE: parseFloat(cells[expenseMapping] || 0) || 0,
+                        DESCRIPTION: cells[document.getElementById('descMapping').value] || '',
+                        userId: currentUser.uid,
+                        createdAt: new Date()
+                    };
+
+                    // Validate transaction data
+                    const validationErrors = validateTransactionData(transactionData);
+                    if (validationErrors.length > 0) {
+                        throw new Error(`Row ${i + 2}: ${validationErrors.join(', ')}`);
+                    }
+
+                    // Check for duplicate SINO
+                    const isDuplicate = await checkForDuplicateSINO(transactionData.SINO);
+                    if (isDuplicate) {
+                        throw new Error(`Row ${i + 2}: Duplicate voucher number ${transactionData.SINO}`);
+                    }
+
+                    // Save transaction
+                    await addDoc(collection(db, "users", currentUser.uid, "transactions"), transactionData);
+                    successCount++;
+
+                    // Add delay to avoid Firestore quota limits
+                    if (i % 10 === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+
+                } catch (error) {
+                    errorCount++;
+                    errors.push(error.message);
+                    console.error(`Error processing row ${i + 2}:`, error);
+                }
+            }
+
+            // Show results
+            let resultMessage = `Processed ${successCount + errorCount} transactions.<br>`;
+            resultMessage += `Success: ${successCount}<br>`;
+            resultMessage += `Errors: ${errorCount}`;
+
+            if (errors.length > 0) {
+                resultMessage += `<br><br>Errors:<br>${errors.slice(0, 5).join('<br>')}`;
+                if (errors.length > 5) {
+                    resultMessage += `<br>... and ${errors.length - 5} more errors`;
+                }
+            }
+
+            Swal.fire({
+                title: "CSV Import Complete",
+                html: resultMessage,
+                icon: successCount > 0 ? "success" : "error"
+            });
+
+            // Reload transactions
+            await loadTransactions();
+            document.getElementById('csvUploadModal').style.display = 'none';
+
+        } catch (error) {
+            console.error("Error processing CSV:", error);
+            Swal.fire("Error", "Failed to process CSV file: " + error.message, "error");
+        } finally {
+            loadingModal.style.display = "none";
+        }
+    }
+
+    function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = e => reject(e);
+            reader.readAsText(file);
+        });
+    }
+
+    // Add CSV template download function
+    function downloadCSVTemplate() {
+        const template = `SINO,DATE,TIME,ACCOUNT_HEADER,MODE,BANK_NAME,INCOME,EXPENSE,DESCRIPTION
+VOUCHER-001,2023-10-01,09:30,Salary Income,Bank,Chase Bank,5000,0,October Salary
+VOUCHER-002,2023-10-02,14:15,Rent Expense,Bank,Chase Bank,0,1200,Monthly Rent
+VOUCHER-003,2023-10-03,11:00,Office Supplies,Cash,,0,85.50,Stationery purchase
+
+Instructions:
+1. Keep the header row as is
+2. SINO must be unique for each transaction
+3. DATE format: YYYY-MM-DD
+4. TIME format: HH:MM (24-hour)
+5. For income transactions, put amount in INCOME column
+6. For expense transactions, put amount in EXPENSE column
+7. BANK_NAME is required for Bank/Transfer modes`;
+
+        const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'transactions_template.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // Initialize CSV upload when DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        setupCSVUpload();
+        
+        // Add template download button event
+        const downloadTemplateBtn = document.getElementById('downloadTemplateBtn');
+        if (downloadTemplateBtn) {
+            downloadTemplateBtn.addEventListener('click', downloadCSVTemplate);
+        }
+                `;
+        document.head.appendChild(style);
+    });
+
 </script>
 </body>
 </html>
