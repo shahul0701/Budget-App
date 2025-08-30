@@ -720,145 +720,136 @@
     }
 
     // Load all transactions for user
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+   // Enhanced loadTransactions function
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        let q;
         try {
-            // Try the original query first
-            let q;
-            try {
+            // Try to order by both date and time if possible
+            q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("createdAt", "desc") // Use timestamp for consistent ordering
+            );
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                // Fallback to date-only ordering
                 q = query(
                     collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc"),
-                    orderBy("TIME", "desc")
+                    orderBy("DATE", "desc")
                 );
-                const snap = await getDocs(q);
-                processTransactions(snap);
-            } catch (error) {
-                if (error.code === 'failed-precondition') {
-                    // Fallback to single field ordering if index doesn't exist
-                    console.warn("Composite index not found, using date-only sorting");
-                    q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                    const snap = await getDocs(q);
-                    processTransactions(snap);
-                } else {
-                    throw error;
-                }
+            } else {
+                throw error;
             }
-
-            function processTransactions(snap) {
-                let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                // Get account from URL
-                const selectedAccount = getAccountFromURL();
-
-                // Filter if opened from trial balance
-                if (selectedAccount) {
-                    transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                    document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-                } else {
-                    document.getElementById("accountTitle").textContent = "All Transactions";
-                }
-
-                allTransactions = transactions;
-
-                // Calculate running balance
-                calculateRunningBalance(allTransactions);
-                populateFiltersOptions(allTransactions);
-                applyFilters();
-                
-                // Debug attachments to see what's in the data
-                debugAttachments();
-            }
-
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            alert("Error loading transactions. Please check console for details.");
-        } finally {
-            loadingModal.style.display = "none";
         }
-    }
 
+        const snap = await getDocs(q);
+        let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Get account from URL
+        const selectedAccount = getAccountFromURL();
+
+        // Filter if opened from trial balance
+        if (selectedAccount) {
+            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+        } else {
+            document.getElementById("accountTitle").textContent = "All Transactions";
+        }
+
+        allTransactions = calculateRunningBalance(transactions);
+        populateFiltersOptions(allTransactions);
+        applyFilters();
+        
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        if (err.code === 'permission-denied') {
+            Swal.fire("Error", "You don't have permission to view transactions", "error");
+        } else {
+            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+        }
+    } finally {
+        loadingModal.style.display = "none";
+    }
+}
     // Calculate running balance for transactions per bank
-    function calculateRunningBalance(transactions) {
-        // Create a map to track balances for each bank
-        const bankBalances = {};
-        
-        // Sort transactions by date and time
-        const sortedTransactions = [...transactions].sort((a, b) => {
-            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
-            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
-            return dateA - dateB;
-        });
-        
-        // Calculate balance for each transaction based on its bank
-        sortedTransactions.forEach(transaction => {
-            const income = parseFloat(transaction.INCOME) || 0;
-            const expense = parseFloat(transaction.EXPENSE) || 0;
-            
-            // Determine which bank this transaction belongs to
-            let bankKey = "Cash"; // Default for cash transactions
-            
-            if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
-                bankKey = transaction.BANK_NAME;
-            } else if (transaction.MODE === "Transfer") {
-                // For transfers, we need special handling
-                // This is a simplified approach - you might need to adjust based on your data structure
-                if (transaction.BANK_NAME) {
-                    bankKey = transaction.BANK_NAME;
-                }
-            }
-            
-            // Initialize bank balance if not exists
-            if (!bankBalances[bankKey]) {
-                bankBalances[bankKey] = 0;
-            }
-            
-            // Update the balance for this bank
-            bankBalances[bankKey] += income - expense;
-            transaction.BALANCE = parseFloat(bankBalances[bankKey].toFixed(2));
-        });
-        
-        // Update the last balances for new transactions
-        lastBalances = bankBalances;
-        
-        return sortedTransactions;
-    }
-
-    // Update the updateBalance function to handle per-bank calculations
-    function updateBalance() {
-        const income = parseFloat(formINCOME.value) || 0;
-        const expense = parseFloat(formEXPENSE.value) || 0;
+    // Enhanced function to calculate running balance for transactions
+function calculateRunningBalance(transactions) {
+    // Create a map to track balances for each bank
+    const bankBalances = {};
+    
+    // Sort transactions by date and time (oldest first for proper balance calculation)
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+        const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+        return dateA - dateB;
+    });
+    
+    // Calculate balance for each transaction based on its bank
+    sortedTransactions.forEach(transaction => {
+        const income = parseFloat(transaction.INCOME) || 0;
+        const expense = parseFloat(transaction.EXPENSE) || 0;
+        const netChange = income - expense;
         
         // Determine which bank this transaction belongs to
-        let bankKey = "Cash"; // Default for cash
+        let bankKey = "Cash"; // Default for cash transactions
         
-        if (formMODE.value === "Bank" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
-        } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
-            bankKey = formBANKNAME.value;
+        if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
+            bankKey = transaction.BANK_NAME;
+        } else if (transaction.MODE === "Transfer" && transaction.BANK_NAME) {
+            bankKey = transaction.BANK_NAME;
         }
         
-        // Get the current balance for this bank
-        const currentBankBalance = lastBalances[bankKey] || 0;
+        // Initialize bank balance if not exists
+        if (!bankBalances[bankKey]) {
+            bankBalances[bankKey] = 0;
+        }
         
-        // For new transactions, calculate based on the bank's last balance
-        if (!txIdInput.value) {
-            formBALANCE.value = (currentBankBalance + income - expense).toFixed(2);
-        } else {
-            // For editing existing transactions, we need to recalculate
-            const tx = txMap[txIdInput.value];
-            if (tx) {
-                const oldIncome = parseFloat(tx.INCOME) || 0;
-                const oldExpense = parseFloat(tx.EXPENSE) || 0;
-                const balanceChange = (income - expense) - (oldIncome - oldExpense);
-                formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
-            }
+        // Update the balance for this bank
+        bankBalances[bankKey] += netChange;
+        transaction.BALANCE = parseFloat(bankBalances[bankKey].toFixed(2));
+    });
+    
+    // Update the last balances for new transactions
+    lastBalances = bankBalances;
+    
+    // Return sorted by date descending for display
+    return sortedTransactions.reverse();
+}
+    // Update the updateBalance function to handle per-bank calculations
+    // Enhanced updateBalance function
+function updateBalance() {
+    const income = parseFloat(formINCOME.value) || 0;
+    const expense = parseFloat(formEXPENSE.value) || 0;
+    const netChange = income - expense;
+    
+    // Determine which bank this transaction belongs to
+    let bankKey = "Cash"; // Default for cash
+    
+    if (formMODE.value === "Bank" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    }
+    
+    // Get the current balance for this bank
+    const currentBankBalance = lastBalances[bankKey] || 0;
+    
+    // For new transactions, calculate based on the bank's last balance
+    if (!txIdInput.value) {
+        formBALANCE.value = (currentBankBalance + netChange).toFixed(2);
+    } else {
+        // For editing existing transactions, we need to recalculate
+        const tx = txMap[txIdInput.value];
+        if (tx) {
+            const oldIncome = parseFloat(tx.INCOME) || 0;
+            const oldExpense = parseFloat(tx.EXPENSE) || 0;
+            const oldNetChange = oldIncome - oldExpense;
+            const balanceChange = netChange - oldNetChange;
+            formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
         }
     }
-
+}
     // Update the clearForm function to use lastBalances instead of lastBalance
     function clearForm() {
         form.reset();
@@ -891,41 +882,72 @@
     }
 
     // Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
-    async function saveTransaction() {
-        loadingModal.style.display = "flex";
-        
-        try {
-            // Determine which bank this transaction belongs to
-            let bankName = "";
-            if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
-                bankName = formBANKNAME.value;
-            }
-            
-            // Create the base transaction data
-            const transactionData = {
-                SINO: formSINO.value,
-                DATE: formDATE.value,
-                TIME: formTIME.value,
-                ACCOUNT_HEADER: formHEADER.value,
-                MODE: formMODE.value,
-                BANK_NAME: bankName,
-                INCOME: parseFloat(formINCOME.value) || 0,
-                EXPENSE: parseFloat(formEXPENSE.value) || 0,
-                DESCRIPTION: formDESC.value,
-                BALANCE: parseFloat(formBALANCE.value) || 0,
-                userId: currentUser.uid
-            };
+async function saveTransaction() {
+    loadingModal.style.display = "flex";
+    
+    try {
+        // Validate required fields
+        if (!formSINO.value || !formDATE.value || !formHEADER.value || !formMODE.value) {
+            Swal.fire("Error", "Please fill in all required fields", "error");
+            loadingModal.style.display = "none";
+            return;
+        }
 
-            // Handle file upload / attachment
-            if (formATTACHFILE.files.length > 0) {
-                const file = formATTACHFILE.files[0];
-                
-                // Check file size (limit to 10MB)
-                if (file.size > 10 * 1024 * 1024) {
-                    Swal.fire("Error", "File size must be less than 10MB", "error");
+        // Validate transaction type
+        if ((!formINCOME.value || parseFloat(formINCOME.value) === 0) && 
+            (!formEXPENSE.value || parseFloat(formEXPENSE.value) === 0)) {
+            Swal.fire("Error", "Please enter either income or expense amount", "error");
+            loadingModal.style.display = "none";
+            return;
+        }
+
+        // Check for duplicate SINO (voucher number)
+        const isDuplicate = await checkForDuplicateSINO(formSINO.value, txIdInput.value);
+        if (isDuplicate) {
+            Swal.fire("Error", "A transaction with this voucher number already exists", "error");
+            loadingModal.style.display = "none";
+            return;
+        }
+
+        // Bank validation
+        let bankName = "";
+        if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
+            if (!formBANKNAME.value) {
+                Swal.fire("Error", "Please select a bank for bank/transfer transactions", "error");
+                loadingModal.style.display = "none";
+                return;
+            }
+            bankName = formBANKNAME.value;
+            
+            // Check if bank has sufficient balance for expense
+            const income = parseFloat(formINCOME.value) || 0;
+            const expense = parseFloat(formEXPENSE.value) || 0;
+            
+            if (expense > 0) {
+                const currentBankBalance = lastBalances[bankName] || 0;
+                if (currentBankBalance < expense && !txIdInput.value) {
+                    Swal.fire("Error", `Insufficient balance in ${bankName}. Available: ${currentBankBalance.toFixed(2)}`, "error");
                     loadingModal.style.display = "none";
                     return;
                 }
+            }
+        }
+
+        // Create the base transaction data
+        const transactionData = {
+            SINO: formSINO.value,
+            DATE: formDATE.value,
+            TIME: formTIME.value,
+            ACCOUNT_HEADER: formHEADER.value,
+            MODE: formMODE.value,
+            BANK_NAME: bankName,
+            INCOME: parseFloat(formINCOME.value) || 0,
+            EXPENSE: parseFloat(formEXPENSE.value) || 0,
+            DESCRIPTION: formDESC.value,
+            BALANCE: parseFloat(formBALANCE.value) || 0,
+            userId: currentUser.uid,
+            createdAt: new Date() // Add timestamp for ordering
+        };
                 
                 // Allowed file types (all docs & images, no video)
                 const allowedTypes = [
@@ -989,37 +1011,134 @@
             }
 
             // Prepare data for Firestore - remove any undefined values
-            const firestoreData = {};
-            Object.keys(transactionData).forEach(key => {
-                if (transactionData[key] !== undefined && transactionData[key] !== null) {
-                    firestoreData[key] = transactionData[key];
-                }
-            });
-
-            if (txIdInput.value) {
-                // For updates, handle the case where we want to remove attachment
-                if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
-                    firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
-                }
-                
-                await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
-                Swal.fire("Success", "Transaction updated successfully!", "success");
-            } else {
-                await addDoc(collection(db, "users", currentUser.uid, "transactions"), firestoreData);
-                Swal.fire("Success", "Transaction added successfully!", "success");
-            }
-
-            await loadTransactions();
-            modal.style.display = "none";
-            
-        } catch (error) {
-            console.error("Error saving transaction:", error);
-            Swal.fire("Error", "Failed to save transaction: " + error.message, "error");
-        } finally {
+            // Update the saveTransaction function to validate against rules
+async function saveTransaction() {
+    loadingModal.style.display = "flex";
+    
+    try {
+        // Validate required fields
+        if (!formSINO.value || !formDATE.value || !formHEADER.value || !formMODE.value) {
+            Swal.fire("Error", "Please fill in all required fields", "error");
             loadingModal.style.display = "none";
+            return;
         }
-    }
 
+        // Validate transaction type
+        if ((!formINCOME.value || parseFloat(formINCOME.value) === 0) && 
+            (!formEXPENSE.value || parseFloat(formEXPENSE.value) === 0)) {
+            Swal.fire("Error", "Please enter either income or expense amount", "error");
+            loadingModal.style.display = "none";
+            return;
+        }
+
+        // Check for duplicate SINO (voucher number)
+        const isDuplicate = await checkForDuplicateSINO(formSINO.value, txIdInput.value);
+        if (isDuplicate) {
+            Swal.fire("Error", "A transaction with this voucher number already exists", "error");
+            loadingModal.style.display = "none";
+            return;
+        }
+
+        // Bank validation
+        let bankName = "";
+        if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
+            if (!formBANKNAME.value) {
+                Swal.fire("Error", "Please select a bank for bank/transfer transactions", "error");
+                loadingModal.style.display = "none";
+                return;
+            }
+            bankName = formBANKNAME.value;
+            
+            // Check if bank has sufficient balance for expense
+            const income = parseFloat(formINCOME.value) || 0;
+            const expense = parseFloat(formEXPENSE.value) || 0;
+            
+            if (expense > 0) {
+                const currentBankBalance = lastBalances[bankName] || 0;
+                if (currentBankBalance < expense && !txIdInput.value) {
+                    Swal.fire("Error", `Insufficient balance in ${bankName}. Available: ${currentBankBalance.toFixed(2)}`, "error");
+                    loadingModal.style.display = "none";
+                    return;
+                }
+            }
+        }
+
+        // Create the base transaction data
+        const transactionData = {
+            SINO: formSINO.value,
+            DATE: formDATE.value,
+            TIME: formTIME.value,
+            ACCOUNT_HEADER: formHEADER.value,
+            MODE: formMODE.value,
+            BANK_NAME: bankName,
+            INCOME: parseFloat(formINCOME.value) || 0,
+            EXPENSE: parseFloat(formEXPENSE.value) || 0,
+            DESCRIPTION: formDESC.value,
+            BALANCE: parseFloat(formBALANCE.value) || 0,
+            userId: currentUser.uid,
+            createdAt: new Date() // Add timestamp for ordering
+        };
+
+        // ... rest of the file upload code remains the same ...
+
+        // Prepare data for Firestore - remove any undefined values
+        const firestoreData = {};
+        Object.keys(transactionData).forEach(key => {
+            if (transactionData[key] !== undefined && transactionData[key] !== null) {
+                firestoreData[key] = transactionData[key];
+            }
+        });
+
+        if (txIdInput.value) {
+            // For updates, handle the case where we want to remove attachment
+            if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
+                firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
+            }
+            
+            await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
+            Swal.fire("Success", "Transaction updated successfully!", "success");
+        } else {
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), firestoreData);
+            Swal.fire("Success", "Transaction added successfully!", "success");
+        }
+
+        await loadTransactions();
+        modal.style.display = "none";
+        
+    } catch (error) {
+        console.error("Error saving transaction:", error);
+        // Check if it's a permissions error
+        if (error.code === 'permission-denied') {
+            Swal.fire("Error", "You don't have permission to perform this action", "error");
+        } else {
+            Swal.fire("Error", "Failed to save transaction: " + error.message, "error");
+        }
+    } finally {
+        loadingModal.style.display = "none";
+    }
+}
+
+// Add function to check for duplicate SINO numbers
+async function checkForDuplicateSINO(sino, currentTxId = null) {
+    try {
+        const q = query(
+            collection(db, "users", currentUser.uid, "transactions"),
+            where("SINO", "==", sino)
+        );
+        
+        const snapshot = await getDocs(q);
+        
+        // If we're editing, exclude the current transaction from the check
+        if (currentTxId) {
+            return snapshot.docs.some(doc => doc.id !== currentTxId);
+        }
+        
+        return !snapshot.empty;
+    } catch (error) {
+        console.error("Error checking for duplicate SINO:", error);
+        return false; // Don't block on error
+    }
+}
     // Add event listeners to update the balance when bank selection changes
     formMODE.addEventListener("change", () => {
         toggleToBankGroup(formMODE.value);
@@ -1487,6 +1606,48 @@ function getAttachmentHtml(url) {
             <br>
             <small style="color:#666; font-size:11px;">${displayName}</small>
         `;
+    }
+}
+
+    function handleFirestoreError(error, action) {
+    console.error(`Error ${action}:`, error);
+    
+    if (error.code === 'permission-denied') {
+        Swal.fire("Permission Denied", `You don't have permission to ${action}.`, "error");
+        return true;
+    } else if (error.code === 'not-found') {
+        Swal.fire("Not Found", `The requested data was not found.`, "error");
+        return true;
+    } else if (error.code === 'unauthenticated') {
+        Swal.fire("Authentication Error", "Please log in again.", "error");
+        setTimeout(() => window.location.href = "index.html", 2000);
+        return true;
+    }
+    
+    return false;
+}
+    // Add this to your saveTransaction function after bank validation
+if (formMODE.value === "Transfer") {
+    if (!toBankSelect.value) {
+        Swal.fire("Error", "Please select a destination bank for transfer", "error");
+        loadingModal.style.display = "none";
+        return;
+    }
+    
+    if (formBANKNAME.value === toBankSelect.value) {
+        Swal.fire("Error", "Cannot transfer to the same bank", "error");
+        loadingModal.style.display = "none";
+        return;
+    }
+    
+    // For transfers, expense should equal income
+    const income = parseFloat(formINCOME.value) || 0;
+    const expense = parseFloat(formEXPENSE.value) || 0;
+    
+    if (income > 0 && expense > 0 && income !== expense) {
+        Swal.fire("Error", "For transfers, income and expense amounts should be equal", "error");
+        loadingModal.style.display = "none";
+        return;
     }
 }
 </script>
