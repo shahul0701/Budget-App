@@ -612,6 +612,17 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .no-items, .error-loading {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -650,14 +661,14 @@
                     <h2>My Assets & Documents</h2>
                     <div class="search-box">
                         <i class="fas fa-search"></i>
-                        <input type="text" placeholder="Search items...">
+                        <input type="text" placeholder="Search items..." id="searchInput">
                     </div>
                 </div>
                 
                 <div class="tabs">
-                    <div class="tab active">All</div>
-                    <div class="tab">Assets</div>
-                    <div class="tab">Documents</div>
+                    <div class="tab active" data-filter="all">All</div>
+                    <div class="tab" data-filter="asset">Assets</div>
+                    <div class="tab" data-filter="document">Documents</div>
                 </div>
                 
                 <div class="items-grid" id="itemsGrid">
@@ -898,6 +909,8 @@
         const journalEntries = document.getElementById('journalEntries');
         const iconSelector = document.getElementById('iconSelector');
         const iconOptions = document.querySelectorAll('.icon-option');
+        const searchInput = document.getElementById('searchInput');
+        const filterTabs = document.querySelectorAll('.content .tab');
 
         // Current state
         let currentItems = [];
@@ -906,6 +919,8 @@
         let selectedIcon = 'fas fa-laptop';
         let currentItemId = null;
         let currentUsername = 'DemoUser';
+        let currentFilter = 'all';
+        let currentSearchTerm = '';
 
         // Initialize from Firebase
         function initializeApp() {
@@ -957,6 +972,22 @@
                     documentForm.classList.remove('hidden');
                 }
             });
+        });
+
+        // Filter tabs
+        filterTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                filterTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.getAttribute('data-filter');
+                renderItems();
+            });
+        });
+
+        // Search functionality
+        searchInput.addEventListener('input', () => {
+            currentSearchTerm = searchInput.value.toLowerCase();
+            renderItems();
         });
 
         // Detail tab switching
@@ -1073,9 +1104,6 @@
             };
             
             addJournalEntryToItem(currentItemId, entryData);
-            showNotification('Journal entry added!', 'success');
-            journalEntry.value = '';
-            loadJournalEntries(currentItemId);
         });
 
         // Cloudinary Upload Widget
@@ -1099,7 +1127,6 @@
                     
                     if (forExistingItem) {
                         addAttachmentToItem(currentItemId, fileInfo);
-                        loadAttachments(currentItemId);
                     } else {
                         selectedFiles.push(fileInfo);
                         addFileToAttachmentsList(fileInfo, attachmentsList);
@@ -1128,6 +1155,7 @@
                 })
                 .catch((error) => {
                     showNotification('Error saving item: ' + error.message, 'error');
+                    console.error('Error saving item:', error);
                 })
                 .finally(() => {
                     submitItem.innerHTML = 'Add Item';
@@ -1142,50 +1170,99 @@
                 .orderBy('createdAt', 'desc')
                 .get()
                 .then((querySnapshot) => {
-                    itemsGrid.innerHTML = '';
                     currentItems = [];
                     
-                    // Add the "Add New Item" card
-                    const addItemCard = document.createElement('div');
-                    addItemCard.className = 'item-card add-item';
-                    addItemCard.innerHTML = `
-                        <div class="add-icon">
-                            <i class="fas fa-plus"></i>
-                        </div>
-                        <div>Add New Item</div>
-                    `;
-                    addItemCard.addEventListener('click', () => {
-                        addModal.style.display = 'flex';
-                    });
-                    itemsGrid.appendChild(addItemCard);
-                    
                     if (querySnapshot.empty) {
-                        itemsGrid.innerHTML = `
-                            <div class="no-items">
-                                <p>No items found. Add your first item!</p>
-                            </div>
-                        `;
-                        itemsGrid.appendChild(addItemCard);
+                        renderItems();
                         return;
                     }
                     
-                    querySnapshot.forEach((doc, index) => {
+                    querySnapshot.forEach((doc) => {
                         const item = doc.data();
                         item.id = doc.id;
                         currentItems.push(item);
-                        
-                        const itemElement = createItemElement(item, index);
-                        itemsGrid.insertBefore(itemElement, addItemCard);
                     });
+                    
+                    renderItems();
                 })
                 .catch((error) => {
                     showNotification('Error loading items: ' + error.message, 'error');
+                    console.error('Error loading items:', error);
                     itemsGrid.innerHTML = `
                         <div class="error-loading">
                             <p>Error loading items. Please try again.</p>
                         </div>
                     `;
                 });
+        }
+
+        function renderItems() {
+            itemsGrid.innerHTML = '';
+            
+            // Add the "Add New Item" card
+            const addItemCard = document.createElement('div');
+            addItemCard.className = 'item-card add-item';
+            addItemCard.innerHTML = `
+                <div class="add-icon">
+                    <i class="fas fa-plus"></i>
+                </div>
+                <div>Add New Item</div>
+            `;
+            addItemCard.addEventListener('click', () => {
+                addModal.style.display = 'flex';
+            });
+            itemsGrid.appendChild(addItemCard);
+            
+            if (currentItems.length === 0) {
+                itemsGrid.innerHTML = `
+                    <div class="no-items">
+                        <p>No items found. Add your first item!</p>
+                    </div>
+                `;
+                itemsGrid.appendChild(addItemCard);
+                return;
+            }
+            
+            // Filter items based on current filter and search term
+            const filteredItems = currentItems.filter(item => {
+                // Apply type filter
+                if (currentFilter !== 'all' && item.type !== currentFilter) {
+                    return false;
+                }
+                
+                // Apply search filter
+                if (currentSearchTerm) {
+                    const searchFields = [
+                        item.type === 'asset' ? item.name : item.title,
+                        item.description,
+                        item.type === 'asset' ? item.purchaseDate : item.issueDate
+                    ];
+                    
+                    const matchesSearch = searchFields.some(field => 
+                        field && field.toString().toLowerCase().includes(currentSearchTerm)
+                    );
+                    
+                    if (!matchesSearch) return false;
+                }
+                
+                return true;
+            });
+            
+            if (filteredItems.length === 0) {
+                itemsGrid.innerHTML = `
+                    <div class="no-items">
+                        <p>No items match your search criteria.</p>
+                    </div>
+                `;
+                itemsGrid.appendChild(addItemCard);
+                return;
+            }
+            
+            // Render filtered items
+            filteredItems.forEach((item, index) => {
+                const itemElement = createItemElement(item, index);
+                itemsGrid.insertBefore(itemElement, addItemCard);
+            });
         }
 
         function addAttachmentToItem(itemId, attachment) {
@@ -1203,9 +1280,11 @@
                 })
                 .then(() => {
                     showNotification('Attachment added successfully!', 'success');
+                    loadAttachments(itemId);
                 })
                 .catch((error) => {
                     showNotification('Error adding attachment: ' + error.message, 'error');
+                    console.error('Error adding attachment:', error);
                 });
         }
 
@@ -1224,9 +1303,12 @@
                 })
                 .then(() => {
                     showNotification('Journal entry added successfully!', 'success');
+                    journalEntry.value = '';
+                    loadJournalEntries(itemId);
                 })
                 .catch((error) => {
                     showNotification('Error adding journal entry: ' + error.message, 'error');
+                    console.error('Error adding journal entry:', error);
                 });
         }
 
@@ -1240,6 +1322,7 @@
                 })
                 .catch((error) => {
                     showNotification('Error deleting item: ' + error.message, 'error');
+                    console.error('Error deleting item:', error);
                 });
         }
 
