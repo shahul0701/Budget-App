@@ -6,6 +6,10 @@
     <title>Asset & Document Manager</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://upload-widget.cloudinary.com/global/all.js"></script>
+    <!-- Firebase App (core Firebase SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <!-- Firebase Firestore -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <style>
         * {
             margin: 0;
@@ -588,6 +592,26 @@
             font-size: 16px;
             width: 200px;
         }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4361ee;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -637,7 +661,9 @@
                 </div>
                 
                 <div class="items-grid" id="itemsGrid">
-                    <!-- Items will be loaded from localStorage -->
+                    <div class="loading">
+                        <div class="spinner"></div>
+                    </div>
                 </div>
                 
                 <div class="cloudinary-badge">
@@ -819,10 +845,25 @@
     <div class="notification" id="notification"></div>
 
     <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+            authDomain: "budget-app-1365f.firebaseapp.com",
+            projectId: "budget-app-1365f",
+            storageBucket: "budget-app-1365f.firebasestorage.app",
+            messagingSenderId: "1036194450411",
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+            measurementId: "G-YFFJL2H54X"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
         // Cloudinary configuration
         const cloudinaryConfig = {
-            cloudName: 'demo', // Replace with your Cloudinary cloud name
-            uploadPreset: 'ml_default' // Replace with your upload preset
+            cloudName: 'dpwdsyvz8', // Replace with your Cloudinary cloud name
+            uploadPreset: 'my_app_uploads' // Replace with your upload preset
         };
 
         // DOM Elements
@@ -866,7 +907,7 @@
         let currentItemId = null;
         let currentUsername = 'DemoUser';
 
-        // Initialize from localStorage
+        // Initialize from Firebase
         function initializeApp() {
             currentUsername = usernameInput.value || 'DemoUser';
             userAvatar.textContent = currentUsername.charAt(0).toUpperCase();
@@ -1014,15 +1055,8 @@
                 };
             }
             
-            // Save item data to localStorage
-            saveItem(itemData);
-            
-            showNotification('Item added successfully!', 'success');
-            addModal.style.display = 'none';
-            resetAddModal();
-            
-            // Refresh items list
-            loadUserItems();
+            // Save item data to Firebase
+            saveItemToFirebase(itemData);
         });
 
         // Add journal entry
@@ -1078,6 +1112,137 @@
             uploadWidget.open();
         }
 
+        // Firebase Functions
+        function saveItemToFirebase(itemData) {
+            submitItem.innerHTML = 'Saving...';
+            submitItem.disabled = true;
+            
+            db.collection('users').doc(currentUsername).collection('items').add(itemData)
+                .then((docRef) => {
+                    showNotification('Item added successfully!', 'success');
+                    addModal.style.display = 'none';
+                    resetAddModal();
+                    
+                    // Refresh items list
+                    loadUserItems();
+                })
+                .catch((error) => {
+                    showNotification('Error saving item: ' + error.message, 'error');
+                })
+                .finally(() => {
+                    submitItem.innerHTML = 'Add Item';
+                    submitItem.disabled = false;
+                });
+        }
+
+        function loadUserItems() {
+            itemsGrid.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            
+            db.collection('users').doc(currentUsername).collection('items')
+                .orderBy('createdAt', 'desc')
+                .get()
+                .then((querySnapshot) => {
+                    itemsGrid.innerHTML = '';
+                    currentItems = [];
+                    
+                    // Add the "Add New Item" card
+                    const addItemCard = document.createElement('div');
+                    addItemCard.className = 'item-card add-item';
+                    addItemCard.innerHTML = `
+                        <div class="add-icon">
+                            <i class="fas fa-plus"></i>
+                        </div>
+                        <div>Add New Item</div>
+                    `;
+                    addItemCard.addEventListener('click', () => {
+                        addModal.style.display = 'flex';
+                    });
+                    itemsGrid.appendChild(addItemCard);
+                    
+                    if (querySnapshot.empty) {
+                        itemsGrid.innerHTML = `
+                            <div class="no-items">
+                                <p>No items found. Add your first item!</p>
+                            </div>
+                        `;
+                        itemsGrid.appendChild(addItemCard);
+                        return;
+                    }
+                    
+                    querySnapshot.forEach((doc, index) => {
+                        const item = doc.data();
+                        item.id = doc.id;
+                        currentItems.push(item);
+                        
+                        const itemElement = createItemElement(item, index);
+                        itemsGrid.insertBefore(itemElement, addItemCard);
+                    });
+                })
+                .catch((error) => {
+                    showNotification('Error loading items: ' + error.message, 'error');
+                    itemsGrid.innerHTML = `
+                        <div class="error-loading">
+                            <p>Error loading items. Please try again.</p>
+                        </div>
+                    `;
+                });
+        }
+
+        function addAttachmentToItem(itemId, attachment) {
+            const item = currentItems[itemId];
+            
+            if (!item.attachments) {
+                item.attachments = [];
+            }
+            
+            item.attachments.push(attachment);
+            
+            db.collection('users').doc(currentUsername).collection('items').doc(item.id)
+                .update({
+                    attachments: firebase.firestore.FieldValue.arrayUnion(attachment)
+                })
+                .then(() => {
+                    showNotification('Attachment added successfully!', 'success');
+                })
+                .catch((error) => {
+                    showNotification('Error adding attachment: ' + error.message, 'error');
+                });
+        }
+
+        function addJournalEntryToItem(itemId, entry) {
+            const item = currentItems[itemId];
+            
+            if (!item.journal) {
+                item.journal = [];
+            }
+            
+            item.journal.push(entry);
+            
+            db.collection('users').doc(currentUsername).collection('items').doc(item.id)
+                .update({
+                    journal: firebase.firestore.FieldValue.arrayUnion(entry)
+                })
+                .then(() => {
+                    showNotification('Journal entry added successfully!', 'success');
+                })
+                .catch((error) => {
+                    showNotification('Error adding journal entry: ' + error.message, 'error');
+                });
+        }
+
+        function deleteItemFromFirebase(itemId) {
+            const item = currentItems[itemId];
+            
+            db.collection('users').doc(currentUsername).collection('items').doc(item.id).delete()
+                .then(() => {
+                    showNotification('Item deleted successfully!', 'success');
+                    loadUserItems();
+                })
+                .catch((error) => {
+                    showNotification('Error deleting item: ' + error.message, 'error');
+                });
+        }
+
         // Helper Functions
         function addFileToAttachmentsList(file, listElement) {
             const attachmentItem = document.createElement('div');
@@ -1123,37 +1288,6 @@
             });
         }
 
-        // Load user's items from localStorage
-        function loadUserItems() {
-            itemsGrid.innerHTML = '';
-            
-            // Get items from localStorage
-            const allItems = JSON.parse(localStorage.getItem('assetTrackerItems') || '[]');
-            
-            // Filter items by current username
-            currentItems = allItems.filter(item => item.username === currentUsername);
-            
-            // Add the "Add New Item" card
-            const addItemCard = document.createElement('div');
-            addItemCard.className = 'item-card add-item';
-            addItemCard.innerHTML = `
-                <div class="add-icon">
-                    <i class="fas fa-plus"></i>
-                </div>
-                <div>Add New Item</div>
-            `;
-            addItemCard.addEventListener('click', () => {
-                addModal.style.display = 'flex';
-            });
-            itemsGrid.appendChild(addItemCard);
-            
-            // Add items to the grid
-            currentItems.forEach((item, index) => {
-                const itemElement = createItemElement(item, index);
-                itemsGrid.insertBefore(itemElement, addItemCard);
-            });
-        }
-
         function createItemElement(item, itemId) {
             const itemElement = document.createElement('div');
             itemElement.className = 'item-card';
@@ -1191,7 +1325,9 @@
             const deleteBtn = itemElement.querySelector('.delete-item');
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                deleteItem(itemId);
+                if (confirm('Are you sure you want to delete this item?')) {
+                    deleteItemFromFirebase(itemId);
+                }
             });
             
             itemElement.addEventListener('click', () => {
@@ -1303,69 +1439,6 @@
             } else {
                 journalEntries.innerHTML = '<p>No journal entries yet.</p>';
             }
-        }
-
-        function deleteItem(itemId) {
-            if (!confirm('Are you sure you want to delete this item?')) return;
-            
-            // Get all items from localStorage
-            const allItems = JSON.parse(localStorage.getItem('assetTrackerItems') || '[]');
-            
-            // Remove the item
-            allItems.splice(itemId, 1);
-            
-            // Save back to localStorage
-            localStorage.setItem('assetTrackerItems', JSON.stringify(allItems));
-            
-            showNotification('Item deleted successfully!', 'success');
-            loadUserItems();
-        }
-
-        function saveItem(itemData) {
-            // Get existing items from localStorage
-            const allItems = JSON.parse(localStorage.getItem('assetTrackerItems') || '[]');
-            
-            // Add new item
-            allItems.push(itemData);
-            
-            // Save back to localStorage
-            localStorage.setItem('assetTrackerItems', JSON.stringify(allItems));
-        }
-
-        function addAttachmentToItem(itemId, attachment) {
-            // Get all items from localStorage
-            const allItems = JSON.parse(localStorage.getItem('assetTrackerItems') || '[]');
-            
-            // Add attachment to the item
-            if (!allItems[itemId].attachments) {
-                allItems[itemId].attachments = [];
-            }
-            
-            allItems[itemId].attachments.push(attachment);
-            
-            // Save back to localStorage
-            localStorage.setItem('assetTrackerItems', JSON.stringify(allItems));
-            
-            // Update current items
-            currentItems[itemId] = allItems[itemId];
-        }
-
-        function addJournalEntryToItem(itemId, entry) {
-            // Get all items from localStorage
-            const allItems = JSON.parse(localStorage.getItem('assetTrackerItems') || '[]');
-            
-            // Add journal entry to the item
-            if (!allItems[itemId].journal) {
-                allItems[itemId].journal = [];
-            }
-            
-            allItems[itemId].journal.push(entry);
-            
-            // Save back to localStorage
-            localStorage.setItem('assetTrackerItems', JSON.stringify(allItems));
-            
-            // Update current items
-            currentItems[itemId] = allItems[itemId];
         }
 
         // Format date for display
