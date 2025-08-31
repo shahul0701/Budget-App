@@ -128,7 +128,7 @@
           <button class="btn ghost" onclick="sciClear()">C</button>
           <button class="btn ghost" onclick="sciBack()">⌫</button>
           <button class="btn ghost" onclick="sciAppend('(')">(</button>
-          <button class="btn ghost" onclick="sciAppend(')')">)</button>
+          <button class="btn ghost" onclick="sciAppend('')">)</button>
           <button class="btn ghost" onclick="sciAppend('**')">^</button>
 
           <button class="btn" onclick="sciFunc('sin')">sin</button>
@@ -505,6 +505,7 @@ countrySelect.addEventListener('change', function() {
   currentCountry = this.value;
   updateCountryData();
   refreshLive(); // Refresh live data with new country
+  updateCurrencySelectors(); // Update currency selectors with new country currency
 });
 
 async function updateCountryData() {
@@ -529,7 +530,10 @@ async function updateCountryData() {
   document.getElementById('country-currency').textContent = countryCurrency;
   document.getElementById('local-currency').textContent = countryCurrency;
   
-  // Update time display
+  // Update currency selectors
+  updateCurrencySelectors();
+  
+  // Update local time display
   updateLocalTime();
 }
 
@@ -537,456 +541,922 @@ function updateLocalTime() {
   const now = new Date();
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: countryTimeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
-  
   const dateFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: countryTimeZone,
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
+    year: 'numeric', month: 'short', day: 'numeric'
   });
   
   document.getElementById('local-time').textContent = formatter.format(now);
   document.getElementById('local-date').textContent = dateFormatter.format(now);
 }
 
-// Update time every second
+// Update local time every second
 setInterval(updateLocalTime, 1000);
 
-/* ------------------ History UI ------------------ */
-const historyEl = document.getElementById('history');
-function addHistory(txt){
-  const el = document.createElement('div'); el.className = 'tiny'; el.textContent = new Date().toLocaleString() + ' — ' + txt;
-  historyEl.prepend(el);
-  while(historyEl.children.length > 200) historyEl.removeChild(historyEl.lastChild);
-}
-function copyHistory(){ navigator.clipboard?.writeText(Array.from(historyEl.children).map(c=>c.textContent).join('\n')).then(()=>alert('Copied')) }
-function downloadHistory(){
-  const rows = [['timestamp','entry']];
-  Array.from(historyEl.children).forEach(ch => rows.push([new Date().toISOString(), ch.textContent]));
-  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'calc_history.csv'; a.click(); URL.revokeObjectURL(url);
-}
+/* ------------------ Currency symbols ------------------ */
+let currencySymbols = {};
 
-/* ------------------ STANDARD calculator ------------------ */
-let stdVal = '0'; const stdDisplay = document.getElementById('std-display');
-function stdUpdate(){ stdDisplay.value = stdVal; }
-function stdAppend(v){ if(stdVal==='0' && v!=='.') stdVal = v; else stdVal += v; stdUpdate(); }
-function stdClear(){ stdVal = '0'; stdUpdate(); }
-function stdBack(){ stdVal = stdVal.length>1 ? stdVal.slice(0,-1) : '0'; stdUpdate(); }
-function stdCalculate(){
+async function loadCurrencySymbols() {
   try {
-    let expr = stdVal.replace(/×/g,'*').replace(/÷/g,'/');
-    expr = expr.replace(/(\d+(\.\d+)?)%/g,'($1/100)');
-    const res = Function('"use strict";return ('+expr+')')();
-    addHistory(`${stdVal} = ${res}`);
-    stdVal = String(res); stdUpdate();
-  } catch (e) {
-    stdVal = 'Error'; stdUpdate();
-    setTimeout(()=>{ stdVal='0'; stdUpdate(); },1500);
-  }
-}
-
-/* ------------------ SCIENTIFIC ------------------ */
-let sciVal = '0'; const sciDisplay = document.getElementById('sci-display');
-function sciUpdate(){ sciDisplay.value = sciVal; }
-function sciAppend(v){ if(sciVal==='0' && v!=='.') sciVal = v; else sciVal += v; sciUpdate(); }
-function sciClear(){ sciVal='0'; sciUpdate(); }
-function sciBack(){ sciVal = sciVal.length>1 ? sciVal.slice(0,-1) : '0'; sciUpdate(); }
-function sciCalculate(){ try { let expr = sciVal.replace(/π/g,'Math.PI').replace(/\^/g,'**'); const res = Function('"use strict";return ('+expr+')')(); addHistory(`${sciVal} = ${res}`); sciVal = String(res); sciUpdate(); } catch(e){ sciVal='Error'; sciUpdate(); setTimeout(()=>sciVal='0',1200); } }
-function sciFunc(fn){ try{ let v = parseFloat(sciVal); if(isNaN(v)) v = 0; let r; switch(fn){ case 'sin': r = Math.sin(v*Math.PI/180); break; case 'cos': r = Math.cos(v*Math.PI/180); break; case 'tan': r = Math.tan(v*Math.PI/180); break; case 'sqrt': r = Math.sqrt(v); break; case 'log': r = Math.log10(v); break; case 'ln': r = Math.log(v); break; default: r = v; } addHistory(`${fn}(${v}) = ${r}`); sciVal = String(r); sciUpdate(); }catch(e){ sciVal='Error'; sciUpdate(); } }
-function sciFact(){ const n = parseInt(sciVal); if(isNaN(n)||n<0){ sciVal='Error'; sciUpdate(); return; } let r=1; for(let i=2;i<=n;i++) r*=i; addHistory(`${n}! = ${r}`); sciVal = String(r); sciUpdate(); }
-
-/* ------------------ CURRENCY symbols + convert ------------------ */
-const fromSelect = document.getElementById('from-currency'), toSelect = document.getElementById('to-currency'), amtInput = document.getElementById('cur-amount');
-const quickFrom = document.getElementById('quick-from'), quickTo = document.getElementById('quick-to'), quickAmt = document.getElementById('quick-amt');
-
-async function loadSymbols(){
-  try {
-    const j = await fetchJson(API.SYMBOLS);
-    if(j && j.symbols){
-      const codes = Object.keys(j.symbols).sort();
-      const html = codes.map(c=>`<option value="${c}">${c}</option>`).join('');
-      fromSelect.innerHTML = html; toSelect.innerHTML = html; quickFrom.innerHTML = html; quickTo.innerHTML = html;
-      fromSelect.value='USD'; toSelect.value=countryCurrency; quickFrom.value='USD'; quickTo.value=countryCurrency;
-      return;
-    }
-  } catch (err) {
-    console.warn('loadSymbols failed:', err);
-  }
-  // fallback
-  const fallback = ['USD','EUR','GBP','INR','JPY','CAD','AUD'];
-  const html = fallback.map(c=>`<option value="${c}">${c}</option>`).join('');
-  fromSelect.innerHTML = html; toSelect.innerHTML = html; quickFrom.innerHTML = html; quickTo.innerHTML = html;
-  fromSelect.value='USD'; toSelect.value=countryCurrency;
-}
-
-async function convertCurrency(){
-  const amount = parseFloat(amtInput.value);
-  const from = fromSelect.value;
-  const to = toSelect.value;
-  if(isNaN(amount)){ document.getElementById('cur-result').textContent = 'Enter valid amount'; return; }
-  document.getElementById('cur-result').textContent = 'Converting…';
-  try {
-    const url = `${API.CONVERT}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${encodeURIComponent(amount)}`;
-    const j = await fetchJson(url, {}, 10000);
-    if(j && j.result !== undefined){
-      document.getElementById('cur-result').innerHTML = `${amount} ${from} = <strong>${Number(j.result).toFixed(4)} ${to}</strong>
-        <div class="tiny muted">Rate: 1 ${from} = ${Number(j.info?.rate || (j.result/amount)).toFixed(6)} ${to}</div>`;
-      addHistory(`Currency: ${amount} ${from} = ${Number(j.result).toFixed(4)} ${to}`);
-      return;
-    } else throw new Error('convert endpoint returned no result');
-  } catch (err) {
-    console.warn('convert endpoint failed, fallback to latest:', err);
-    try {
-      const j2 = await fetchJson(`${API.LATEST}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`, {}, 10000);
-      if(j2 && j2.rates && j2.rates[to] !== undefined){
-        const rate = Number(j2.rates[to]);
-        const result = amount * rate;
-        document.getElementById('cur-result').innerHTML = `${amount} ${from} = <strong>${result.toFixed(4)} ${to}</strong>
-          <div class="tiny muted">Rate: 1 ${from} = ${rate.toFixed(6)} ${to} (latest)</div>`;
-        addHistory(`Currency (fallback): ${amount} ${from} = ${result.toFixed(4)} ${to}`);
-        return;
-      } else throw new Error('latest endpoint no rate');
-    } catch (err2) {
-      console.error('currency fallback failed', err2);
-      document.getElementById('cur-result').textContent = 'Conversion failed — network or CORS issue. See console and try running via local server.';
-    }
-  }
-}
-function swapCurrency(){ const t = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = t; }
-
-/* Quick converter */
-function fillQuick(){ quickFrom.value = fromSelect.value; quickTo.value = toSelect.value; quickAmt.value = amtInput.value; }
-async function quickConvert(){ const a = parseFloat(quickAmt.value); const f = quickFrom.value; const t = quickTo.value; if(isNaN(a)){ alert('Enter amount'); return; } document.getElementById('quick-result').textContent = 'Converting…'; try{ const j = await fetchJson(`${API.CONVERT}?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}&amount=${encodeURIComponent(a)}`, {}, 10000); if(j && j.result !== undefined){ document.getElementById('quick-result').innerHTML = `${a} ${f} = <strong>${Number(j.result).toFixed(4)} ${t}</strong>`; addHistory(`Quick: ${a} ${f} => ${Number(j.result).toFixed(4)} ${t}`); } else document.getElementById('quick-result').textContent = 'Conversion failed'; } catch(e){ console.error(e); document.getElementById('quick-result').textContent = 'Error converting (check console)'; } }
-
-/* ------------------ Mileage (Firestore + localStorage fallback) ------------------ */
-const mileageKey = 'all_in_one_mileage_v1';
-let localRecords = JSON.parse(localStorage.getItem(mileageKey) || '[]');
-const mtbody = document.querySelector('#mileage-table tbody');
-
-function renderMileageFromLocal(){
-  mtbody.innerHTML = '';
-  if(localRecords.length === 0){ document.getElementById('mileage-summary').textContent = 'No local records'; return; }
-  localRecords.forEach((r, index) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.date}</td><td>${r.vehicle}</td><td>${r.odo}</td><td>${r.fuel}</td><td>₹${r.cost || '-'}</td><td>${r.mileage || '-'}</td><td><span class="delete" onclick="deleteLocalRecord(${index})">✖</span></td>`;
-    mtbody.appendChild(tr);
-  });
-  const last = localRecords[localRecords.length-1];
-  document.getElementById('mileage-summary').innerHTML = `Latest local: <strong>${last.vehicle}</strong> — ${last.mileage || '-'} km/L`;
-}
-
-function saveLocalRecord(rec){
-  localRecords.push(rec);
-  localStorage.setItem(mileageKey, JSON.stringify(localRecords));
-  renderMileageFromLocal();
-}
-
-function deleteLocalRecord(i){
-  if(!confirm('Delete local record?')) return;
-  localRecords.splice(i,1);
-  localStorage.setItem(mileageKey, JSON.stringify(localRecords));
-  renderMileageFromLocal();
-  addHistory('Local mileage record deleted');
-}
-
-/* Firestore: save & load. If Firestore not available, we use localStorage only. */
-async function addMileage(){
-  const vehicle = document.getElementById("vehicle").value.trim();
-  const odo = parseFloat(document.getElementById("odo").value);
-  const fuel = parseFloat(document.getElementById("fuel").value);
-  const cost = parseFloat(document.getElementById("cost").value);
-  const date = document.getElementById("mdate").value || new Date().toISOString().slice(0,10);
-
-  if (!vehicle || isNaN(odo) || isNaN(fuel) || fuel <= 0){ alert("Enter valid values"); return; }
-  // compute mileage as odo / fuel (simple)
-  let mileageVal = (odo / fuel).toFixed(2);
-  const rec = { vehicle, odo, fuel, cost: isNaN(cost)?0:cost, date, mileage: mileageVal, createdAt: new Date().toISOString() };
-
-  // Save to localStorage as a backup
-  saveLocalRecord(rec);
-  addHistory(`Mileage saved locally: ${vehicle} — ${mileageVal} km/L`);
-
-  if (db) {
-    try {
-      await addDoc(collection(db, "mileage"), {
-        vehicle, odo, fuel, cost: isNaN(cost)?0:cost, mileage: Number(mileageVal), date, createdAt: new Date()
-      });
-      addHistory('Mileage saved to Firebase');
-      await loadMileageFromFirestore();
-    } catch (e) {
-      console.warn('Failed save to Firestore', e);
-    }
-  } else {
-    console.warn('Firestore not available; data saved to localStorage only.');
-  }
-
-  // clear form
-  clearMileageForm();
-}
-
-async function loadMileageFromFirestore(){
-  if (!db) { renderMileageFromLocal(); return; }
-  try {
-    const q = query(collection(db, "mileage"), orderBy("createdAt", "desc"));
-    const snap = await getDocs(q);
-    const arr = [];
-    snap.forEach(s => {
-      const d = s.data();
-      arr.push({
-        id: s.id,
-        date: d.date || '',
-        vehicle: d.vehicle || '',
-        odo: d.odo || '',
-        fuel: d.fuel || '',
-        cost: d.cost || '',
-        mileage: (d.mileage !== undefined) ? Number(d.mileage).toFixed(2) : '-'
-      });
-    });
-    if (arr.length > 0) {
-      mtbody.innerHTML = '';
-      arr.forEach(r=>{
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${r.date}</td><td>${r.vehicle}</td><td>${r.odo}</td><td>${r.fuel}</td><td>₹${r.cost}</td><td>${r.mileage}</td><td><span class="delete" onclick="deleteMileageFirestore('${r.id}')">✖</span></td>`;
-        mtbody.appendChild(tr);
-      });
-      document.getElementById('mileage-summary').innerHTML = `Latest remote: <strong>${arr[0].vehicle}</strong> — ${arr[0].mileage} km/L`;
-      return;
-    } else {
-      renderMileageFromLocal();
+    const data = await fetchJson(API.SYMBOLS);
+    if (data && data.success) {
+      currencySymbols = data.symbols;
+      updateCurrencySelectors();
     }
   } catch (e) {
-    console.error('Failed load firestore mileage', e);
-    renderMileageFromLocal();
+    console.error('Failed to load currency symbols:', e);
+    // Fallback to common currencies
+    currencySymbols = {
+      "USD": { description: "United States Dollar" },
+      "EUR": { description: "Euro" },
+      "GBP": { description: "British Pound Sterling" },
+      "JPY": { description: "Japanese Yen" },
+      "INR": { description: "Indian Rupee" },
+      "AUD": { description: "Australian Dollar" },
+      "CAD": { description: "Canadian Dollar" },
+      "CHF": { description: "Swiss Franc" },
+      "CNY": { description: "Chinese Yuan" },
+      "NZD": { description: "New Zealand Dollar" }
+    };
+    updateCurrencySelectors();
   }
 }
 
-async function deleteMileageFirestore(id){
-  if(!confirm('Delete Firestore record?')) return;
-  try {
-    await deleteDoc(doc(db, "mileage", id));
-    addHistory('Deleted remote mileage record');
-    await loadMileageFromFirestore();
-  } catch (e) {
-    console.error('Failed to delete firestore doc', e);
-  }
-}
-
-function clearMileageForm(){ document.getElementById('vehicle').value=''; document.getElementById('odo').value=''; document.getElementById('fuel').value=''; document.getElementById('cost').value=''; document.getElementById('mdate').value=''; }
-
-/* Local export/clear utilities */
-function exportMileageCSV(){
-  const rows=[['date','vehicle','odometer','fuel','cost','mileage']];
-  const source = (localRecords.length>0) ? localRecords : [];
-  if(source.length===0){ alert('No local mileage to export'); return; }
-  source.forEach(r=>rows.push([r.date,r.vehicle,r.odo,r.fuel,r.cost,r.mileage]));
-  const csv = rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'mileage.csv'; a.click(); URL.revokeObjectURL(url);
-}
-function clearMileageStorage(){ if(!confirm('Clear local mileage storage?')) return; localRecords=[]; localStorage.removeItem(mileageKey); renderMileageFromLocal(); addHistory('Local mileage cleared'); }
-
-/* ------------------ Loan/EMI ------------------ */
-function calcLoan(){
-  const P = parseFloat(document.getElementById('loan-p').value);
-  const rAnnual = parseFloat(document.getElementById('loan-r').value);
-  const years = parseFloat(document.getElementById('loan-n').value);
-  if(isNaN(P)||isNaN(rAnnual)||isNaN(years)||P<=0){ alert('Invalid loan inputs'); return; }
-  const r = rAnnual/100/12; const n = years*12;
-  const monthly = r===0 ? P/n : (P*r)/(1-Math.pow(1+r,-n));
-  const total = monthly * n; const interest = total - P;
-  document.getElementById('loan-result').innerHTML = `Monthly EMI: <strong>₹${monthly.toFixed(2)}</strong><br>Total paid: ₹${total.toFixed(2)} · Interest: ₹${interest.toFixed(2)}`;
-  addHistory(`Loan: P=${P} r=${rAnnual}% -> EMI ₹${monthly.toFixed(2)}`);
-}
-function clearLoan(){ document.getElementById('loan-p').value=''; document.getElementById('loan-r').value=''; document.getElementById('loan-n').value=''; document.getElementById('loan-result').textContent='EMI result'; }
-
-/* ------------------ Tax ------------------ */
-function calcTax(){ const income = parseFloat(document.getElementById('tax-income').value); const rate = parseFloat(document.getElementById('tax-rate').value); if(isNaN(income)||isNaN(rate)){ alert('Invalid'); return; } const tax = income * (rate/100); document.getElementById('tax-result').textContent = `Tax: ₹${tax.toFixed(2)} (${rate}%)`; addHistory(`Tax: ${income} @ ${rate}% => ${tax.toFixed(2)}`); }
-function calcTaxSlab(){ const income = parseFloat(document.getElementById('tax-income').value)||0; const slabs=[{limit:250000,rate:0},{limit:500000,rate:5},{limit:750000,rate:10},{limit:1000000,rate:15},{limit:Infinity,rate:20}]; let rem=income,lower=0,tax=0; for(const s of slabs){ const amt = Math.max(0, Math.min(rem, s.limit - lower)); if(amt>0) tax+= amt*(s.rate/100); lower=s.limit; rem-=amt; if(rem<=0) break; } document.getElementById('tax-result').textContent = `Estimated slab tax: ₹${tax.toFixed(2)} (demo)`; addHistory(`Tax slab: ${income} => ${tax.toFixed(2)}`); }
-
-/* ------------------ Date utilities ------------------ */
-function calcAge(){ const v=document.getElementById('dob').value; if(!v){ alert('Pick DOB'); return; } const b=new Date(v), now=new Date(); if(b>now){ document.getElementById('age-result').textContent='DOB in future'; return; } let y=now.getFullYear()-b.getFullYear(), m=now.getMonth()-b.getMonth(), d=now.getDate()-b.getDate(); if(d<0){ m--; d += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); } if(m<0){ y--; m+=12; } document.getElementById('age-result').textContent = `${y} years, ${m} months, ${d} days`; addHistory(`Age for ${v}: ${y}y ${m}m ${d}d`); }
-function clearAge(){ document.getElementById('dob').value=''; document.getElementById('age-result').textContent='Age result'; }
-function daysBetween(){ const s=document.getElementById('start-date').value, e=document.getElementById('end-date').value; if(!s||!e){ alert('Pick dates'); return; } const a=new Date(s), b=new Date(e), diff=Math.abs(b-a), days=Math.floor(diff/(1000*60*60*24)); document.getElementById('date-diff-result').textContent = `${days} days`; addHistory(`Days: ${s} ↔ ${e} = ${days}`); }
-function clearDates(){ document.getElementById('start-date').value=''; document.getElementById('end-date').value=''; document.getElementById('date-diff-result').textContent='Days difference'; }
-function addDays(){ const base=document.getElementById('base-date').value, d=parseInt(document.getElementById('days-add').value,10); if(!base||isNaN(d)){ alert('Pick base & days'); return; } const dt=new Date(base); dt.setDate(dt.getDate()+d); document.getElementById('add-days-result').textContent = dt.toISOString().slice(0,10); addHistory(`AddDays: ${base} + ${d} => ${dt.toISOString().slice(0,10)}`); }
-function clearAddDays(){ document.getElementById('base-date').value=''; document.getElementById('days-add').value='0'; document.getElementById('add-days-result').textContent='Add/Sub result'; }
-
-/* ------------------ Measure conversions ------------------ */
-const measures = { length:{units:['m','km','cm','mm','in','ft'],conv:{m:1,km:1000,cm:0.01,mm:0.001,in:0.0254,ft:0.3048}}, weight:{units:['kg','g','lb','oz'],conv:{kg:1,g:0.001,lb:0.45359237,oz:0.0283495}}, temperature:{units:['C','F','K']} };
-function populateUnits(){ const t=document.getElementById('measure-type').value; const f=document.getElementById('measure-from'), to=document.getElementById('measure-to'); f.innerHTML=''; to.innerHTML=''; if(t==='temperature'){ ['C','F','K'].forEach(u=>{ f.innerHTML += `<option>${u}</option>`; to.innerHTML += `<option>${u}</option>`; }); } else { measures[t].units.forEach(u=>{ f.innerHTML += `<option>${u}</option>`; to.innerHTML += `<option>${u}</option>`; }); } }
-function convertMeasure(){ const t=document.getElementById('measure-type').value; const v=parseFloat(document.getElementById('measure-value').value); const from=document.getElementById('measure-from').value, to=document.getElementById('measure-to').value; if(isNaN(v)){ alert('Enter value'); return; } let res=v; if(t==='temperature'){ let c; if(from==='C') c=v; else if(from==='F') c=(v-32)*5/9; else c=v-273.15; if(to==='C') res=c; else if(to==='F') res=c*9/5+32; else res=c+273.15; } else { const conv=measures[t].conv; res = v * conv[from] / conv[to]; } document.getElementById('measure-result').textContent = `${v} ${from} = ${Number(res).toFixed(6)} ${to}`; addHistory(`Measure: ${v}${from} -> ${Number(res).toFixed(6)}${to}`); }
-function resetMeasure(){ document.getElementById('measure-value').value='1'; populateUnits(); document.getElementById('measure-result').textContent='Conversion result'; }
-
-/* ------------------ BMI Calculator ------------------ */
-function calcBMI(){
-  const height = parseFloat(document.getElementById('bmi-height').value) / 100; // convert cm to m
-  const weight = parseFloat(document.getElementById('bmi-weight').value);
+function updateCurrencySelectors() {
+  const fromSelect = document.getElementById('from-currency');
+  const toSelect = document.getElementById('to-currency');
+  const quickFrom = document.getElementById('quick-from');
+  const quickTo = document.getElementById('quick-to');
   
-  if(isNaN(height) || isNaN(weight) || height <= 0 || weight <= 0) {
-    alert('Please enter valid height and weight values');
+  // Clear existing options
+  fromSelect.innerHTML = '';
+  toSelect.innerHTML = '';
+  quickFrom.innerHTML = '';
+  quickTo.innerHTML = '';
+  
+  // Add currency options
+  for (const code in currencySymbols) {
+    const option = document.createElement('option');
+    option.value = code;
+    option.textContent = `${code} - ${currencySymbols[code].description}`;
+    
+    const option2 = option.cloneNode(true);
+    const option3 = option.cloneNode(true);
+    const option4 = option.cloneNode(true);
+    
+    fromSelect.appendChild(option);
+    toSelect.appendChild(option2);
+    quickFrom.appendChild(option3);
+    quickTo.appendChild(option4);
+    
+    // Set default selections
+    if (code === 'USD') {
+      option.selected = true;
+      option3.selected = true;
+    }
+    if (code === countryCurrency) {
+      option2.selected = true;
+      option4.selected = true;
+    }
+  }
+}
+
+/* ------------------ Currency conversion ------------------ */
+async function convertCurrency() {
+  const amount = parseFloat(document.getElementById('cur-amount').value) || 1;
+  const from = document.getElementById('from-currency').value;
+  const to = document.getElementById('to-currency').value;
+  
+  try {
+    const data = await fetchJson(`${API.CONVERT}?from=${from}&to=${to}&amount=${amount}`);
+    if (data && data.success) {
+      const result = data.result;
+      document.getElementById('cur-result').innerHTML = `
+        <strong>${amount} ${from} = ${result.toFixed(2)} ${to}</strong><br>
+        <span class="small">Rate: 1 ${from} = ${(result/amount).toFixed(6)} ${to}</span>
+      `;
+      addToHistory(`${amount} ${from} → ${result.toFixed(2)} ${to}`);
+    } else {
+      document.getElementById('cur-result').textContent = 'Conversion failed. Please try again.';
+    }
+  } catch (e) {
+    console.error('Currency conversion error:', e);
+    document.getElementById('cur-result').textContent = 'Error: ' + e.message;
+  }
+}
+
+function swapCurrency() {
+  const fromSelect = document.getElementById('from-currency');
+  const toSelect = document.getElementById('to-currency');
+  const temp = fromSelect.value;
+  fromSelect.value = toSelect.value;
+  toSelect.value = temp;
+  convertCurrency();
+}
+
+async function quickConvert() {
+  const amount = parseFloat(document.getElementById('quick-amt').value) || 1;
+  const from = document.getElementById('quick-from').value;
+  const to = document.getElementById('quick-to').value;
+  
+  try {
+    const data = await fetchJson(`${API.CONVERT}?from=${from}&to=${to}&amount=${amount}`);
+    if (data && data.success) {
+      const result = data.result;
+      document.getElementById('quick-result').innerHTML = `
+        <strong>${amount} ${from} = ${result.toFixed(2)} ${to}</strong><br>
+        <span class="small">Rate: 1 ${from} = ${(result/amount).toFixed(6)} ${to}</span>
+      `;
+    } else {
+      document.getElementById('quick-result').textContent = 'Conversion failed. Please try again.';
+    }
+  } catch (e) {
+    console.error('Quick conversion error:', e);
+    document.getElementById('quick-result').textContent = 'Error: ' + e.message;
+  }
+}
+
+function fillQuick() {
+  document.getElementById('quick-amt').value = document.getElementById('cur-amount').value;
+  document.getElementById('quick-from').value = document.getElementById('from-currency').value;
+  document.getElementById('quick-to').value = document.getElementById('to-currency').value;
+  quickConvert();
+}
+
+/* ------------------ Live data ------------------ */
+let autoRefresh = true;
+let refreshInterval = null;
+
+async function refreshLive() {
+  const updatedEl = document.getElementById('live-updated');
+  updatedEl.textContent = 'Updating...';
+  
+  try {
+    // Get USD to local currency rate
+    const latestData = await fetchJson(`${API.LATEST}?base=USD&symbols=${countryCurrency}`);
+    if (latestData && latestData.success) {
+      const rate = latestData.rates[countryCurrency];
+      document.getElementById('usd-local').textContent = rate.toFixed(2);
+    }
+    
+    // Get EUR to USD rate
+    const eurData = await fetchJson(`${API.LATEST}?base=EUR&symbols=USD`);
+    if (eurData && eurData.success) {
+      const rate = eurData.rates.USD;
+      document.getElementById('eur-usd').textContent = rate.toFixed(2);
+    }
+    
+    // Get gold price
+    const goldData = await fetchJson(API.GOLDPRICE);
+    if (goldData) {
+      const goldPrice = goldData.items[0].xauPrice;
+      document.getElementById('gold').textContent = `$${goldPrice.toLocaleString()}`;
+      
+      const silverPrice = goldData.items[0].xagPrice;
+      document.getElementById('silver').textContent = `$${silverPrice.toFixed(2)}`;
+    }
+    
+    // Get crypto prices
+    const cryptoData = await fetchJson(`${API.COINGECKO_SIMPLE}?ids=bitcoin,ethereum&vs_currencies=usd`);
+    if (cryptoData) {
+      document.getElementById('btc').textContent = `$${cryptoData.bitcoin.usd.toLocaleString()}`;
+      document.getElementById('eth').textContent = `$${cryptoData.ethereum.usd.toLocaleString()}`;
+    }
+    
+    updatedEl.textContent = new Date().toLocaleTimeString();
+  } catch (e) {
+    console.error('Live data error:', e);
+    updatedEl.textContent = 'Error updating';
+  }
+}
+
+function toggleAuto() {
+  autoRefresh = !autoRefresh;
+  document.getElementById('auto-status').textContent = autoRefresh ? 'ON' : 'OFF';
+  
+  if (autoRefresh) {
+    refreshLive();
+    refreshInterval = setInterval(refreshLive, 60000); // Refresh every minute
+  } else if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+}
+
+/* ------------------ Standard Calculator ------------------ */
+let stdExpression = '0';
+
+function stdAppend(value) {
+  if (stdExpression === '0' && value !== '.') {
+    stdExpression = value;
+  } else {
+    stdExpression += value;
+  }
+  document.getElementById('std-display').value = stdExpression;
+}
+
+function stdClear() {
+  stdExpression = '0';
+  document.getElementById('std-display').value = stdExpression;
+}
+
+function stdBack() {
+  if (stdExpression.length > 1) {
+    stdExpression = stdExpression.slice(0, -1);
+  } else {
+    stdExpression = '0';
+  }
+  document.getElementById('std-display').value = stdExpression;
+}
+
+function stdCalculate() {
+  try {
+    // Replace visual symbols with JavaScript operators
+    const calcExpression = stdExpression.replace(/×/g, '*').replace(/÷/g, '/');
+    const result = eval(calcExpression);
+    document.getElementById('std-display').value = result;
+    stdExpression = String(result);
+    addToHistory(`${stdExpression} = ${result}`);
+  } catch (e) {
+    document.getElementById('std-display').value = 'Error';
+    stdExpression = '0';
+  }
+}
+
+/* ------------------ Scientific Calculator ------------------ */
+let sciExpression = '0';
+
+function sciAppend(value) {
+  if (sciExpression === '0' && value !== '.') {
+    sciExpression = value;
+  } else {
+    sciExpression += value;
+  }
+  document.getElementById('sci-display').value = sciExpression;
+}
+
+function sciClear() {
+  sciExpression = '0';
+  document.getElementById('sci-display').value = sciExpression;
+}
+
+function sciBack() {
+  if (sciExpression.length > 1) {
+    sciExpression = sciExpression.slice(0, -1);
+  } else {
+    sciExpression = '0';
+  }
+  document.getElementById('sci-display').value = sciExpression;
+}
+
+function sciFunc(func) {
+  const value = parseFloat(sciExpression) || 0;
+  let result = 0;
+  
+  switch(func) {
+    case 'sin': result = Math.sin(value * Math.PI / 180); break;
+    case 'cos': result = Math.cos(value * Math.PI / 180); break;
+    case 'tan': result = Math.tan(value * Math.PI / 180); break;
+    case 'sqrt': result = Math.sqrt(value); break;
+    case 'log': result = Math.log10(value); break;
+    case 'ln': result = Math.log(value); break;
+  }
+  
+  sciExpression = String(result);
+  document.getElementById('sci-display').value = sciExpression;
+  addToHistory(`${func}(${value}) = ${result}`);
+}
+
+function sciFact() {
+  const num = parseInt(sciExpression) || 0;
+  if (num < 0) {
+    document.getElementById('sci-display').value = 'Error';
+    sciExpression = '0';
     return;
   }
   
-  const bmi = weight / (height * height);
-  let category = '';
+  let result = 1;
+  for (let i = 2; i <= num; i++) {
+    result *= i;
+  }
   
+  sciExpression = String(result);
+  document.getElementById('sci-display').value = sciExpression;
+  addToHistory(`${num}! = ${result}`);
+}
+
+function sciCalculate() {
+  try {
+    // Replace visual symbols with JavaScript operators
+    const calcExpression = sciExpression.replace(/×/g, '*').replace(/÷/g, '/');
+    const result = eval(calcExpression);
+    document.getElementById('sci-display').value = result;
+    sciExpression = String(result);
+    addToHistory(`${sciExpression} = ${result}`);
+  } catch (e) {
+    document.getElementById('sci-display').value = 'Error';
+    sciExpression = '0';
+  }
+}
+
+/* ------------------ History ------------------ */
+function addToHistory(entry) {
+  const historyEl = document.getElementById('history');
+  const entryEl = document.createElement('div');
+  entryEl.textContent = entry;
+  entryEl.className = 'small';
+  historyEl.prepend(entryEl);
+  
+  // Keep only the last 10 entries
+  if (historyEl.children.length > 10) {
+    historyEl.removeChild(historyEl.lastChild);
+  }
+}
+
+function copyHistory() {
+  const historyEl = document.getElementById('history');
+  const text = Array.from(historyEl.children).map(el => el.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    alert('History copied to clipboard');
+  });
+}
+
+function downloadHistory() {
+  const historyEl = document.getElementById('history');
+  const text = Array.from(historyEl.children).map(el => el.textContent).join('\n');
+  const blob = new Blob([text], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'calculator-history.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function resetAll() {
+  if (confirm('Are you sure you want to reset all data?')) {
+    localStorage.clear();
+    document.getElementById('history').innerHTML = '';
+    stdClear();
+    sciClear();
+    location.reload();
+  }
+}
+
+/* ------------------ Mileage Tracker ------------------ */
+async function addMileage() {
+  const vehicle = document.getElementById('vehicle').value;
+  const odo = parseFloat(document.getElementById('odo').value);
+  const fuel = parseFloat(document.getElementById('fuel').value);
+  const cost = parseFloat(document.getElementById('cost').value);
+  const date = document.getElementById('mdate').value || new Date().toISOString().split('T')[0];
+  
+  if (!vehicle || isNaN(odo) || isNaN(fuel) || isNaN(cost) || fuel <= 0) {
+    alert('Please fill all fields with valid values');
+    return;
+  }
+  
+  const mileage = odo / fuel;
+  const costPerKm = cost / odo;
+  
+  const record = {
+    vehicle, odo, fuel, cost, date, mileage: mileage.toFixed(2), costPerKm: costPerKm.toFixed(2)
+  };
+  
+  // Try to save to Firebase first
+  if (db) {
+    try {
+      await addDoc(collection(db, "mileage"), record);
+    } catch (e) {
+      console.warn('Firestore save failed, using localStorage:', e);
+      saveToLocalStorage(record);
+    }
+  } else {
+    saveToLocalStorage(record);
+  }
+  
+  // Update UI
+  clearMileageForm();
+  loadMileageData();
+}
+
+function saveToLocalStorage(record) {
+  let mileageData = JSON.parse(localStorage.getItem('mileageData') || '[]');
+  mileageData.push(record);
+  localStorage.setItem('mileageData', JSON.stringify(mileageData));
+}
+
+async function loadMileageData() {
+  let mileageData = [];
+  
+  // Try to load from Firebase first
+  if (db) {
+    try {
+      const querySnapshot = await getDocs(query(collection(db, "mileage"), orderBy("date", "desc")));
+      querySnapshot.forEach((doc) => {
+        mileageData.push({ id: doc.id, ...doc.data() });
+      });
+    } catch (e) {
+      console.warn('Firestore load failed, using localStorage:', e);
+      mileageData = JSON.parse(localStorage.getItem('mileageData') || '[]');
+    }
+  } else {
+    mileageData = JSON.parse(localStorage.getItem('mileageData') || '[]');
+  }
+  
+  // Update table
+  const tbody = document.getElementById('mileage-table').querySelector('tbody');
+  tbody.innerHTML = '';
+  
+  mileageData.forEach(record => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${record.date}</td>
+      <td>${record.vehicle}</td>
+      <td>${record.odo}</td>
+      <td>${record.fuel}</td>
+      <td>${record.cost}</td>
+      <td>${record.mileage}</td>
+      <td><span class="delete" onclick="deleteMileage('${record.id || record.date}')">✕</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  
+  // Update summary
+  if (mileageData.length > 0) {
+    const totalKm = mileageData.reduce((sum, r) => sum + parseFloat(r.odo), 0);
+    const totalFuel = mileageData.reduce((sum, r) => sum + parseFloat(r.fuel), 0);
+    const totalCost = mileageData.reduce((sum, r) => sum + parseFloat(r.cost), 0);
+    const avgMileage = totalKm / totalFuel;
+    const avgCostPerKm = totalCost / totalKm;
+    
+    document.getElementById('mileage-summary').innerHTML = `
+      <strong>Summary:</strong> ${mileageData.length} records<br>
+      <span class="small">Avg. Mileage: ${avgMileage.toFixed(2)} km/L</span><br>
+      <span class="small">Avg. Cost: ${avgCostPerKm.toFixed(2)} ₹/km</span>
+    `;
+  } else {
+    document.getElementById('mileage-summary').textContent = 'No records yet';
+  }
+}
+
+async function deleteMileage(id) {
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "mileage", id));
+    } catch (e) {
+      console.warn('Firestore delete failed, trying localStorage:', e);
+      deleteFromLocalStorage(id);
+    }
+  } else {
+    deleteFromLocalStorage(id);
+  }
+  
+  loadMileageData();
+}
+
+function deleteFromLocalStorage(date) {
+  let mileageData = JSON.parse(localStorage.getItem('mileageData') || '[]');
+  mileageData = mileageData.filter(r => r.date !== date);
+  localStorage.setItem('mileageData', JSON.stringify(mileageData));
+}
+
+function clearMileageForm() {
+  document.getElementById('vehicle').value = '';
+  document.getElementById('odo').value = '';
+  document.getElementById('fuel').value = '';
+  document.getElementById('cost').value = '';
+  document.getElementById('mdate').value = '';
+}
+
+function clearMileageStorage() {
+  if (confirm('Are you sure you want to clear all mileage data?')) {
+    if (db) {
+      // Note: This would require a cloud function to clear entire collection
+      alert('To clear all data from Firestore, you need to implement a cloud function.');
+    }
+    localStorage.removeItem('mileageData');
+    loadMileageData();
+  }
+}
+
+function exportMileageCSV() {
+  let mileageData = JSON.parse(localStorage.getItem('mileageData') || '[]');
+  if (mileageData.length === 0) {
+    alert('No data to export');
+    return;
+  }
+  
+  const headers = ['Date', 'Vehicle', 'Odometer (km)', 'Fuel (L)', 'Cost (₹)', 'Mileage (km/L)', 'Cost per km (₹)'];
+  const csv = [
+    headers.join(','),
+    ...mileageData.map(r => [
+      r.date, r.vehicle, r.odo, r.fuel, r.cost, r.mileage, r.costPerKm
+    ].join(','))
+  ].join('\n');
+  
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mileage-data.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ------------------ Loan Calculator ------------------ */
+function calcLoan() {
+  const principal = parseFloat(document.getElementById('loan-p').value) || 0;
+  const rate = parseFloat(document.getElementById('loan-r').value) || 0;
+  const years = parseFloat(document.getElementById('loan-n').value) || 0;
+  
+  if (principal <= 0 || rate <= 0 || years <= 0) {
+    document.getElementById('loan-result').textContent = 'Please enter valid values';
+    return;
+  }
+  
+  const monthlyRate = rate / 100 / 12;
+  const months = years * 12;
+  const emi = principal * monthlyRate * Math.pow(1 + monthlyRate, months) / (Math.pow(1 + monthlyRate, months) - 1);
+  const totalPayment = emi * months;
+  const totalInterest = totalPayment - principal;
+  
+  document.getElementById('loan-result').innerHTML = `
+    <strong>EMI: ₹${emi.toFixed(2)}</strong><br>
+    <span class="small">Total Payment: ₹${totalPayment.toFixed(2)}</span><br>
+    <span class="small">Total Interest: ₹${totalInterest.toFixed(2)}</span>
+  `;
+  
+  addToHistory(`Loan: ₹${principal} @ ${rate}% for ${years} years = EMI ₹${emi.toFixed(2)}`);
+}
+
+function clearLoan() {
+  document.getElementById('loan-p').value = '';
+  document.getElementById('loan-r').value = '';
+  document.getElementById('loan-n').value = '';
+  document.getElementById('loan-result').textContent = 'EMI result';
+}
+
+/* ------------------ Tax Calculator ------------------ */
+function calcTax() {
+  const income = parseFloat(document.getElementById('tax-income').value) || 0;
+  const rate = parseFloat(document.getElementById('tax-rate').value) || 0;
+  
+  if (income <= 0 || rate < 0) {
+    document.getElementById('tax-result').textContent = 'Please enter valid values';
+    return;
+  }
+  
+  const tax = income * rate / 100;
+  const net = income - tax;
+  
+  document.getElementById('tax-result').innerHTML = `
+    <strong>Tax: ₹${tax.toFixed(2)}</strong><br>
+    <span class="small">Net Income: ₹${net.toFixed(2)}</span><br>
+    <span class="small">Effective Rate: ${rate.toFixed(2)}%</span>
+  `;
+  
+  addToHistory(`Tax: ₹${income} @ ${rate}% = ₹${tax.toFixed(2)} tax`);
+}
+
+function calcTaxSlab() {
+  const income = parseFloat(document.getElementById('tax-income').value) || 0;
+  
+  if (income <= 0) {
+    document.getElementById('tax-result').textContent = 'Please enter valid income';
+    return;
+  }
+  
+  // Simplified tax slab (Indian system as example)
+  let tax = 0;
+  if (income > 1000000) {
+    tax += (income - 1000000) * 0.3;
+    income = 1000000;
+  }
+  if (income > 500000) {
+    tax += (income - 500000) * 0.2;
+    income = 500000;
+  }
+  if (income > 250000) {
+    tax += (income - 250000) * 0.05;
+  }
+  
+  const net = income - tax;
+  const effectiveRate = (tax / income) * 100;
+  
+  document.getElementById('tax-result').innerHTML = `
+    <strong>Tax: ₹${tax.toFixed(2)}</strong><br>
+    <span class="small">Net Income: ₹${net.toFixed(2)}</span><br>
+    <span class="small">Effective Rate: ${effectiveRate.toFixed(2)}%</span>
+  `;
+  
+  addToHistory(`Tax Slab: ₹${income} = ₹${tax.toFixed(2)} tax`);
+}
+
+/* ------------------ Date Calculator ------------------ */
+function calcAge() {
+  const dob = new Date(document.getElementById('dob').value);
+  if (isNaN(dob.getTime())) {
+    document.getElementById('age-result').textContent = 'Please select a valid date';
+    return;
+  }
+  
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+  
+  document.getElementById('age-result').innerHTML = `
+    <strong>Age: ${age} years</strong><br>
+    <span class="small">Date of Birth: ${dob.toDateString()}</span>
+  `;
+  
+  addToHistory(`Age: ${dob.toDateString()} = ${age} years`);
+}
+
+function clearAge() {
+  document.getElementById('dob').value = '';
+  document.getElementById('age-result').textContent = 'Age result';
+}
+
+function daysBetween() {
+  const start = new Date(document.getElementById('start-date').value);
+  const end = new Date(document.getElementById('end-date').value);
+  
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    document.getElementById('date-diff-result').textContent = 'Please select valid dates';
+    return;
+  }
+  
+  const diffTime = Math.abs(end - start);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  document.getElementById('date-diff-result').innerHTML = `
+    <strong>Difference: ${diffDays} days</strong><br>
+    <span class="small">From: ${start.toDateString()}</span><br>
+    <span class="small">To: ${end.toDateString()}</span>
+  `;
+  
+  addToHistory(`Days between: ${start.toDateString()} to ${end.toDateString()} = ${diffDays} days`);
+}
+
+function clearDates() {
+  document.getElementById('start-date').value = '';
+  document.getElementById('end-date').value = '';
+  document.getElementById('date-diff-result').textContent = 'Days difference';
+}
+
+function addDays() {
+  const baseDate = new Date(document.getElementById('base-date').value);
+  const days = parseInt(document.getElementById('days-add').value) || 0;
+  
+  if (isNaN(baseDate.getTime())) {
+    document.getElementById('add-days-result').textContent = 'Please select a valid date';
+    return;
+  }
+  
+  const resultDate = new Date(baseDate);
+  resultDate.setDate(resultDate.getDate() + days);
+  
+  document.getElementById('add-days-result').innerHTML = `
+    <strong>Result: ${resultDate.toDateString()}</strong><br>
+    <span class="small">Base Date: ${baseDate.toDateString()}</span><br>
+    <span class="small">Days ${days >= 0 ? 'Added' : 'Subtracted'}: ${Math.abs(days)}</span>
+  `;
+  
+  addToHistory(`Date calc: ${baseDate.toDateString()} ${days >= 0 ? '+' : '-'} ${Math.abs(days)} days = ${resultDate.toDateString()}`);
+}
+
+function clearAddDays() {
+  document.getElementById('base-date').value = '';
+  document.getElementById('days-add').value = '0';
+  document.getElementById('add-days-result').textContent = 'Add/Sub result';
+}
+
+/* ------------------ Measure Converter ------------------ */
+const units = {
+  length: [
+    { code: 'm', name: 'Meters', factor: 1 },
+    { code: 'km', name: 'Kilometers', factor: 1000 },
+    { code: 'cm', name: 'Centimeters', factor: 0.01 },
+    { code: 'mm', name: 'Millimeters', factor: 0.001 },
+    { code: 'mi', name: 'Miles', factor: 1609.34 },
+    { code: 'yd', name: 'Yards', factor: 0.9144 },
+    { code: 'ft', name: 'Feet', factor: 0.3048 },
+    { code: 'in', name: 'Inches', factor: 0.0254 }
+  ],
+  weight: [
+    { code: 'kg', name: 'Kilograms', factor: 1 },
+    { code: 'g', name: 'Grams', factor: 0.001 },
+    { code: 'mg', name: 'Milligrams', factor: 0.000001 },
+    { code: 'lb', name: 'Pounds', factor: 0.453592 },
+    { code: 'oz', name: 'Ounces', factor: 0.0283495 },
+    { code: 'st', name: 'Stones', factor: 6.35029 }
+  ],
+  temperature: [
+    { code: 'c', name: 'Celsius', factor: 1 },
+    { code: 'f', name: 'Fahrenheit', factor: 1 },
+    { code: 'k', name: 'Kelvin', factor: 1 }
+  ]
+};
+
+function populateUnits() {
+  const type = document.getElementById('measure-type').value;
+  const fromSelect = document.getElementById('measure-from');
+  const toSelect = document.getElementById('measure-to');
+  
+  fromSelect.innerHTML = '';
+  toSelect.innerHTML = '';
+  
+  units[type].forEach(unit => {
+    const option1 = document.createElement('option');
+    option1.value = unit.code;
+    option1.textContent = `${unit.code} - ${unit.name}`;
+    
+    const option2 = option1.cloneNode(true);
+    
+    fromSelect.appendChild(option1);
+    toSelect.appendChild(option2);
+  });
+  
+  // Set default "to" unit to a different one
+  if (units[type].length > 1) {
+    toSelect.selectedIndex = 1;
+  }
+}
+
+function convertMeasure() {
+  const type = document.getElementById('measure-type').value;
+  const value = parseFloat(document.getElementById('measure-value').value) || 0;
+  const from = document.getElementById('measure-from').value;
+  const to = document.getElementById('measure-to').value;
+  
+  if (type === 'temperature') {
+    // Temperature needs special handling
+    let result;
+    if (from === 'c' && to === 'f') {
+      result = (value * 9/5) + 32;
+    } else if (from === 'f' && to === 'c') {
+      result = (value - 32) * 5/9;
+    } else if (from === 'c' && to === 'k') {
+      result = value + 273.15;
+    } else if (from === 'k' && to === 'c') {
+      result = value - 273.15;
+    } else if (from === 'f' && to === 'k') {
+      result = (value - 32) * 5/9 + 273.15;
+    } else if (from === 'k' && to === 'f') {
+      result = (value - 273.15) * 9/5 + 32;
+    } else {
+      result = value; // Same unit
+    }
+    
+    document.getElementById('measure-result').innerHTML = `
+      <strong>${value}°${from.toUpperCase()} = ${result.toFixed(2)}°${to.toUpperCase()}</strong>
+    `;
+    
+    addToHistory(`Convert: ${value}${from} → ${result.toFixed(2)}${to}`);
+  } else {
+    // For length and weight
+    const fromUnit = units[type].find(u => u.code === from);
+    const toUnit = units[type].find(u => u.code === to);
+    
+    const baseValue = value * fromUnit.factor;
+    const result = baseValue / toUnit.factor;
+    
+    document.getElementById('measure-result').innerHTML = `
+      <strong>${value} ${from} = ${result.toFixed(6)} ${to}</strong>
+    `;
+    
+    addToHistory(`Convert: ${value}${from} → ${result.toFixed(6)}${to}`);
+  }
+}
+
+function resetMeasure() {
+  document.getElementById('measure-value').value = '1';
+  populateUnits();
+  document.getElementById('measure-result').textContent = 'Conversion';
+}
+
+/* ------------------ BMI Calculator ------------------ */
+function calcBMI() {
+  const height = parseFloat(document.getElementById('bmi-height').value) || 0;
+  const weight = parseFloat(document.getElementById('bmi-weight').value) || 0;
+  
+  if (height <= 0 || weight <= 0) {
+    document.getElementById('bmi-result').textContent = 'Please enter valid values';
+    return;
+  }
+  
+  // Convert height from cm to meters
+  const heightM = height / 100;
+  const bmi = weight / (heightM * heightM);
+  
+  let category = '';
   if (bmi < 18.5) category = 'Underweight';
   else if (bmi < 25) category = 'Normal weight';
   else if (bmi < 30) category = 'Overweight';
   else category = 'Obesity';
   
-  document.getElementById('bmi-result').innerHTML = 
-    `BMI: <strong>${bmi.toFixed(1)}</strong> — ${category}`;
-  addHistory(`BMI: ${height*100}cm, ${weight}kg = ${bmi.toFixed(1)} (${category})`);
+  document.getElementById('bmi-result').innerHTML = `
+    <strong>BMI: ${bmi.toFixed(1)} (${category})</strong><br>
+    <span class="small">Height: ${height} cm, Weight: ${weight} kg</span>
+  `;
+  
+  addToHistory(`BMI: ${height}cm, ${weight}kg = ${bmi.toFixed(1)} (${category})`);
 }
 
-function clearBMI(){
+function clearBMI() {
   document.getElementById('bmi-height').value = '';
   document.getElementById('bmi-weight').value = '';
   document.getElementById('bmi-result').textContent = 'BMI result';
 }
 
 /* ------------------ Discount Calculator ------------------ */
-function calcDiscount(){
-  const price = parseFloat(document.getElementById('discount-price').value);
-  const discount = parseFloat(document.getElementById('discount-percent').value);
+function calcDiscount() {
+  const price = parseFloat(document.getElementById('discount-price').value) || 0;
+  const discount = parseFloat(document.getElementById('discount-percent').value) || 0;
   
-  if(isNaN(price) || isNaN(discount) || price <= 0 || discount < 0 || discount > 100) {
-    alert('Please enter valid price and discount values (0-100%)');
+  if (price <= 0 || discount < 0) {
+    document.getElementById('discount-result').textContent = 'Please enter valid values';
     return;
   }
   
-  const discountAmount = price * (discount / 100);
+  const discountAmount = price * discount / 100;
   const finalPrice = price - discountAmount;
   
-  document.getElementById('discount-result').innerHTML = 
-    `Discount: <strong>${discountAmount.toFixed(2)}</strong><br>
-     Final Price: <strong>${finalPrice.toFixed(2)}</strong>`;
-  addHistory(`Discount: ${price} - ${discount}% = ${finalPrice.toFixed(2)}`);
+  document.getElementById('discount-result').innerHTML = `
+    <strong>Final Price: ₹${finalPrice.toFixed(2)}</strong><br>
+    <span class="small">Original Price: ₹${price.toFixed(2)}</span><br>
+    <span class="small">You Save: ₹${discountAmount.toFixed(2)} (${discount}%)</span>
+  `;
+  
+  addToHistory(`Discount: ₹${price} - ${discount}% = ₹${finalPrice.toFixed(2)}`);
 }
 
-function clearDiscount(){
+function clearDiscount() {
   document.getElementById('discount-price').value = '';
   document.getElementById('discount-percent').value = '';
   document.getElementById('discount-result').textContent = 'Discount result';
 }
 
 /* ------------------ Tip Calculator ------------------ */
-function calcTip(){
-  const amount = parseFloat(document.getElementById('tip-amount').value);
-  const tipPercent = parseFloat(document.getElementById('tip-percent').value);
-  const people = parseInt(document.getElementById('tip-people').value);
+function calcTip() {
+  const amount = parseFloat(document.getElementById('tip-amount').value) || 0;
+  const tipPercent = parseFloat(document.getElementById('tip-percent').value) || 0;
+  const people = parseInt(document.getElementById('tip-people').value) || 1;
   
-  if(isNaN(amount) || isNaN(tipPercent) || isNaN(people) || 
-     amount <= 0 || tipPercent < 0 || people <= 0) {
-    alert('Please enter valid values');
+  if (amount <= 0 || tipPercent < 0 || people <= 0) {
+    document.getElementById('tip-result').textContent = 'Please enter valid values';
     return;
   }
   
-  const tipAmount = amount * (tipPercent / 100);
+  const tipAmount = amount * tipPercent / 100;
   const total = amount + tipAmount;
   const perPerson = total / people;
   
-  document.getElementById('tip-result').innerHTML = 
-    `Tip: <strong>${tipAmount.toFixed(2)}</strong><br>
-     Total: <strong>${total.toFixed(2)}</strong><br>
-     Per person: <strong>${perPerson.toFixed(2)}</strong>`;
-  addHistory(`Tip: ${amount} + ${tipPercent}% = ${total.toFixed(2)} (${people} people)`);
+  document.getElementById('tip-result').innerHTML = `
+    <strong>Total: ₹${total.toFixed(2)}</strong><br>
+    <span class="small">Bill: ₹${amount.toFixed(2)}</span><br>
+    <span class="small">Tip: ₹${tipAmount.toFixed(2)} (${tipPercent}%)</span><br>
+    <span class="small">Per Person: ₹${perPerson.toFixed(2)}</span>
+  `;
+  
+  addToHistory(`Tip: ₹${amount} + ${tipPercent}% = ₹${total.toFixed(2)} total`);
 }
 
-/* ------------------ Live data aggregator (rates, gold, crypto) ------------------ */
-let auto = true, autoTimer = null;
-const autoLabel = document.getElementById('auto-status');
-
-async function refreshLive(){
-  document.getElementById('live-updated').textContent = 'Refreshing...';
-  try {
-    // exchange rates snapshot (USD base)
-    try {
-      const cur = await fetchJson(`${API.LATEST}?base=USD&symbols=${countryCurrency},EUR,GBP,JPY,CAD,AUD`);
-      if(cur && cur.rates){
-        if(cur.rates[countryCurrency]) document.getElementById('usd-local').textContent = Number(cur.rates[countryCurrency]).toFixed(4);
-        if(cur.rates.EUR) document.getElementById('eur-usd').textContent = Number(1/(cur.rates.EUR||1)).toFixed(4);
-      }
-    } catch(e){ console.warn('exchange rate failed', e); }
-
-    // gold & silver from GoldPrice.org (public JSON)
-    try {
-      const goldJson = await fetchJson(API.GOLDPRICE);
-      if(goldJson && goldJson.items && goldJson.items[0]){
-        const it = goldJson.items[0];
-        if(it.xauPrice !== undefined) document.getElementById('gold').textContent = '$' + Number(it.xauPrice).toFixed(2) + ' / oz';
-        if(it.xagPrice !== undefined) document.getElementById('silver').textContent = '$' + Number(it.xagPrice).toFixed(3) + ' / oz';
-      }
-    } catch (gerr) {
-      console.warn('goldprice failed, falling back to CoinGecko token price', gerr);
-      try {
-        const cgGold = await fetchJson(API.COINGECKO_SIMPLE + '?ids=tether-gold&vs_currencies=usd');
-        if(cgGold && cgGold['tether-gold'] && cgGold['tether-gold'].usd) document.getElementById('gold').textContent = '$' + Number(cgGold['tether-gold'].usd).toFixed(2) + ' (token)';
-        else document.getElementById('gold').textContent = 'N/A';
-        document.getElementById('silver').textContent = 'N/A';
-      } catch(e2){
-        console.error('both gold endpoints failed', e2);
-        document.getElementById('gold').textContent = 'Error';
-        document.getElementById('silver').textContent = 'Error';
-      }
-    }
-
-    // crypto prices (CoinGecko)
-    try {
-      const cg = await fetchJson(API.COINGECKO_SIMPLE + '?ids=bitcoin,ethereum&vs_currencies=usd');
-      if(cg){
-        if(cg.bitcoin && cg.bitcoin.usd) document.getElementById('btc').textContent = '$' + Number(cg.bitcoin.usd).toLocaleString();
-        if(cg.ethereum && cg.ethereum.usd) document.getElementById('eth').textContent = '$' + Number(cg.ethereum.usd).toLocaleString();
-      }
-    } catch(e){ console.warn('coingecko crypto failed', e); document.getElementById('btc').textContent = 'N/A'; document.getElementById('eth').textContent = 'N/A'; }
-
-    document.getElementById('live-updated').textContent = new Date().toLocaleTimeString();
-  } catch (err) {
-    console.error('refreshLive error', err);
-    document.getElementById('live-updated').textContent = 'Error';
-  }
-}
-
-function toggleAuto(){ auto = !auto; autoLabel.textContent = auto ? 'ON' : 'OFF'; if(auto) startAuto(); else stopAuto(); }
-function startAuto(){ if(autoTimer) clearInterval(autoTimer); autoTimer = setInterval(refreshLive, 60_000); refreshLive(); }
-function stopAuto(){ if(autoTimer) clearInterval(autoTimer); autoTimer = null; }
-
-/* ------------------ Utilities ------------------ */
-function resetAll(){ if(!confirm('Reset history and local data?')) return; localStorage.clear(); localRecords=[]; renderMileageFromLocal(); historyEl.innerHTML=''; addHistory('App reset'); }
-
-/* ------------------ Init (on load) ------------------ */
-document.addEventListener('DOMContentLoaded', async () => {
-  await updateCountryData();
-  await loadSymbols();
+/* ------------------ Initialize ------------------ */
+function init() {
+  // Set today's date as default for date inputs
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('mdate').value = today;
+  document.getElementById('dob').value = today;
+  document.getElementById('start-date').value = today;
+  document.getElementById('end-date').value = today;
+  document.getElementById('base-date').value = today;
+  
+  // Load currency symbols
+  loadCurrencySymbols();
+  
+  // Populate measure units
   populateUnits();
-  renderMileageFromLocal();
-  await loadMileageFromFirestore();
-  startAuto();
-  addHistory('App loaded');
-});
+  
+  // Load mileage data
+  loadMileageData();
+  
+  // Set up auto refresh for live data
+  refreshLive();
+  refreshInterval = setInterval(refreshLive, 60000);
+  
+  // Update country data
+  updateCountryData();
+}
 
-/* ------------------ Expose handlers globally (so inline onclick works) ------------------ */
-window.stdAppend = stdAppend; window.stdClear = stdClear; window.stdBack = stdBack; window.stdCalculate = stdCalculate;
-window.sciAppend = sciAppend; window.sciClear = sciClear; window.sciBack = sciBack; window.sciCalculate = sciCalculate; window.sciFunc = sciFunc; window.sciFact = sciFact;
-window.convertCurrency = convertCurrency; window.swapCurrency = swapCurrency; window.fillQuick = fillQuick; window.quickConvert = quickConvert; window.loadSymbols = loadSymbols;
-window.addMileage = addMileage; window.clearMileageForm = clearMileageForm; window.exportMileageCSV = exportMileageCSV; window.clearMileageStorage = clearMileageStorage;
-window.deleteLocalRecord = deleteLocalRecord; window.deleteMileageFirestore = deleteMileageFirestore;
-window.calcLoan = calcLoan; window.clearLoan = clearLoan;
-window.calcTax = calcTax; window.calcTaxSlab = calcTaxSlab;
-window.calcAge = calcAge; window.clearAge = clearAge; window.daysBetween = daysBetween; window.clearDates = clearDates; window.addDays = addDays; window.clearAddDays = clearAddDays;
-window.populateUnits = populateUnits; window.convertMeasure = convertMeasure; window.resetMeasure = resetMeasure;
-window.calcBMI = calcBMI; window.clearBMI = clearBMI;
-window.calcDiscount = calcDiscount; window.clearDiscount = clearDiscount;
-window.calcTip = calcTip;
-window.copyHistory = copyHistory; window.downloadHistory = downloadHistory; window.resetAll = resetAll;
-window.refreshLive = refreshLive; window.toggleAuto = toggleAuto; window.exportMileageCSV = exportMileageCSV;
-
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>
