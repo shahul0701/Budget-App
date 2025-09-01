@@ -681,6 +681,7 @@
 </div>
 
 <script type="module">
+<script type="module">
     // Firebase Initialization & Imports
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
@@ -735,7 +736,7 @@
     const cashFlowChangeElem = document.getElementById("cashFlowChange");
     const savingsChangeElem = document.getElementById("savingsChange");
 
-    // Chart instances
+    // Chart instances (placeholders)
     let incomeExpenseChart, expenseCategoryChart, incomeSourceChart, cashFlowChart;
     let paymentMethodChart, accountBalanceChart, monthComparisonChart, topExpensesChart;
     let savingsRateChart, yearlySummaryChart, expenseBreakdownChart, incomeTrendChart;
@@ -843,10 +844,7 @@
 
     // Handle chart resizing when window is resized
     function handleChartResize() {
-        // Clear the timeout if it exists
         if (resizeTimeout) clearTimeout(resizeTimeout);
-        
-        // Set a new timeout to resize charts after window resize is complete
         resizeTimeout = setTimeout(() => {
             const charts = Chart.instances;
             charts.forEach(chart => {
@@ -855,7 +853,6 @@
         }, 250);
     }
 
-    // Add event listener for window resize
     window.addEventListener('resize', handleChartResize);
 
     // Load chart of accounts
@@ -888,48 +885,35 @@
     async function loadTransactions() {
         loadingModal.style.display = "flex";
         try {
-            let q;
-            try {
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("date", "desc")
-                );
-            } catch (error) {
-                // Fallback if index doesn't exist or date field is different
-                console.log("Trying alternative date field...");
-                try {
-                    q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                } catch (err) {
-                    // Final fallback - no ordering
-                    q = query(collection(db, "users", currentUser.uid, "transactions"));
-                }
-            }
+            const q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("DATE", "desc")
+            );
             
             const snapshot = await getDocs(q);
             allTransactions = [];
             
             snapshot.forEach(doc => {
                 const txData = doc.data();
-                // Handle different field naming conventions
-                const income = parseFloat(txData.income || txData.INCOME || 0);
-                const expense = parseFloat(txData.expense || txData.EXPENSE || 0);
-                const balance = parseFloat(txData.balance || txData.BALANCE || 0);
-                
-                // Handle date field (could be date, DATE, timestamp, etc.)
-                let dateObj;
-                if (txData.date) {
-                    dateObj = txData.date.toDate ? txData.date.toDate() : new Date(txData.date);
-                } else if (txData.DATE) {
-                    dateObj = txData.DATE.toDate ? txData.DATE.toDate() : new Date(txData.DATE);
-                } else if (txData.timestamp) {
-                    dateObj = txData.timestamp.toDate();
+
+                // Use proper fields with fallback
+                const income = parseFloat(txData.INCOME || 0);
+                const expense = parseFloat(txData.EXPENSE || 0);
+                const balance = parseFloat(txData.BALANCE || 0);
+
+                // Parse date string to Date object
+                let dateObj = null;
+                if (txData.DATE) {
+                    // Firestore timestamp or ISO string
+                    if (typeof txData.DATE === "object" && txData.DATE.toDate) {
+                        dateObj = txData.DATE.toDate();
+                    } else {
+                        dateObj = new Date(txData.DATE);
+                    }
                 } else {
-                    dateObj = new Date();
+                    dateObj = new Date(); // fallback to current date
                 }
-                
+
                 allTransactions.push({
                     id: doc.id,
                     ...txData,
@@ -937,8 +921,8 @@
                     EXPENSE: expense,
                     BALANCE: balance,
                     dateObj: dateObj,
-                    ACCOUNT_HEADER: txData.account || txData.ACCOUNT_HEADER || "Uncategorized",
-                    DESCRIPTION: txData.description || txData.DESCRIPTION || "Transaction"
+                    ACCOUNT_HEADER: txData.ACCOUNT_HEADER || "Uncategorized",
+                    DESCRIPTION: txData.DESCRIPTION || "Transaction"
                 });
             });
             
@@ -949,12 +933,6 @@
             loadingModal.style.display = "none";
         }
     }
-
-    // Apply filters and regenerate charts
-    applyChartFiltersBtn.addEventListener("click", async () => {
-        await generateAllCharts();
-        updateSummaryCards();
-    });
 
     // Filter transactions based on chart controls
     function getFilteredTransactions() {
@@ -989,11 +967,11 @@
                     break;
             }
             
-            if (range !== "custom") {
+            if (range !== "custom" && startDate) {
                 filtered = filtered.filter(tx => tx.dateObj >= startDate);
             }
         }
-        
+
         // Filter by account
         const accountFilter = chartAccountFilter.value;
         if (accountFilter !== "all") {
@@ -1032,7 +1010,6 @@
         }
         
         // TODO: Calculate changes compared to previous period
-        // This would require loading previous period data
         incomeChangeElem.textContent = "+5.2% vs previous period";
         expensesChangeElem.textContent = "-2.1% vs previous period";
         cashFlowChangeElem.textContent = "+12.5% vs previous period";
@@ -1043,16 +1020,13 @@
     async function generateAllCharts() {
         const filteredTransactions = getFilteredTransactions();
         
-        // Show loading modal
         loadingModal.style.display = "flex";
         
-        // Use setTimeout to allow the UI to update before heavy chart rendering
         setTimeout(() => {
             try {
-                // Destroy existing charts if they exist
                 destroyCharts();
                 
-                // Generate new charts
+                // Placeholder calls - you should implement these chart creation functions
                 createIncomeExpenseChart(filteredTransactions);
                 createExpenseCategoryChart(filteredTransactions);
                 createIncomeSourceChart(filteredTransactions);
@@ -1069,7 +1043,6 @@
                 createFinancialHealthChart(filteredTransactions);
                 createProjectionChart(filteredTransactions);
                 
-                // Hide loading modal
                 loadingModal.style.display = "none";
             } catch (error) {
                 console.error("Error generating charts:", error);
@@ -1106,13 +1079,12 @@
         setTimeout(() => {
             try {
                 if (format === 'pdf') {
-                    // Using html2canvas and jsPDF for PDF export
                     html2canvas(document.querySelector(".container")).then(canvas => {
                         const imgData = canvas.toDataURL('image/png');
                         const { jsPDF } = window.jspdf;
                         const doc = new jsPDF('p', 'mm', 'a4');
-                        const imgWidth = 210; // A4 width in mm
-                        const pageHeight = 297; // A4 height in mm
+                        const imgWidth = 210;
+                        const pageHeight = 297;
                         const imgHeight = canvas.height * imgWidth / canvas.width;
                         let heightLeft = imgHeight;
                         let position = 0;
@@ -1120,7 +1092,6 @@
                         doc.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
                         heightLeft -= pageHeight;
                         
-                        // Add more pages if the content is too long
                         while (heightLeft >= 0) {
                             position = heightLeft - imgHeight;
                             doc.addPage();
@@ -1132,7 +1103,6 @@
                         loadingModal.style.display = "none";
                     });
                 } else if (format === 'image') {
-                    // Using html2canvas for image export
                     html2canvas(document.querySelector(".container")).then(canvas => {
                         const link = document.createElement('a');
                         link.download = 'financial-dashboard.png';
@@ -1148,6 +1118,14 @@
             }
         }, 500);
     }
+
+    // Apply chart filters
+    applyChartFiltersBtn.addEventListener("click", () => {
+        generateAllCharts();
+        updateSummaryCards();
+    });
+
+
 
     // 1. Income vs Expenses Trend Chart
     function createIncomeExpenseChart(transactions) {
