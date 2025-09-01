@@ -201,10 +201,55 @@
       width: 300px;
     }
     
+    /* Filter Section */
+    .filter-section {
+      background: #f8f9fa;
+      padding: 15px 22px;
+      border-bottom: 1px solid #e9ecef;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      align-items: center;
+    }
+    
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    .filter-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    
+    .filter-control {
+      padding: 8px 12px;
+      border: 1px solid #ced4da;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    
+    .filter-button {
+      background: var(--purple-1);
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      align-self: flex-end;
+    }
+    
+    .filter-button:hover {
+      background: var(--purple-2);
+    }
+    
     /* Responsive */
     @media (max-width: 980px) {
       .top-cards { grid-template-columns: repeat(2,1fr); }
       .chart-grid { grid-template-columns: 1fr; }
+      .filter-section { flex-direction: column; align-items: stretch; }
     }
     @media (max-width: 640px) {
       .top-cards { grid-template-columns: 1fr; gap:10px; }
@@ -253,6 +298,44 @@
             <button id="logoutBtn" class="btn btn-outline-light btn-sm">Logout</button>
           </div>
         </div>
+      </div>
+
+      <!-- Filter section -->
+      <div class="filter-section">
+        <div class="filter-group">
+          <label class="filter-label">Date Range</label>
+          <input type="date" id="startDate" class="filter-control">
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">to</label>
+          <input type="date" id="endDate" class="filter-control">
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Account</label>
+          <select id="accountFilter" class="filter-control">
+            <option value="">All Accounts</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Type</label>
+          <select id="typeFilter" class="filter-control">
+            <option value="">All Types</option>
+            <option value="Income">Income</option>
+            <option value="Expense">Expense</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Bank</label>
+          <select id="bankFilter" class="filter-control">
+            <option value="">All Banks</option>
+          </select>
+        </div>
+        <button id="applyFilters" class="filter-button">
+          <i class="fas fa-filter me-1"></i> Apply Filters
+        </button>
+        <button id="resetFilters" class="filter-button" style="background: #6c757d;">
+          <i class="fas fa-redo me-1"></i> Reset
+        </button>
       </div>
 
       <!-- top cards -->
@@ -445,9 +528,8 @@
 
     // Global variables
     let userData = null;
-    let transactions = [];
-    let accounts = [];
-    let categories = [];
+    let allTransactions = [];
+    let filteredTransactions = [];
     let chartInstances = {};
 
     // Initialize the application
@@ -455,6 +537,7 @@
       initNavigation();
       initTabEvents();
       initExportModal();
+      initFilters();
       
       // Check if user is already logged in
       auth.onAuthStateChanged(user => {
@@ -486,63 +569,48 @@
       document.getElementById('dashboard').style.display = 'block';
     }
 
-  function loadUserData(userId) {
-  // Load user profile
-  db.collection('users').doc(userId).get().then(doc => {
-    if (doc.exists) {
-      let userData = doc.data();
-      document.getElementById('username').textContent = userData.name;
-      document.getElementById('userInitials').textContent = getInitials(userData.name);
+    function loadUserData(userId) {
+      // Load user profile
+      db.collection('users').doc(userId).get().then(doc => {
+        if (doc.exists) {
+          let userData = doc.data();
+          document.getElementById('username').textContent = userData.name;
+          document.getElementById('userInitials').textContent = getInitials(userData.name);
+        }
+      });
+
+      // Load transactions
+      db.collection('users').doc(userId).collection('transactions')
+        .orderBy('DATE', 'desc')
+        .get().then(snapshot => {
+          allTransactions = [];
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            // Determine transaction type based on INCOME/EXPENSE values
+            data.TYPE = (data.INCOME > 0) ? 'Income' : 'Expense';
+            data.id = doc.id;
+            allTransactions.push(data);
+          });
+          
+          // Set default date range to last 6 months
+          const endDate = new Date();
+          const startDate = new Date();
+          startDate.setMonth(startDate.getMonth() - 6);
+          
+          document.getElementById('startDate').value = startDate.toISOString().split('T')[0];
+          document.getElementById('endDate').value = endDate.toISOString().split('T')[0];
+          
+          // Initialize filters
+          populateFilterOptions();
+          
+          // Apply initial filters
+          applyFilters();
+        });
     }
-  });
 
-  // Load both transactions and CoA
-  Promise.all([
-    db.collection('users').doc(userId).collection('transactions').get(),
-    db.collection('users').doc(userId).collection('chartOfAccounts').get()
-  ]).then(([transSnap, accSnap]) => {
-    let transactions = [];
-    let accounts = {};
-
-    // Build accounts dictionary keyed by "name"
-    accSnap.forEach(a => {
-      let acc = a.data();
-      accounts[acc.name] = acc;
-    });
-
-    // Match transactions to accounts
-    transSnap.forEach(tr => {
-      let t = { id: tr.id, ...tr.data() };
-      let acc = accounts[t.ACCOUNT_HEADER]; // match ACCOUNT_HEADER → CoA.name
-      if (acc) {
-        console.log(`${t.INCOME - t.EXPENSE} → ${acc.name} [${acc.type}]`);
-      } else {
-        console.warn(`No CoA match for ${t.ACCOUNT_HEADER}`);
-      }
-      transactions.push(t);
-    });
-
-    // Update charts and stats
-    updateStats(transactions);
-    renderAllCharts(transactions, accounts);
-  });
-
-  // Populate dropdown
-  db.collection('users').doc(userId).collection('chartOfAccounts').get().then(snapshot => {
-    let select = document.getElementById('accountDropdown');
-    snapshot.forEach(doc => {
-      let acc = doc.data();
-      let option = document.createElement('option');
-      option.value = acc.name; // match ACCOUNT_HEADER in transactions
-      option.textContent = `${acc.name} (${acc.type})`;
-      select.appendChild(option);
-    });
-  });
-}
-
-function getInitials(name) {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase();
-}
+    function getInitials(name) {
+      return name.split(' ').map(n => n[0]).join('').toUpperCase();
+    }
 
     function initNavigation() {
       document.getElementById('backBtn').addEventListener('click', () => {
@@ -564,6 +632,75 @@ function getInitials(name) {
       document.getElementById('exportBtn').addEventListener('click', () => {
         showExportModal();
       });
+    }
+
+    function initFilters() {
+      document.getElementById('applyFilters').addEventListener('click', applyFilters);
+      document.getElementById('resetFilters').addEventListener('click', resetFilters);
+    }
+
+    function populateFilterOptions() {
+      // Get unique accounts
+      const accounts = [...new Set(allTransactions.map(t => t.ACCOUNT_HEADER).filter(Boolean))];
+      const accountFilter = document.getElementById('accountFilter');
+      
+      accounts.forEach(account => {
+        const option = document.createElement('option');
+        option.value = account;
+        option.textContent = account;
+        accountFilter.appendChild(option);
+      });
+      
+      // Get unique banks
+      const banks = [...new Set(allTransactions.map(t => t.BANK_NAME).filter(Boolean))];
+      const bankFilter = document.getElementById('bankFilter');
+      
+      banks.forEach(bank => {
+        const option = document.createElement('option');
+        option.value = bank;
+        option.textContent = bank;
+        bankFilter.appendChild(option);
+      });
+    }
+
+    function applyFilters() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const account = document.getElementById('accountFilter').value;
+      const type = document.getElementById('typeFilter').value;
+      const bank = document.getElementById('bankFilter').value;
+      
+      filteredTransactions = allTransactions.filter(transaction => {
+        // Date filter
+        if (startDate && transaction.DATE < startDate) return false;
+        if (endDate && transaction.DATE > endDate) return false;
+        
+        // Account filter
+        if (account && transaction.ACCOUNT_HEADER !== account) return false;
+        
+        // Type filter
+        if (type && transaction.TYPE !== type) return false;
+        
+        // Bank filter
+        if (bank && transaction.BANK_NAME !== bank) return false;
+        
+        return true;
+      });
+      
+      updateStats();
+      renderAllCharts();
+    }
+
+    function resetFilters() {
+      document.getElementById('startDate').value = '';
+      document.getElementById('endDate').value = '';
+      document.getElementById('accountFilter').value = '';
+      document.getElementById('typeFilter').value = '';
+      document.getElementById('bankFilter').value = '';
+      
+      filteredTransactions = [...allTransactions];
+      updateStats();
+      renderAllCharts();
     }
 
     function initExportModal() {
@@ -613,11 +750,11 @@ function getInitials(name) {
     }
 
     function updateStats() {
-      const totalIncome = transactions
+      const totalIncome = filteredTransactions
         .filter(t => t.TYPE === 'Income')
         .reduce((sum, t) => sum + (t.INCOME || 0), 0);
         
-      const totalExpense = transactions
+      const totalExpense = filteredTransactions
         .filter(t => t.TYPE === 'Expense')
         .reduce((sum, t) => sum + (t.EXPENSE || 0), 0);
         
@@ -625,7 +762,7 @@ function getInitials(name) {
       
       // Count transactions from current month
       const currentMonth = new Date().toISOString().substring(0, 7);
-      const transactionCount = transactions.filter(t => {
+      const transactionCount = filteredTransactions.filter(t => {
         const txMonth = t.DATE ? t.DATE.substring(0, 7) : '';
         return txMonth === currentMonth;
       }).length;
@@ -668,11 +805,11 @@ function getInitials(name) {
 
     function renderIncomeExpensePieChart() {
       const ctx = document.getElementById('incomeExpensePieChart').getContext('2d');
-      const totalIncome = transactions
+      const totalIncome = filteredTransactions
         .filter(t => t.TYPE === 'Income')
         .reduce((sum, t) => sum + (t.INCOME || 0), 0);
         
-      const totalExpense = transactions
+      const totalExpense = filteredTransactions
         .filter(t => t.TYPE === 'Expense')
         .reduce((sum, t) => sum + (t.EXPENSE || 0), 0);
       
@@ -703,7 +840,7 @@ function getInitials(name) {
       
       // Group by month
       const monthlyData = {};
-      transactions.forEach(t => {
+      filteredTransactions.forEach(t => {
         if (!t.DATE) return;
         
         const month = t.DATE.substring(0, 7); // YYYY-MM
@@ -755,20 +892,20 @@ function getInitials(name) {
       const ctx = document.getElementById('accountBalancesChart').getContext('2d');
       
       // Calculate balances for each account
-const accountBalances = {};
-Object.keys(accounts).forEach(name => {
-  accountBalances[name] = 0;
-});
-
-transactions.forEach(t => {
-  const accName = t.ACCOUNT_HEADER;
-  if (!accName) return;
-  if (t.TYPE === 'Income') {
-    accountBalances[accName] += t.INCOME || 0;
-  } else if (t.TYPE === 'Expense') {
-    accountBalances[accName] -= t.EXPENSE || 0;
-  }
-});
+      const accountBalances = {};
+      
+      filteredTransactions.forEach(t => {
+        const accName = t.ACCOUNT_HEADER || 'Unknown';
+        if (!accountBalances[accName]) {
+          accountBalances[accName] = 0;
+        }
+        
+        if (t.TYPE === 'Income') {
+          accountBalances[accName] += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          accountBalances[accName] -= t.EXPENSE || 0;
+        }
+      });
       
       chartInstances.accountBalancesChart = new Chart(ctx, {
         type: 'bar',
@@ -799,7 +936,39 @@ transactions.forEach(t => {
       const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const transactionsByDay = [0, 0, 0, 0, 0, 0, 0];
       
-      transactions.forEach(t => {
+      filteredTransactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const date = new Date(t.DATE);
+        const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        transactionsByDay[dayOfWeek]++;
+      });
+      
+      // Reorder to start with Monday
+      const reorderedData = [
+        ...transactionsByDay.slice(1),
+        transactionsByDay[0]
+      ];
+      
+      chartInstances.dailyTransactionsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+          datasets: [{
+            label: 'Transactions',
+            data: reorderedData,
+            borderColor: '#5b2ce7',
+            tension: 0.1,
+            fill: false
+          }]
+    function renderDailyTransactionsChart() {
+      const ctx = document.getElementById('dailyTransactionsChart').getContext('2d');
+      
+      // Group transactions by day of week
+      const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const transactionsByDay = [0, 0, 0, 0, 0, 0, 0];
+      
+      filteredTransactions.forEach(t => {
         if (!t.DATE) return;
         
         const date = new Date(t.DATE);
@@ -838,49 +1007,63 @@ transactions.forEach(t => {
     }
 
     function renderIncomeByCategoryChart() {
-  const ctx = document.getElementById('incomeByCategoryChart').getContext('2d');
-  
-  // Group income by Chart of Accounts (CoA)
-  const incomeByCoA = {};
-  transactions
-    .filter(t => t.TYPE === 'Income')
-    .forEach(t => {
-      const coa = t.COA || 'Unmapped'; // use COA field instead of CATEGORY
-      incomeByCoA[coa] = (incomeByCoA[coa] || 0) + (t.INCOME || 0);
-    });
-
-  chartInstances.incomeByCategoryChart = new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: Object.keys(incomeByCoA),
-      datasets: [{
-        data: Object.values(incomeByCoA),
-        backgroundColor: ['#0f7a3a', '#1e9c4f', '#2dbc64', '#3cdb79', '#5cec8d']
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom' }
-      }
+      const ctx = document.getElementById('incomeByCategoryChart').getContext('2d');
+      
+      // Group income by category
+      const incomeByCategory = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Income')
+        .forEach(t => {
+          const category = t.CATEGORY || 'Uncategorized';
+          if (!incomeByCategory[category]) {
+            incomeByCategory[category] = 0;
+          }
+          incomeByCategory[category] += t.INCOME || 0;
+        });
+      
+      // Sort by amount and take top 5
+      const sortedCategories = Object.entries(incomeByCategory)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+      
+      chartInstances.incomeByCategoryChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: sortedCategories.map(item => item[0]),
+          datasets: [{
+            data: sortedCategories.map(item => item[1]),
+            backgroundColor: ['#0f7a3a', '#1e9955', '#2db86c', '#4ccf85', '#6ae69e']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
+      });
     }
-  });
-}
-
 
     function renderMonthlyIncomeChart() {
       const ctx = document.getElementById('monthlyIncomeChart').getContext('2d');
       
       // Group income by month
       const monthlyIncome = {};
-      transactions
+      
+      filteredTransactions
         .filter(t => t.TYPE === 'Income')
         .forEach(t => {
           if (!t.DATE) return;
           
           const month = t.DATE.substring(0, 7); // YYYY-MM
-          monthlyIncome[month] = (monthlyIncome[month] || 0) + (t.INCOME || 0);
+          if (!monthlyIncome[month]) {
+            monthlyIncome[month] = 0;
+          }
+          monthlyIncome[month] += t.INCOME || 0;
         });
       
       const months = Object.keys(monthlyIncome).sort();
@@ -911,58 +1094,64 @@ transactions.forEach(t => {
       });
     }
 
-   function renderExpensesByCategoryChart() {
-  const ctx = document.getElementById('expensesByCategoryChart').getContext('2d');
-  
-  // Group expenses by Chart of Accounts (CoA)
-const incomeByCoA = {};
-transactions
-  .filter(t => t.TYPE === 'Income')
-  .forEach(t => {
-    const coa = t.ACCOUNT_HEADER || 'Unmapped';
-    incomeByCoA[coa] = (incomeByCoA[coa] || 0) + (t.INCOME || 0);
-  });
-     
-const expensesByCoA = {};
-transactions
-  .filter(t => t.TYPE === 'Expense')
-  .forEach(t => {
-    const coa = t.ACCOUNT_HEADER || 'Unmapped';
-    expensesByCoA[coa] = (expensesByCoA[coa] || 0) + (t.EXPENSE || 0);
-  });
-
-
-  chartInstances.expensesByCategoryChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: Object.keys(expensesByCoA),
-      datasets: [{
-        data: Object.values(expensesByCoA),
-        backgroundColor: ['#c92a2a', '#e03a3a', '#f74a4a', '#ff5a5a', '#ff6a6a']
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom' }
-      }
+    function renderExpensesByCategoryChart() {
+      const ctx = document.getElementById('expensesByCategoryChart').getContext('2d');
+      
+      // Group expenses by category
+      const expensesByCategory = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          const category = t.CATEGORY || 'Uncategorized';
+          if (!expensesByCategory[category]) {
+            expensesByCategory[category] = 0;
+          }
+          expensesByCategory[category] += t.EXPENSE || 0;
+        });
+      
+      // Sort by amount and take top 5
+      const sortedCategories = Object.entries(expensesByCategory)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+      
+      chartInstances.expensesByCategoryChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: sortedCategories.map(item => item[0]),
+          datasets: [{
+            data: sortedCategories.map(item => item[1]),
+            backgroundColor: ['#c92a2a', '#d64545', '#e35f5f', '#ef7a7a', '#fa9494']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
+      });
     }
-  });
-}
 
     function renderMonthlyExpensesChart() {
       const ctx = document.getElementById('monthlyExpensesChart').getContext('2d');
       
       // Group expenses by month
       const monthlyExpenses = {};
-      transactions
+      
+      filteredTransactions
         .filter(t => t.TYPE === 'Expense')
         .forEach(t => {
           if (!t.DATE) return;
           
           const month = t.DATE.substring(0, 7); // YYYY-MM
-          monthlyExpenses[month] = (monthlyExpenses[month] || 0) + (t.EXPENSE || 0);
+          if (!monthlyExpenses[month]) {
+            monthlyExpenses[month] = 0;
+          }
+          monthlyExpenses[month] += t.EXPENSE || 0;
         });
       
       const months = Object.keys(monthlyExpenses).sort();
@@ -993,295 +1182,625 @@ transactions
       });
     }
 
-   
-function renderIncomeExpenseTrendChart() {
-  const ctx = document.getElementById('incomeExpenseTrendChart').getContext('2d');
-
-  const monthly = {};
-  transactions.forEach(t => {
-    if (!t.DATE) return;
-    const month = t.DATE.substring(0, 7);
-    if (!monthly[month]) monthly[month] = { income: 0, expense: 0 };
-
-    if (t.TYPE === 'Income') {
-      monthly[month].income += t.INCOME || 0;
-    } else if (t.TYPE === 'Expense') {
-      monthly[month].expense += t.EXPENSE || 0;
-    }
-  });
-
-  const months = Object.keys(monthly).sort();
-  const incomeData = months.map(m => monthly[m].income);
-  const expenseData = months.map(m => monthly[m].expense);
-
-  chartInstances.incomeExpenseTrendChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: months,
-      datasets: [
-        {
-          label: 'Income',
-          data: incomeData,
-          borderColor: '#0f7a3a',
-          backgroundColor: 'rgba(15, 122, 58, 0.1)',
-          fill: true,
-          tension: 0.3
-        },
-        {
-          label: 'Expenses',
-          data: expenseData,
-          borderColor: '#c92a2a',
-          backgroundColor: 'rgba(201, 42, 42, 0.1)',
-          fill: true,
-          tension: 0.3
+    function renderIncomeExpenseTrendChart() {
+      const ctx = document.getElementById('incomeExpenseTrendChart').getContext('2d');
+      
+      // Group by month
+      const monthlyData = {};
+      filteredTransactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const month = t.DATE.substring(0, 7); // YYYY-MM
+        if (!monthlyData[month]) {
+          monthlyData[month] = { income: 0, expense: 0 };
         }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: { beginAtZero: true }
-      }
+        
+        if (t.TYPE === 'Income') {
+          monthlyData[month].income += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyData[month].expense += t.EXPENSE || 0;
+        }
+      });
+      
+      const months = Object.keys(monthlyData).sort();
+      const incomeData = months.map(m => monthlyData[m].income);
+      const expenseData = months.map(m => monthlyData[m].expense);
+      
+      chartInstances.incomeExpenseTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [
+            {
+              label: 'Income',
+              data: incomeData,
+              borderColor: '#0f7a3a',
+              backgroundColor: 'rgba(15, 122, 58, 0.1)',
+              fill: true,
+              tension: 0.3
+            },
+            {
+              label: 'Expenses',
+              data: expenseData,
+              borderColor: '#c92a2a',
+              backgroundColor: 'rgba(201, 42, 42, 0.1)',
+              fill: true,
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
     }
-  });
-}
-
 
     function renderIncomeByMonthChart() {
       const ctx = document.getElementById('incomeByMonthChart').getContext('2d');
-      const monthly = {};
-      transactions.filter(t => t.TYPE === 'Income').forEach(t => {
-        if (!t.DATE) return;
-        const month = t.DATE.substring(0, 7);
-        monthly[month] = (monthly[month] || 0) + (t.INCOME || 0);
-      });
-      const months = Object.keys(monthly).sort();
+      
+      // Group income by month
+      const monthlyIncome = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Income')
+        .forEach(t => {
+          if (!t.DATE) return;
+          
+          const month = t.DATE.substring(0, 7); // YYYY-MM
+          if (!monthlyIncome[month]) {
+            monthlyIncome[month] = 0;
+          }
+          monthlyIncome[month] += t.INCOME || 0;
+        });
+      
+      const months = Object.keys(monthlyIncome).sort();
+      const incomeData = months.map(m => monthlyIncome[m]);
+      
       chartInstances.incomeByMonthChart = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: months,
-          datasets: [{ label: 'Income', data: months.map(m => monthly[m]), backgroundColor: '#0f7a3a' }]
+          datasets: [{
+            label: 'Income by Month',
+            data: incomeData,
+            backgroundColor: '#0f7a3a'
+          }]
         },
-        options: { responsive: true, maintainAspectRatio: false }
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
       });
     }
 
     function renderExpensesByMonthChart() {
       const ctx = document.getElementById('expensesByMonthChart').getContext('2d');
-      const monthly = {};
-      transactions.filter(t => t.TYPE === 'Expense').forEach(t => {
-        if (!t.DATE) return;
-        const month = t.DATE.substring(0, 7);
-        monthly[month] = (monthly[month] || 0) + (t.EXPENSE || 0);
-      });
-      const months = Object.keys(monthly).sort();
+      
+      // Group expenses by month
+      const monthlyExpenses = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          if (!t.DATE) return;
+          
+          const month = t.DATE.substring(0, 7); // YYYY-MM
+          if (!monthlyExpenses[month]) {
+            monthlyExpenses[month] = 0;
+          }
+          monthlyExpenses[month] += t.EXPENSE || 0;
+        });
+      
+      const months = Object.keys(monthlyExpenses).sort();
+      const expenseData = months.map(m => monthlyExpenses[m]);
+      
       chartInstances.expensesByMonthChart = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: months,
-          datasets: [{ label: 'Expenses', data: months.map(m => monthly[m]), backgroundColor: '#c92a2a' }]
+          datasets: [{
+            label: 'Expenses by Month',
+            data: expenseData,
+            backgroundColor: '#c92a2a'
+          }]
         },
-        options: { responsive: true, maintainAspectRatio: false }
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
       });
     }
 
     function renderIncomeCompositionChart() {
       const ctx = document.getElementById('incomeCompositionChart').getContext('2d');
-      const byCat = {};
-      transactions.filter(t => t.TYPE === 'Income').forEach(t => {
-        const cat = t.CATEGORY || 'Other';
-        byCat[cat] = (byCat[cat] || 0) + (t.INCOME || 0);
-      });
+      
+      // Group income by category
+      const incomeByCategory = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Income')
+        .forEach(t => {
+          const category = t.CATEGORY || 'Uncategorized';
+          if (!incomeByCategory[category]) {
+            incomeByCategory[category] = 0;
+          }
+          incomeByCategory[category] += t.INCOME || 0;
+        });
+      
       chartInstances.incomeCompositionChart = new Chart(ctx, {
-        type: 'pie',
-        data: { labels: Object.keys(byCat), datasets: [{ data: Object.values(byCat) }] },
-        options: { responsive: true, maintainAspectRatio: false }
+        type: 'polarArea',
+        data: {
+          labels: Object.keys(incomeByCategory),
+          datasets: [{
+            data: Object.values(incomeByCategory),
+            backgroundColor: [
+              '#0f7a3a', '#1e9955', '#2db86c', '#4ccf85', '#6ae69e',
+              '#89fdba', '#a7ffd5', '#c6fff0'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
       });
     }
 
     function renderExpenseCompositionChart() {
       const ctx = document.getElementById('expenseCompositionChart').getContext('2d');
-      const byCat = {};
-      transactions.filter(t => t.TYPE === 'Expense').forEach(t => {
-        const cat = t.CATEGORY || 'Other';
-        byCat[cat] = (byCat[cat] || 0) + (t.EXPENSE || 0);
-      });
+      
+      // Group expenses by category
+      const expensesByCategory = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          const category = t.CATEGORY || 'Uncategorized';
+          if (!expensesByCategory[category]) {
+            expensesByCategory[category] = 0;
+          }
+          expensesByCategory[category] += t.EXPENSE || 0;
+        });
+      
       chartInstances.expenseCompositionChart = new Chart(ctx, {
-        type: 'pie',
-        data: { labels: Object.keys(byCat), datasets: [{ data: Object.values(byCat) }] },
-        options: { responsive: true, maintainAspectRatio: false }
+        type: 'polarArea',
+        data: {
+          labels: Object.keys(expensesByCategory),
+          datasets: [{
+            data: Object.values(expensesByCategory),
+            backgroundColor: [
+              '#c92a2a', '#d64545', '#e35f5f', '#ef7a7a', '#fa9494',
+              '#ffafaf', '#ffc9c9', '#ffe4e4'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
       });
     }
 
     function renderForecastChart() {
       const ctx = document.getElementById('forecastChart').getContext('2d');
-      // simple 6-month projection using avg balance
-      const monthly = {};
-      transactions.forEach(t => {
+      
+      // Simple forecasting based on recent trends
+      const monthlyData = {};
+      filteredTransactions.forEach(t => {
         if (!t.DATE) return;
-        const month = t.DATE.substring(0, 7);
-        monthly[month] = (monthly[month] || 0) + (t.INCOME || 0) - (t.EXPENSE || 0);
+        
+        const month = t.DATE.substring(0, 7); // YYYY-MM
+        if (!monthlyData[month]) {
+          monthlyData[month] = { income: 0, expense: 0, net: 0 };
+        }
+        
+        if (t.TYPE === 'Income') {
+          monthlyData[month].income += t.INCOME || 0;
+          monthlyData[month].net += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyData[month].expense += t.EXPENSE || 0;
+          monthlyData[month].net -= t.EXPENSE || 0;
+        }
       });
-      const months = Object.keys(monthly).sort();
-      const balances = [];
-      let running = 0;
-      months.forEach(m => {
-        running += monthly[m];
-        balances.push(running);
-      });
-      // project next 6 months
-      const avg = balances.length ? balances[balances.length-1]/balances.length : 0;
-      const forecast = [];
-      for(let i=1;i<=6;i++) forecast.push((balances[balances.length-1]||0) + avg*i);
+      
+      const months = Object.keys(monthlyData).sort();
+      const netData = months.map(m => monthlyData[m].net);
+      
+      // Simple forecast: average of last 3 months
+      const last3MonthsAvg = netData.slice(-3).reduce((a, b) => a + b, 0) / 3;
+      
+      // Create forecast data for next 6 months
+      const forecastMonths = [];
+      const forecastData = [];
+      
+      for (let i = 1; i <= 6; i++) {
+        const lastDate = new Date(months[months.length - 1] + '-01');
+        lastDate.setMonth(lastDate.getMonth() + i);
+        const forecastMonth = lastDate.toISOString().substring(0, 7);
+        forecastMonths.push(forecastMonth);
+        forecastData.push(last3MonthsAvg);
+      }
+      
       chartInstances.forecastChart = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: [...months, ...Array.from({length:6},(_,i)=>`+${i+1}M`)],
-          datasets: [{ label: 'Balance Forecast', data: [...balances, ...forecast], borderColor:'#5b2ce7' }]
+          labels: [...months, ...forecastMonths],
+          datasets: [{
+            label: 'Actual Net',
+            data: [...netData, ...Array(6).fill(null)],
+            borderColor: '#5b2ce7',
+            borderWidth: 2,
+            fill: false
+          }, {
+            label: 'Forecast',
+            data: [...Array(months.length).fill(null), ...forecastData],
+            borderColor: '#ff6384',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            fill: false
+          }]
         },
-        options:{ responsive:true, maintainAspectRatio:false }
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: false
+            }
+          }
+        }
       });
     }
 
     function renderCumulativeBalanceChart() {
       const ctx = document.getElementById('cumulativeBalanceChart').getContext('2d');
-      let running = 0;
+      
+      // Calculate cumulative balance over time
+      const sortedTransactions = [...filteredTransactions]
+        .filter(t => t.DATE)
+        .sort((a, b) => new Date(a.DATE) - new Date(b.DATE));
+      
+      let cumulativeBalance = 0;
       const dates = [];
       const balances = [];
-      transactions.sort((a,b)=>new Date(a.DATE)-new Date(b.DATE)).forEach(t => {
-        if (!t.DATE) return;
-        running += (t.INCOME||0)-(t.EXPENSE||0);
+      
+      sortedTransactions.forEach(t => {
+        if (t.TYPE === 'Income') {
+          cumulativeBalance += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          cumulativeBalance -= t.EXPENSE || 0;
+        }
+        
         dates.push(t.DATE);
-        balances.push(running);
+        balances.push(cumulativeBalance);
       });
+      
       chartInstances.cumulativeBalanceChart = new Chart(ctx, {
-        type:'line',
-        data:{ labels:dates, datasets:[{ label:'Balance', data:balances, borderColor:'#5b2ce7'}]},
-        options:{ responsive:true, maintainAspectRatio:false }
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: [{
+            label: 'Cumulative Balance',
+            data: balances,
+            borderColor: '#5b2ce7',
+            backgroundColor: 'rgba(91, 44, 231, 0.1)',
+            fill: true,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: false
+            }
+          }
+        }
       });
     }
 
     function renderYoyComparisonChart() {
-      const ctx=document.getElementById('yoyComparisonChart').getContext('2d');
-      const byYear={};
-      transactions.forEach(t=>{
-        if(!t.DATE) return;
-        const year=t.DATE.substring(0,4);
-        if(!byYear[year]) byYear[year]={income:0,expense:0};
-        if(t.TYPE==='Income') byYear[year].income+=(t.INCOME||0);
-        if(t.TYPE==='Expense') byYear[year].expense+=(t.EXPENSE||0);
+      const ctx = document.getElementById('yoyComparisonChart').getContext('2d');
+      
+      // Group by year and month
+      const yearlyData = {};
+      
+      filteredTransactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const date = new Date(t.DATE);
+        const year = date.getFullYear();
+        const month = date.getMonth(); // 0-11
+        
+        if (!yearlyData[year]) {
+          yearlyData[year] = Array(12).fill(0);
+        }
+        
+        if (t.TYPE === 'Income') {
+          yearlyData[year][month] += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          yearlyData[year][month] -= t.EXPENSE || 0;
+        }
       });
-      const years=Object.keys(byYear).sort();
-      chartInstances.yoyComparisonChart=new Chart(ctx,{
-        type:'bar',
-        data:{labels:years,datasets:[
-          {label:'Income',data:years.map(y=>byYear[y].income),backgroundColor:'#0f7a3a'},
-          {label:'Expenses',data:years.map(y=>byYear[y].expense),backgroundColor:'#c92a2a'}
-        ]},
-        options:{responsive:true,maintainAspectRatio:false}
+      
+      const years = Object.keys(yearlyData).sort();
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      const datasets = years.map((year, index) => {
+        const colors = ['#5b2ce7', '#ff6384', '#36a2eb', '#ffcd56', '#4bc0c0'];
+        return {
+          label: year,
+          data: yearlyData[year],
+          borderColor: colors[index % colors.length],
+          backgroundColor: 'transparent',
+          tension: 0.1
+        };
+      });
+      
+      chartInstances.yoyComparisonChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: monthNames,
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: false
+            }
+          }
+        }
       });
     }
 
     function renderMonthlyComparisonChart() {
-      const ctx=document.getElementById('monthlyComparisonChart').getContext('2d');
-      const byMonth={};
-      transactions.forEach(t=>{
-        if(!t.DATE) return;
-        const m=t.DATE.substring(0,7);
-        if(!byMonth[m]) byMonth[m]={income:0,expense:0};
-        if(t.TYPE==='Income') byMonth[m].income+=(t.INCOME||0);
-        if(t.TYPE==='Expense') byMonth[m].expense+=(t.EXPENSE||0);
+      const ctx = document.getElementById('monthlyComparisonChart').getContext('2d');
+      
+      // Group by month
+      const monthlyData = {};
+      filteredTransactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const month = t.DATE.substring(0, 7); // YYYY-MM
+        if (!monthlyData[month]) {
+          monthlyData[month] = { income: 0, expense: 0 };
+        }
+        
+        if (t.TYPE === 'Income') {
+          monthlyData[month].income += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyData[month].expense += t.EXPENSE || 0;
+        }
       });
-      const months=Object.keys(byMonth).sort();
-      chartInstances.monthlyComparisonChart=new Chart(ctx,{
-        type:'line',
-        data:{labels:months,datasets:[
-          {label:'Income',data:months.map(m=>byMonth[m].income),borderColor:'#0f7a3a'},
-          {label:'Expenses',data:months.map(m=>byMonth[m].expense),borderColor:'#c92a2a'}
-        ]},
-        options:{responsive:true,maintainAspectRatio:false}
+      
+      const months = Object.keys(monthlyData).sort();
+      const incomeData = months.map(m => monthlyData[m].income);
+      const expenseData = months.map(m => monthlyData[m].expense);
+      
+      chartInstances.monthlyComparisonChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: months,
+          datasets: [
+            {
+              label: 'Income',
+              data: incomeData,
+              backgroundColor: '#0f7a3a'
+            },
+            {
+              label: 'Expenses',
+              data: expenseData,
+              backgroundColor: '#c92a2a'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
       });
     }
 
     function renderExpenseIncomeRatioChart() {
-      const ctx=document.getElementById('expenseIncomeRatioChart').getContext('2d');
-      const ratio = [];
-      const months=[];
-      const byMonth={};
-      transactions.forEach(t=>{
-        if(!t.DATE) return;
-        const m=t.DATE.substring(0,7);
-        if(!byMonth[m]) byMonth[m]={income:0,expense:0};
-        if(t.TYPE==='Income') byMonth[m].income+=(t.INCOME||0);
-        if(t.TYPE==='Expense') byMonth[m].expense+=(t.EXPENSE||0);
+      const ctx = document.getElementById('expenseIncomeRatioChart').getContext('2d');
+      
+      // Calculate ratio by month
+      const monthlyRatios = {};
+      
+      filteredTransactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const month = t.DATE.substring(0, 7); // YYYY-MM
+        if (!monthlyRatios[month]) {
+          monthlyRatios[month] = { income: 0, expense: 0 };
+        }
+        
+        if (t.TYPE === 'Income') {
+          monthlyRatios[month].income += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyRatios[month].expense += t.EXPENSE || 0;
+        }
       });
-      Object.keys(byMonth).sort().forEach(m=>{
-        months.push(m);
-        const inc=byMonth[m].income||1;
-        ratio.push((byMonth[m].expense/inc*100).toFixed(2));
+      
+      const months = Object.keys(monthlyRatios).sort();
+      const ratioData = months.map(m => {
+        const income = monthlyRatios[m].income;
+        const expense = monthlyRatios[m].expense;
+        return income > 0 ? (expense / income) * 100 : 0;
       });
-      chartInstances.expenseIncomeRatioChart=new Chart(ctx,{
-        type:'bar',
-        data:{labels:months,datasets:[{label:'Expense/Income %',data:ratio,backgroundColor:'#5b2ce7'}]},
-        options:{responsive:true,maintainAspectRatio:false}
+      
+      chartInstances.expenseIncomeRatioChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [{
+            label: 'Expense/Income Ratio (%)',
+            data: ratioData,
+            borderColor: '#ff6384',
+            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+            fill: true,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              ticks: {
+                callback: function(value) {
+                  return value + '%';
+                }
+              }
+            }
+          }
+        }
       });
     }
 
     function renderPaymentMethodsChart() {
-      const ctx=document.getElementById('paymentMethodsChart').getContext('2d');
-      const byMethod={};
-      transactions.forEach(t=>{
-        const method=t.PAYMENT_METHOD||'Other';
-        byMethod[method]=(byMethod[method]||0)+ (t.INCOME||0)+(t.EXPENSE||0);
+      const ctx = document.getElementById('paymentMethodsChart').getContext('2d');
+      
+      // Count transactions by payment method
+      const paymentMethods = {};
+      
+      filteredTransactions.forEach(t => {
+        const method = t.PAYMENT_METHOD || 'Unknown';
+        if (!paymentMethods[method]) {
+          paymentMethods[method] = 0;
+        }
+        paymentMethods[method]++;
       });
-      chartInstances.paymentMethodsChart=new Chart(ctx,{
-        type:'pie',
-        data:{labels:Object.keys(byMethod),datasets:[{data:Object.values(byMethod)}]},
-        options:{responsive:true,maintainAspectRatio:false}
+      
+      chartInstances.paymentMethodsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(paymentMethods),
+          datasets: [{
+            data: Object.values(paymentMethods),
+            backgroundColor: ['#5b2ce7', '#36a2eb', '#ff6384', '#ffcd56', '#4bc0c0']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
       });
     }
 
     function renderTopSpendingChart() {
-      const ctx=document.getElementById('topSpendingChart').getContext('2d');
-      const byCat={};
-      transactions.filter(t=>t.TYPE==='Expense').forEach(t=>{
-        const cat=t.CATEGORY||'Other';
-        byCat[cat]=(byCat[cat]||0)+(t.EXPENSE||0);
-      });
-      const entries=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
-      chartInstances.topSpendingChart=new Chart(ctx,{
-        type:'bar',
-        data:{labels:entries.map(e=>e[0]),datasets:[{label:'Spent',data:entries.map(e=>e[1]),backgroundColor:'#c92a2a'}]},
-        options:{responsive:true,maintainAspectRatio:false}
-      });
-    }
-
-    // Export to Excel
-    function exportToExcel() {
-      const ws = XLSX.utils.json_to_sheet(transactions);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Transactions");
-      XLSX.writeFile(wb, "transactions.xlsx");
-    }
-
-    // Export charts to PDF
-    async function exportChartsToPdf() {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF("p", "mm", "a4");
-      let y = 10;
-
-      for (const [key, chart] of Object.entries(chartInstances)) {
-        const canvas = chart.canvas;
-        const imgData = canvas.toDataURL("image/png", 1.0);
-        doc.addImage(imgData, "PNG", 10, y, 180, 90);
-        y += 95;
-        if (y > 260) {
-          doc.addPage();
-          y = 10;
+      const ctx = document.getElementById('topSpendingChart').getContext('2d');
+      
+      // Get top spending categories
+      const spendingByCategory = {};
+      
+      filteredTransactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          const category = t.CATEGORY || 'Uncategorized';
+          if (!spendingByCategory[category]) {
+            spendingByCategory[category] = 0;
+          }
+          spendingByCategory[category] += t.EXPENSE || 0;
+        });
+      
+      // Sort by amount and take top 7
+      const topCategories = Object.entries(spendingByCategory)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 7);
+      
+      chartInstances.topSpendingChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: topCategories.map(item => item[0]),
+          datasets: [{
+            label: 'Amount Spent',
+            data: topCategories.map(item => item[1]),
+            backgroundColor: '#c92a2a'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          scales: {
+            x: {
+              beginAtZero: true
+            }
+          }
         }
-      }
-      doc.save("charts.pdf");
+      });
+    }
+
+    function exportToExcel() {
+      // Prepare data for export
+      const data = filteredTransactions.map(t => ({
+        Date: t.DATE,
+        Description: t.DESCRIPTION,
+        Category: t.CATEGORY,
+        Type: t.TYPE,
+        Amount: t.TYPE === 'Income' ? t.INCOME : t.EXPENSE,
+        Account: t.ACCOUNT_HEADER,
+        Bank: t.BANK_NAME,
+        PaymentMethod: t.PAYMENT_METHOD
+      }));
+      
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(data);
+      
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+      
+      // Export to file
+      XLSX.writeFile(wb, 'financial_data.xlsx');
+    }
+
+    function exportChartsToPdf() {
+      alert('PDF export functionality would be implemented here with a proper PDF library.');
+      // In a real implementation, you would use jsPDF with html2canvas
+      // to capture each chart and compile into a PDF document
     }
   </script>
 </body>
