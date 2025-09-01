@@ -891,7 +891,7 @@
         }
     });
 
-    // Function to handle CSV file selection
+  // Function to handle CSV file selection
 function handleCsvFileSelect(file) {
     if (!file) return;
     
@@ -1081,9 +1081,35 @@ function parseCSV(csvText) {
     const transactions = [];
     const errors = [];
     
-    // Check required headers
-    const requiredHeaders = ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'INCOME', 'EXPENSE', 'DESCRIPTION'];
-    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+    // Define header mappings for flexibility
+    const headerMappings = {
+        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN'],
+        'DATE': ['DATE', 'TRANSACTION DATE', 'TXN DATE', 'TXN_DATE'],
+        'TIME': ['TIME', 'TRANSACTION TIME', 'TXN TIME', 'TXN_TIME'],
+        'ACCOUNT HEADER': ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'ACCOUNT HEAD', 'ACCOUNT_NAME', 'ACCOUNTHEADER'],
+        'MODE': ['MODE', 'PAYMENT MODE', 'METHOD', 'PAYMENT_METHOD'],
+        'INCOME': ['INCOME', 'CREDIT', 'DEPOSIT', 'AMOUNT IN', 'AMOUNT_IN', 'CREDIT_AMOUNT'],
+        'EXPENSE': ['EXPENSE', 'DEBIT', 'WITHDRAWAL', 'AMOUNT OUT', 'AMOUNT_OUT', 'DEBIT_AMOUNT', 'AMOUNT'],
+        'DESCRIPTION': ['DESCRIPTION', 'DETAILS', 'NOTES', 'REMARKS', 'NOTE']
+    };
+    
+    // Normalize headers to standard names
+    const normalizedHeaders = headers.map(header => {
+        const upperHeader = header.toUpperCase();
+        for (const [standardName, alternatives] of Object.entries(headerMappings)) {
+            if (alternatives.map(a => a.toUpperCase()).includes(upperHeader)) {
+                return standardName;
+            }
+        }
+        return header; // Return original if no match found
+    });
+    
+    console.log('Original headers:', headers);
+    console.log('Normalized headers:', normalizedHeaders);
+    
+    // Check for missing required headers
+    const requiredHeaders = ['DATE', 'ACCOUNT HEADER'];
+    const missingHeaders = requiredHeaders.filter(req => !normalizedHeaders.includes(req));
     
     if (missingHeaders.length > 0) {
         errors.push(`Missing required headers: ${missingHeaders.join(', ')}`);
@@ -1095,23 +1121,21 @@ function parseCSV(csvText) {
         const values = parseCSVLine(lines[i]);
         
         if (values.length !== headers.length) {
-            errors.push(`Row ${i+1}: Column count doesn't match header count`);
+            errors.push(`Row ${i+1}: Column count doesn't match header count (expected ${headers.length}, got ${values.length})`);
             continue;
         }
         
         const transaction = {};
         for (let j = 0; j < headers.length; j++) {
-            transaction[headers[j]] = values[j].trim();
+            const standardHeader = normalizedHeaders[j];
+            transaction[standardHeader] = values[j].trim();
         }
+        
+        console.log('Processing row:', i+1, transaction);
         
         // Validate required fields
         if (!transaction.DATE) {
             errors.push(`Row ${i+1}: DATE is required`);
-            continue;
-        }
-        
-        if (!transaction.TIME) {
-            errors.push(`Row ${i+1}: TIME is required`);
             continue;
         }
         
@@ -1120,9 +1144,9 @@ function parseCSV(csvText) {
             continue;
         }
         
-        // Validate income/expense using cleanNumber to handle string values
-        const income = cleanNumber(transaction.INCOME);
-        const expense = cleanNumber(transaction.EXPENSE);
+        // Validate income/expense
+        const income = cleanNumber(transaction.INCOME || 0);
+        const expense = cleanNumber(transaction.EXPENSE || 0);
         
         if (isNaN(income) || income < 0) {
             errors.push(`Row ${i+1}: INCOME must be a positive number`);
@@ -1140,12 +1164,13 @@ function parseCSV(csvText) {
         }
         
         // Convert numeric fields to numbers for consistency
-        transaction.INCOME = income;
-        transaction.EXPENSE = expense;
+        if (transaction.INCOME) transaction.INCOME = income;
+        if (transaction.EXPENSE) transaction.EXPENSE = expense;
         
         transactions.push(transaction);
     }
     
+    console.log('Parsed transactions:', transactions);
     return {transactions, errors};
 }
 
@@ -1154,12 +1179,17 @@ function parseCSVLine(line) {
     const values = [];
     let current = '';
     let inQuotes = false;
+    let quoteChar = '';
     
     for (let i = 0; i < line.length; i++) {
         const char = line[i];
         
-        if (char === '"') {
-            inQuotes = !inQuotes;
+        if ((char === '"' || char === "'") && !inQuotes) {
+            inQuotes = true;
+            quoteChar = char;
+        } else if (char === quoteChar && inQuotes) {
+            inQuotes = false;
+            quoteChar = '';
         } else if (char === ',' && !inQuotes) {
             values.push(current);
             current = '';
