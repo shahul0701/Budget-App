@@ -897,15 +897,15 @@
  // Function to handle CSV file selection
 function handleCsvFileSelect(file) {
     if (!file) return;
-    
+
     if (!file.name.toLowerCase().endsWith('.csv')) {
         Swal.fire("Error", "Please select a CSV file", "error");
         return;
     }
-    
+
     csvFileName.textContent = file.name;
     importCsvBtn.disabled = false;
-    
+
     const reader = new FileReader();
     reader.onload = (e) => {
         parseCsvFile(e.target.result);
@@ -917,33 +917,31 @@ function handleCsvFileSelect(file) {
 function cleanNumber(value) {
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
-        // Remove currency symbols, commas, and other non-numeric characters
-        const cleaned = value.replace(/[^\d.-]/g, '');
+        const cleaned = value.replace(/[^\d.-]/g, ''); // remove symbols, commas
         return parseFloat(cleaned) || 0;
     }
     return 0;
 }
 
-// Function to debug CSV content
+// Debug function
 function debugCSVContent(csvText) {
     console.log('=== CSV DEBUG INFO ===');
     const lines = csvText.split('\n');
     console.log('Total lines:', lines.length);
     console.log('Headers:', lines[0].split(','));
-    
-    // Show first 3 data rows
+
     for (let i = 1; i < Math.min(4, lines.length); i++) {
         console.log(`Row ${i}:`, lines[i].split(','));
     }
     console.log('======================');
 }
 
-// Function to parse CSV file
+// Parse CSV wrapper
 function parseCsvFile(csvText) {
     try {
         debugCSVContent(csvText);
         const {transactions, errors} = parseCSV(csvText);
-        
+
         if (errors.length > 0) {
             Swal.fire({
                 title: 'CSV Format Issues',
@@ -951,33 +949,27 @@ function parseCsvFile(csvText) {
                 icon: 'warning'
             });
         }
-        
+
         csvTransactions = transactions;
-        
-        // Calculate balances for the imported transactions
         calculateBalancesForImportedTransactions();
-        
-        // Show import summary
         showImportSummary();
-        
+
     } catch (error) {
         console.error("Error parsing CSV:", error);
         Swal.fire("Error", "Failed to parse CSV file. Please check the format.", "error");
     }
 }
 
+// Balance calculation
 function calculateBalancesForImportedTransactions() {
     if (csvTransactions.length === 0) return;
-    
-    // Sort transactions by date only (remove time comparison)
+
     csvTransactions.sort((a, b) => {
-        // Handle different date formats and missing dates
         const dateA = a.DATE ? new Date(a.DATE) : new Date(0);
         const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
         return dateA - dateB;
     });
-    
-    // Get the latest balance from existing transactions to start from
+
     let startingBalance = 0;
     if (allTransactions.length > 0) {
         const sortedTransactions = [...allTransactions].sort((a, b) => {
@@ -987,80 +979,71 @@ function calculateBalancesForImportedTransactions() {
         });
         startingBalance = cleanNumber(sortedTransactions[sortedTransactions.length - 1].BALANCE);
     }
-    
-    // Calculate balances for each transaction
+
     let currentBalance = cleanNumber(startingBalance);
-    
+
     for (const transaction of csvTransactions) {
-        // Use the cleanNumber function to ensure we get proper numbers
         const income = cleanNumber(transaction.INCOME);
         const expense = cleanNumber(transaction.EXPENSE);
-        
         currentBalance += income - expense;
         transaction.BALANCE = currentBalance.toFixed(2);
     }
 }
 
-// Function to show import summary
+// Import summary
 function showImportSummary() {
     if (csvTransactions.length === 0) return;
-    
+
     let totalIncome = 0;
     let totalExpense = 0;
-    
+
     for (const transaction of csvTransactions) {
         totalIncome += cleanNumber(transaction.INCOME);
         totalExpense += cleanNumber(transaction.EXPENSE);
     }
-    
+
     summaryCount.textContent = csvTransactions.length;
     summaryIncome.textContent = `$${totalIncome.toFixed(2)}`;
     summaryExpense.textContent = `$${totalExpense.toFixed(2)}`;
-    
+
     importSummary.style.display = 'block';
 }
 
-// Function to import CSV transactions
+// Import into Firestore
 async function importCsvTransactions() {
     if (csvTransactions.length === 0) {
         Swal.fire("Error", "No valid transactions to import", "error");
         return;
     }
-    
+
     progressContainer.style.display = 'block';
     importCsvBtn.disabled = true;
     cancelCsvBtn.disabled = true;
-    
+
     let importedCount = 0;
     let errors = [];
-    
+
     for (let i = 0; i < csvTransactions.length; i++) {
         const transaction = csvTransactions[i];
-        
         try {
-            // Add transaction to Firestore
             await addDoc(collection(db, "users", currentUser.uid, "transactions"), {
                 ...transaction,
-                // Convert numeric fields to numbers before storing
                 INCOME: cleanNumber(transaction.INCOME),
                 EXPENSE: cleanNumber(transaction.EXPENSE),
                 BALANCE: cleanNumber(transaction.BALANCE),
                 userId: currentUser.uid,
                 createdAt: new Date()
             });
-            
             importedCount++;
         } catch (error) {
             errors.push(`Row ${i+1}: ${error.message}`);
             console.error("Error importing transaction:", error);
         }
-        
-        // Update progress
+
         const progress = ((i + 1) / csvTransactions.length) * 100;
         progressBar.style.width = `${progress}%`;
     }
-    
-    // Show result
+
     if (errors.length === 0) {
         Swal.fire("Success", `Successfully imported ${importedCount} transactions`, "success");
     } else {
@@ -1071,14 +1054,13 @@ async function importCsvTransactions() {
             icon: 'warning'
         });
     }
-    
-    // Reload transactions and close modal
+
     await loadTransactions();
     csvModal.style.display = "none";
     resetCsvModal();
 }
 
-// Function to reset CSV modal
+// Reset modal
 function resetCsvModal() {
     csvFileName.textContent = "No file selected";
     importCsvBtn.disabled = true;
@@ -1088,13 +1070,12 @@ function resetCsvModal() {
     csvTransactions = [];
 }
 
-// Helper function to auto-detect account header from description
+// Auto-detect account header
 function detectAccountHeaderFromDescription(description) {
     if (!description) return 'Uncategorized';
-    
+
     const desc = description.toLowerCase();
-    
-    // Add your own mapping rules here
+
     if (desc.includes('food') || desc.includes('meal') || desc.includes('restaurant') || desc.includes('grocery')) {
         return 'Food & Dining';
     } else if (desc.includes('rent') || desc.includes('house') || desc.includes('apartment')) {
@@ -1112,166 +1093,38 @@ function detectAccountHeaderFromDescription(description) {
     } else if (desc.includes('entertain') || desc.includes('movie') || desc.includes('game')) {
         return 'Entertainment';
     }
-    
+
     return 'Uncategorized';
 }
 
-// Function to parse CSV content
+// === FINAL CLEAN parseCSV FUNCTION ===
 function parseCSV(csvText) {
-    const lines = csvText.split('\n').filter(line => line.trim() !== '');
+    const lines = csvText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length < 2) {
         return {transactions: [], errors: ["CSV file is empty or has only headers"]};
     }
-    
-    const headers = lines[0].split(',').map(h => h.trim());
+
+    const headers = lines[0].split(",").map(h => h.trim().toUpperCase()); // normalize
     const transactions = [];
     const errors = [];
-    
-    console.log('CSV Headers found:', headers); // DEBUG
-    
-    // Define header mappings for flexibility
-    const headerMappings = {
-        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN', 'SR NO', 'SR.NO', 'SERIAL', 'SERIAL NO', 'VOUCHER NO'],
-        'DATE': ['DATE', 'TRANSACTION DATE', 'TXN DATE', 'TXN_DATE', 'TRANSACTION_DATE', 'DT', 'TRAN_DATE'],
-        'TIME': ['TIME', 'TRANSACTION TIME', 'TXN TIME', 'TXN_TIME', 'TRANSACTION_TIME', 'TRAN_TIME', 'TM'],
-        'ACCOUNT HEADER': ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'ACCOUNT HEAD', 
-                          'ACCOUNT_NAME', 'ACCOUNTHEADER', 'ACCOUNT HEADER', 'ACCOUNTHEADER',
-                          'CATEGORY NAME', 'TYPE', 'EXPENSE TYPE', 'INCOME TYPE', 'CAT', 'ACC HEADER'],
-        'MODE': ['MODE', 'PAYMENT MODE', 'METHOD', 'PAYMENT_METHOD', 'PAYMENT METHOD', 'TYPE', 'PAYMENT TYPE'],
-        'INCOME': ['INCOME', 'CREDIT', 'DEPOSIT', 'AMOUNT IN', 'AMOUNT_IN', 'CREDIT_AMOUNT', 'CREDIT AMOUNT', 'CR AMT'],
-        'EXPENSE': ['EXPENSE', 'DEBIT', 'WITHDRAWAL', 'AMOUNT OUT', 'AMOUNT_OUT', 
-                   'DEBIT_AMOUNT', 'DEBIT AMOUNT', 'AMOUNT', 'AMOUNT DEBIT', 'DEBIT', 'EXP AMT'],
-        'DESCRIPTION': ['DESCRIPTION', 'DETAILS', 'NOTES', 'REMARKS', 'NOTE', 'COMMENT', 'DETAIL', 'DESC', 'PARTICULARS'],
-        'BANK NAME': ['BANK NAME', 'BANK', 'BANK_NAME', 'BANKNAME', 'BANK DETAILS', 'BANK_NAMES']
-    };
-    
-    // Normalize headers to standard names
-    const normalizedHeaders = headers.map(header => {
-        const upperHeader = header.toUpperCase();
-        for (const [standardName, alternatives] of Object.entries(headerMappings)) {
-            if (alternatives.map(a => a.toUpperCase()).includes(upperHeader)) {
-                return standardName;
-            }
-        }
-        console.log('Unknown header (will use original):', header);
-        return header; // Return original if no match found
-    });
-    
-    console.log('Original headers:', headers);
-    console.log('Normalized headers:', normalizedHeaders);
-    
-    // Check for missing required headers - only DATE is strictly required
-    const requiredHeaders = ['DATE'];
-    const missingHeaders = requiredHeaders.filter(req => !normalizedHeaders.includes(req));
-    
-    if (missingHeaders.length > 0) {
-        errors.push(`Missing required headers: ${missingHeaders.join(', ')}`);
-        return {transactions, errors};
-    }
-    
-    // Check if DESCRIPTION column exists for auto-detection
-    const hasDescription = normalizedHeaders.includes('DESCRIPTION');
-    
-    // Process each line
-    for (let i = 1; i < lines.length; i++) {
-        const values = parseCSVLine(lines[i]);
-        
-        if (values.length !== headers.length) {
-            errors.push(`Row ${i+1}: Column count doesn't match header count (expected ${headers.length}, got ${values.length})`);
-            continue;
-        }
-        
-        const transaction = {};
-        for (let j = 0; j < headers.length; j++) {
-            const standardHeader = normalizedHeaders[j];
-            transaction[standardHeader] = values[j].trim();
-        }
-        
-        console.log('Row data:', values); // DEBUG
-        
-        // Try to find account header from various sources
-        let accountHeader = '';
-        
-        // 1. First try explicit account header if present
-if (transaction['ACCOUNT HEADER'] && transaction['ACCOUNT HEADER'].trim() !== '') {
-    accountHeader = transaction['ACCOUNT HEADER'].trim();
-}
-
-        
-        // 2. If still empty, check if we have the column but it's empty
-        const hasAccountHeaderColumn = normalizedHeaders.includes('ACCOUNT HEADER') || 
-                                     headers.some(h => h.toUpperCase().includes('ACCOUNT') || 
-                                                     h.toUpperCase().includes('CATEGORY') ||
-                                                     h.toUpperCase().includes('HEADER'));
-        
-        if (!accountHeader && hasAccountHeaderColumn) {
-            // Column exists but is empty - use mode-based default
-            accountHeader = transaction.MODE === 'CASH' ? 'Cash Expense' : 'Bank Expense';
-        }
-        
-        // 3. If still empty, try to auto-detect from description
-        if (!accountHeader && hasDescription && transaction['DESCRIPTION']) {
-            accountHeader = detectAccountHeaderFromDescription(transaction['DESCRIPTION']);
-        }
-        
-        // 4. If still empty, use mode-based default
-        if (!accountHeader && transaction['MODE']) {
-            accountHeader = transaction['MODE'] === 'CASH' ? 'Cash Expense' : 'Bank Expense';
-        }
-        
-        // 5. Final fallback
-        if (!accountHeader) {
-            accountHeader = 'Uncategorized';
-        }
-        
-        // Set the account header
-        transaction['ACCOUNT HEADER'] = accountHeader;
-        
-        console.log('Processing row:', i+1, transaction);
-        
-        // Validate required fields
-        if (!transaction.DATE) {
-            errors.push(`Row ${i+1}: DATE is required`);
-            continue;
-        }
-        
-        // Validate income/expense
-        const income = cleanNumber(transaction.INCOME || 0);
-        const expense = cleanNumber(transaction.EXPENSE || 0);
-        
-        if (isNaN(income) || income < 0) {
-            errors.push(`Row ${i+1}: INCOME must be a positive number`);
-            continue;
-        }
-        
-        if (isNaN(expense) || expense < 0) {
-            errors.push(`Row ${i+1}: EXPENSE must be a positive number`);
-            continue;
-        }
-        
-        if (income > 0 && expense > 0) {
-            errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE in the same transaction`);
-            continue;
-        }
-        
-        function parseCSV(csvText) {
-    const lines = csvText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-    const headers = lines[0].split(",").map(h => h.trim().toUpperCase()); // normalize headers
-    const transactions = [];
 
     for (let i = 1; i < lines.length; i++) {
         const row = lines[i].split(",").map(r => r.trim());
-        let transaction = {};
+        if (row.length !== headers.length) {
+            errors.push(`Row ${i+1}: Column count mismatch`);
+            continue;
+        }
 
+        let transaction = {};
         headers.forEach((header, index) => {
             transaction[header] = row[index] || "";
         });
 
-        // Convert numbers
-        const income = parseFloat(transaction["INCOME"]) || 0;
-        const expense = parseFloat(transaction["EXPENSE"]) || 0;
+        // Convert numeric fields
+        const income = cleanNumber(transaction["INCOME"]);
+        const expense = cleanNumber(transaction["EXPENSE"]);
 
-        // Final normalized transaction
+        // Normalize
         const normalizedTransaction = {
             SINO: transaction["SINO"] || "",
             DATE: transaction["DATE"] || "",
@@ -1282,13 +1135,35 @@ if (transaction['ACCOUNT HEADER'] && transaction['ACCOUNT HEADER'].trim() !== ''
             DESCRIPTION: transaction["DESCRIPTION"] || "",
             INCOME: income,
             EXPENSE: expense,
-            BALANCE: parseFloat(transaction["BALANCE"]) || 0
+            BALANCE: cleanNumber(transaction["BALANCE"])
         };
+
+        // Auto-detect account header if missing
+        if (!normalizedTransaction.ACCOUNT_HEADER) {
+            if (normalizedTransaction.DESCRIPTION) {
+                normalizedTransaction.ACCOUNT_HEADER = detectAccountHeaderFromDescription(normalizedTransaction.DESCRIPTION);
+            } else if (normalizedTransaction.MODE) {
+                normalizedTransaction.ACCOUNT_HEADER = normalizedTransaction.MODE === "CASH" ? "Cash Expense" : "Bank Expense";
+            } else {
+                normalizedTransaction.ACCOUNT_HEADER = "Uncategorized";
+            }
+        }
+
+        // Validate required field
+        if (!normalizedTransaction.DATE) {
+            errors.push(`Row ${i+1}: DATE is required`);
+            continue;
+        }
+
+        if (income > 0 && expense > 0) {
+            errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE`);
+            continue;
+        }
 
         transactions.push(normalizedTransaction);
     }
 
-    return transactions;
+    return {transactions, errors};
 }
 
 
