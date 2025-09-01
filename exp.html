@@ -891,7 +891,10 @@
         }
     });
 
-  // Function to handle CSV file selection
+
+
+
+ // Function to handle CSV file selection
 function handleCsvFileSelect(file) {
     if (!file) return;
     
@@ -921,9 +924,24 @@ function cleanNumber(value) {
     return 0;
 }
 
+// Function to debug CSV content
+function debugCSVContent(csvText) {
+    console.log('=== CSV DEBUG INFO ===');
+    const lines = csvText.split('\n');
+    console.log('Total lines:', lines.length);
+    console.log('Headers:', lines[0].split(','));
+    
+    // Show first 3 data rows
+    for (let i = 1; i < Math.min(4, lines.length); i++) {
+        console.log(`Row ${i}:`, lines[i].split(','));
+    }
+    console.log('======================');
+}
+
 // Function to parse CSV file
 function parseCsvFile(csvText) {
     try {
+        debugCSVContent(csvText);
         const {transactions, errors} = parseCSV(csvText);
         
         if (errors.length > 0) {
@@ -1070,6 +1088,34 @@ function resetCsvModal() {
     csvTransactions = [];
 }
 
+// Helper function to auto-detect account header from description
+function detectAccountHeaderFromDescription(description) {
+    if (!description) return 'Uncategorized';
+    
+    const desc = description.toLowerCase();
+    
+    // Add your own mapping rules here
+    if (desc.includes('food') || desc.includes('meal') || desc.includes('restaurant') || desc.includes('grocery')) {
+        return 'Food & Dining';
+    } else if (desc.includes('rent') || desc.includes('house') || desc.includes('apartment')) {
+        return 'Housing';
+    } else if (desc.includes('transport') || desc.includes('bus') || desc.includes('train') || desc.includes('taxi') || desc.includes('gas')) {
+        return 'Transportation';
+    } else if (desc.includes('electric') || desc.includes('water') || desc.includes('internet') || desc.includes('phone')) {
+        return 'Utilities';
+    } else if (desc.includes('medical') || desc.includes('doctor') || desc.includes('hospital')) {
+        return 'Healthcare';
+    } else if (desc.includes('salary') || desc.includes('income') || desc.includes('payment')) {
+        return 'Income';
+    } else if (desc.includes('shopping') || desc.includes('clothes') || desc.includes('store')) {
+        return 'Shopping';
+    } else if (desc.includes('entertain') || desc.includes('movie') || desc.includes('game')) {
+        return 'Entertainment';
+    }
+    
+    return 'Uncategorized';
+}
+
 // Function to parse CSV content
 function parseCSV(csvText) {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
@@ -1081,16 +1127,20 @@ function parseCSV(csvText) {
     const transactions = [];
     const errors = [];
     
-    // Define header mappings for flexibility
+    // Define header mappings for flexibility - EXPANDED WITH MORE VARIATIONS
     const headerMappings = {
-        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN'],
-        'DATE': ['DATE', 'TRANSACTION DATE', 'TXN DATE', 'TXN_DATE'],
-        'TIME': ['TIME', 'TRANSACTION TIME', 'TXN TIME', 'TXN_TIME'],
-        'ACCOUNT HEADER': ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'ACCOUNT HEAD', 'ACCOUNT_NAME', 'ACCOUNTHEADER'],
-        'MODE': ['MODE', 'PAYMENT MODE', 'METHOD', 'PAYMENT_METHOD'],
-        'INCOME': ['INCOME', 'CREDIT', 'DEPOSIT', 'AMOUNT IN', 'AMOUNT_IN', 'CREDIT_AMOUNT'],
-        'EXPENSE': ['EXPENSE', 'DEBIT', 'WITHDRAWAL', 'AMOUNT OUT', 'AMOUNT_OUT', 'DEBIT_AMOUNT', 'AMOUNT'],
-        'DESCRIPTION': ['DESCRIPTION', 'DETAILS', 'NOTES', 'REMARKS', 'NOTE']
+        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN', 'SR NO', 'SR.NO', 'SERIAL', 'SERIAL NO'],
+        'DATE': ['DATE', 'TRANSACTION DATE', 'TXN DATE', 'TXN_DATE', 'TRANSACTION_DATE', 'DT', 'TRAN_DATE'],
+        'TIME': ['TIME', 'TRANSACTION TIME', 'TXN TIME', 'TXN_TIME', 'TRANSACTION_TIME', 'TRAN_TIME', 'TM'],
+        'ACCOUNT HEADER': ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'ACCOUNT HEAD', 
+                          'ACCOUNT_NAME', 'ACCOUNTHEADER', 'ACCOUNT HEADER', 'ACCOUNTHEADER',
+                          'CATEGORY NAME', 'TYPE', 'EXPENSE TYPE', 'INCOME TYPE', 'CAT', 'ACC HEADER'],
+        'MODE': ['MODE', 'PAYMENT MODE', 'METHOD', 'PAYMENT_METHOD', 'PAYMENT METHOD', 'TYPE', 'PAYMENT TYPE'],
+        'INCOME': ['INCOME', 'CREDIT', 'DEPOSIT', 'AMOUNT IN', 'AMOUNT_IN', 'CREDIT_AMOUNT', 'CREDIT AMOUNT', 'CR AMT'],
+        'EXPENSE': ['EXPENSE', 'DEBIT', 'WITHDRAWAL', 'AMOUNT OUT', 'AMOUNT_OUT', 
+                   'DEBIT_AMOUNT', 'DEBIT AMOUNT', 'AMOUNT', 'AMOUNT DEBIT', 'DEBIT', 'EXP AMT'],
+        'DESCRIPTION': ['DESCRIPTION', 'DETAILS', 'NOTES', 'REMARKS', 'NOTE', 'COMMENT', 'DETAIL', 'DESC', 'PARTICULARS'],
+        'BANK NAME': ['BANK NAME', 'BANK', 'BANK_NAME', 'BANKNAME', 'BANK DETAILS', 'BANK_NAMES']
     };
     
     // Normalize headers to standard names
@@ -1101,19 +1151,26 @@ function parseCSV(csvText) {
                 return standardName;
             }
         }
+        console.log('Unknown header:', header);
         return header; // Return original if no match found
     });
     
     console.log('Original headers:', headers);
     console.log('Normalized headers:', normalizedHeaders);
     
-    // Check for missing required headers
-    const requiredHeaders = ['DATE', 'ACCOUNT HEADER'];
+    // Check for missing required headers - only DATE is strictly required
+    const requiredHeaders = ['DATE'];
     const missingHeaders = requiredHeaders.filter(req => !normalizedHeaders.includes(req));
     
     if (missingHeaders.length > 0) {
         errors.push(`Missing required headers: ${missingHeaders.join(', ')}`);
         return {transactions, errors};
+    }
+    
+    // Check if ACCOUNT HEADER column exists
+    const hasAccountHeader = normalizedHeaders.includes('ACCOUNT HEADER');
+    if (!hasAccountHeader) {
+        errors.push('Warning: No ACCOUNT HEADER column found. Using "Uncategorized" for all transactions.');
     }
     
     // Process each line
@@ -1129,6 +1186,18 @@ function parseCSV(csvText) {
         for (let j = 0; j < headers.length; j++) {
             const standardHeader = normalizedHeaders[j];
             transaction[standardHeader] = values[j].trim();
+            
+            // If ACCOUNT HEADER is empty or doesn't exist, try to auto-detect from description
+            if (standardHeader === 'ACCOUNT HEADER' && (!values[j].trim() || values[j].trim() === '')) {
+                const description = transaction['DESCRIPTION'] || '';
+                transaction[standardHeader] = detectAccountHeaderFromDescription(description);
+            }
+        }
+        
+        // If no ACCOUNT HEADER column exists at all, create one
+        if (!hasAccountHeader) {
+            const description = transaction['DESCRIPTION'] || '';
+            transaction['ACCOUNT HEADER'] = detectAccountHeaderFromDescription(description);
         }
         
         console.log('Processing row:', i+1, transaction);
@@ -1136,11 +1205,6 @@ function parseCSV(csvText) {
         // Validate required fields
         if (!transaction.DATE) {
             errors.push(`Row ${i+1}: DATE is required`);
-            continue;
-        }
-        
-        if (!transaction['ACCOUNT HEADER']) {
-            errors.push(`Row ${i+1}: ACCOUNT HEADER is required`);
             continue;
         }
         
