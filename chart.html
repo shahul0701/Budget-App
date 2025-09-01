@@ -692,7 +692,8 @@
         where,
         orderBy
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+   import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    const db = getFirestore();
 
     const app = initializeApp({
         apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -704,7 +705,7 @@
         measurementId: "G-YFFJL2H54X"
     });
 
-    const db = getFirestore(app);
+    const db = getFirestore();
     const auth = getAuth(app);
 
     // DOM references
@@ -747,23 +748,17 @@
     let chartOfAccounts = [];
     let resizeTimeout;
 
-    // Listen for auth state change
-    onAuthStateChanged(auth, async user => {
-        if (user) {
-            currentUser = user;
-            const name = user.displayName || user.email || "User";
-            usernameElem.textContent = name;
-            initialsElem.textContent = name.charAt(0).toUpperCase();
+// Auth check: if no user in localStorage → redirect
+document.addEventListener("DOMContentLoaded", () => {
+  const username = localStorage.getItem("username");
+  if (!username) {
+    window.location.href = "index.html"; // back to login
+  } else {
+    console.log("Logged in as:", username);
+    loadTransactions(username);
+  }
+});
 
-            await loadChartOfAccounts();
-            await loadTransactions();
-            await generateAllCharts();
-            updateSummaryCards();
-        } else {
-            alert("Please login first.");
-            window.location.href = "index.html";
-        }
-    });
 
     // Theme toggle functionality
     themeToggle.addEventListener("click", () => {
@@ -884,60 +879,28 @@
         }
     }
 
-    // Load all transactions for user
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
-        try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("DATE", "desc")
-            );
-            
-            const snapshot = await getDocs(q);
-            allTransactions = [];
-            
-            snapshot.forEach(doc => {
-                const txData = doc.data();
+  // Load all transactions for logged-in user
+async function loadTransactions(username) {
+  try {
+    const txRef = collection(db, "users", username, "transactions");
+    const snapshot = await getDocs(txRef);
 
-                // Use proper fields with fallback
-                const income = parseFloat(txData.INCOME || 0);
-                const expense = parseFloat(txData.EXPENSE || 0);
-                const balance = parseFloat(txData.BALANCE || 0);
+    let transactions = [];
+    snapshot.forEach(doc => {
+      transactions.push({ id: doc.id, ...doc.data() });
+    });
 
-                // Parse date string to Date object
-                let dateObj = null;
-                if (txData.DATE) {
-                    // Firestore timestamp or ISO string
-                    if (typeof txData.DATE === "object" && txData.DATE.toDate) {
-                        dateObj = txData.DATE.toDate();
-                    } else {
-                        dateObj = new Date(txData.DATE);
-                    }
-                } else {
-                    dateObj = new Date(); // fallback to current date
-                }
+    console.log("Transactions loaded:", transactions.length);
 
-                allTransactions.push({
-    id: doc.id,
-    ...txData,
-    INCOME: income,
-    EXPENSE: expense,
-    BALANCE: balance,
-    dateObj: dateObj,
-    // Use ACCOUNT_HEADER if available, otherwise use BANK_NAME, otherwise default
-    ACCOUNT_HEADER: txData.ACCOUNT_HEADER || txData.BANK_NAME || "Uncategorized",
-    DESCRIPTION: txData.DESCRIPTION || "Transaction"
-});
 
-            });
-            
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            Swal.fire("Error", "Failed to load transactions for charts", "error");
-        } finally {
-            loadingModal.style.display = "none";
-        }
-    }
+               // ✅ Call chart builders after data is ready
+    generateAllCharts(transactions);
+    updateSummary(transactions);
+
+  } catch (error) {
+    console.error("Error loading transactions:", error);
+  }
+}
 
     // Filter transactions based on chart controls
     function getFilteredTransactions() {
@@ -1129,6 +1092,18 @@
         updateSummaryCards();
     });
 
+
+        let activeCharts = [];
+
+function destroyCharts() {
+  activeCharts.forEach(ch => ch.destroy());
+  activeCharts = [];
+}
+
+        function generateAllCharts(transactions) {
+  destroyCharts();
+  activeCharts.push(buildIncomeVsExpensesChart(transactions));
+  activeCharts.push(buildExpenseCategoriesChart(transactions));
 
 
     // 1. Income vs Expenses Trend Chart
