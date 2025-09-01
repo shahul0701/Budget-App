@@ -1127,9 +1127,11 @@ function parseCSV(csvText) {
     const transactions = [];
     const errors = [];
     
-    // Define header mappings for flexibility - EXPANDED WITH MORE VARIATIONS
+    console.log('CSV Headers found:', headers); // DEBUG
+    
+    // Define header mappings for flexibility
     const headerMappings = {
-        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN', 'SR NO', 'SR.NO', 'SERIAL', 'SERIAL NO'],
+        'SINO': ['SINO', 'SI NO', 'NO', 'NUMBER', 'ID', 'SN', 'SR NO', 'SR.NO', 'SERIAL', 'SERIAL NO', 'VOUCHER NO'],
         'DATE': ['DATE', 'TRANSACTION DATE', 'TXN DATE', 'TXN_DATE', 'TRANSACTION_DATE', 'DT', 'TRAN_DATE'],
         'TIME': ['TIME', 'TRANSACTION TIME', 'TXN TIME', 'TXN_TIME', 'TRANSACTION_TIME', 'TRAN_TIME', 'TM'],
         'ACCOUNT HEADER': ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'ACCOUNT HEAD', 
@@ -1151,7 +1153,7 @@ function parseCSV(csvText) {
                 return standardName;
             }
         }
-        console.log('Unknown header:', header);
+        console.log('Unknown header (will use original):', header);
         return header; // Return original if no match found
     });
     
@@ -1185,13 +1187,12 @@ function parseCSV(csvText) {
             transaction[standardHeader] = values[j].trim();
         }
         
-        // DEBUG: Check what values we have for potential account header columns
-        console.log('Row data:', values);
+        console.log('Row data:', values); // DEBUG
         
         // Try to find account header from various sources
         let accountHeader = '';
         
-        // 1. First try explicit account header columns
+        // 1. First try explicit account header columns (using original header names too)
         const accountHeaderKeys = ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'TYPE'];
         for (const key of accountHeaderKeys) {
             if (transaction[key] && transaction[key].trim() !== '') {
@@ -1200,17 +1201,28 @@ function parseCSV(csvText) {
             }
         }
         
-        // 2. If still empty, try to auto-dectect from description
+        // 2. If still empty, check if we have the column but it's empty
+        const hasAccountHeaderColumn = normalizedHeaders.includes('ACCOUNT HEADER') || 
+                                     headers.some(h => h.toUpperCase().includes('ACCOUNT') || 
+                                                     h.toUpperCase().includes('CATEGORY') ||
+                                                     h.toUpperCase().includes('HEADER'));
+        
+        if (!accountHeader && hasAccountHeaderColumn) {
+            // Column exists but is empty - use mode-based default
+            accountHeader = transaction.MODE === 'CASH' ? 'Cash Expense' : 'Bank Expense';
+        }
+        
+        // 3. If still empty, try to auto-detect from description
         if (!accountHeader && hasDescription && transaction['DESCRIPTION']) {
             accountHeader = detectAccountHeaderFromDescription(transaction['DESCRIPTION']);
         }
         
-        // 3. If still empty, try to detect from mode (CASH/BANK might indicate type)
+        // 4. If still empty, use mode-based default
         if (!accountHeader && transaction['MODE']) {
             accountHeader = transaction['MODE'] === 'CASH' ? 'Cash Expense' : 'Bank Expense';
         }
         
-        // 4. Final fallback
+        // 5. Final fallback
         if (!accountHeader) {
             accountHeader = 'Uncategorized';
         }
