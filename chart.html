@@ -870,8 +870,7 @@
     async function loadChartOfAccounts() {
         try {
             const q = query(
-                collection(db, "chartOfAccounts"),
-                where("userId", "==", currentUser.uid)
+                collection(db, "users", currentUser.uid, "chartOfAccounts")
             );
             const snapshot = await getDocs(q);
             
@@ -889,6 +888,7 @@
             });
         } catch (error) {
             console.error("Error loading chart of accounts:", error);
+            Swal.fire("Error", "Failed to load account data", "error");
         }
     }
 
@@ -900,27 +900,55 @@
             try {
                 q = query(
                     collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc")
+                    orderBy("date", "desc")
                 );
             } catch (error) {
-                // Fallback if index doesn't exist
-                q = query(collection(db, "users", currentUser.uid, "transactions"));
+                // Fallback if index doesn't exist or date field is different
+                console.log("Trying alternative date field...");
+                try {
+                    q = query(
+                        collection(db, "users", currentUser.uid, "transactions"),
+                        orderBy("DATE", "desc")
+                    );
+                } catch (err) {
+                    // Final fallback - no ordering
+                    q = query(collection(db, "users", currentUser.uid, "transactions"));
+                }
             }
             
             const snapshot = await getDocs(q);
-            allTransactions = snapshot.docs.map(doc => ({ 
-                id: doc.id, 
-                ...doc.data() 
-            }));
+            allTransactions = [];
             
-            // Convert string values to numbers and dates to Date objects
-            allTransactions = allTransactions.map(tx => ({
-                ...tx,
-                INCOME: parseFloat(tx.INCOME) || 0,
-                EXPENSE: parseFloat(tx.EXPENSE) || 0,
-                BALANCE: parseFloat(tx.BALANCE) || 0,
-                dateObj: new Date(tx.DATE)
-            }));
+            snapshot.forEach(doc => {
+                const txData = doc.data();
+                // Handle different field naming conventions
+                const income = parseFloat(txData.income || txData.INCOME || 0);
+                const expense = parseFloat(txData.expense || txData.EXPENSE || 0);
+                const balance = parseFloat(txData.balance || txData.BALANCE || 0);
+                
+                // Handle date field (could be date, DATE, timestamp, etc.)
+                let dateObj;
+                if (txData.date) {
+                    dateObj = txData.date.toDate ? txData.date.toDate() : new Date(txData.date);
+                } else if (txData.DATE) {
+                    dateObj = txData.DATE.toDate ? txData.DATE.toDate() : new Date(txData.DATE);
+                } else if (txData.timestamp) {
+                    dateObj = txData.timestamp.toDate();
+                } else {
+                    dateObj = new Date();
+                }
+                
+                allTransactions.push({
+                    id: doc.id,
+                    ...txData,
+                    INCOME: income,
+                    EXPENSE: expense,
+                    BALANCE: balance,
+                    dateObj: dateObj,
+                    ACCOUNT_HEADER: txData.account || txData.ACCOUNT_HEADER || "Uncategorized",
+                    DESCRIPTION: txData.description || txData.DESCRIPTION || "Transaction"
+                });
+            });
             
         } catch (err) {
             console.error("Error loading transactions:", err);
@@ -1012,6 +1040,7 @@
         }
         
         // TODO: Calculate changes compared to previous period
+        // This would require loading previous period data
         incomeChangeElem.textContent = "+5.2% vs previous period";
         expensesChangeElem.textContent = "-2.1% vs previous period";
         cashFlowChangeElem.textContent = "+12.5% vs previous period";
@@ -1022,25 +1051,40 @@
     async function generateAllCharts() {
         const filteredTransactions = getFilteredTransactions();
         
-        // Destroy existing charts if they exist
-        destroyCharts();
+        // Show loading modal
+        loadingModal.style.display = "flex";
         
-        // Generate new charts
-        createIncomeExpenseChart(filteredTransactions);
-        createExpenseCategoryChart(filteredTransactions);
-        createIncomeSourceChart(filteredTransactions);
-        createCashFlowChart(filteredTransactions);
-        createAccountBalanceChart(filteredTransactions);
-        createMonthComparisonChart(filteredTransactions);
-        createTopExpensesChart(filteredTransactions);
-        createSavingsRateChart(filteredTransactions);
-        createYearlySummaryChart(filteredTransactions);
-        createExpenseBreakdownChart(filteredTransactions);
-        createIncomeTrendChart(filteredTransactions);
-        createIncomeExpenseRatioChart(filteredTransactions);
-        createDailySpendingChart(filteredTransactions);
-        createFinancialHealthChart(filteredTransactions);
-        createProjectionChart(filteredTransactions);
+        // Use setTimeout to allow the UI to update before heavy chart rendering
+        setTimeout(() => {
+            try {
+                // Destroy existing charts if they exist
+                destroyCharts();
+                
+                // Generate new charts
+                createIncomeExpenseChart(filteredTransactions);
+                createExpenseCategoryChart(filteredTransactions);
+                createIncomeSourceChart(filteredTransactions);
+                createCashFlowChart(filteredTransactions);
+                createAccountBalanceChart(filteredTransactions);
+                createMonthComparisonChart(filteredTransactions);
+                createTopExpensesChart(filteredTransactions);
+                createSavingsRateChart(filteredTransactions);
+                createYearlySummaryChart(filteredTransactions);
+                createExpenseBreakdownChart(filteredTransactions);
+                createIncomeTrendChart(filteredTransactions);
+                createIncomeExpenseRatioChart(filteredTransactions);
+                createDailySpendingChart(filteredTransactions);
+                createFinancialHealthChart(filteredTransactions);
+                createProjectionChart(filteredTransactions);
+                
+                // Hide loading modal
+                loadingModal.style.display = "none";
+            } catch (error) {
+                console.error("Error generating charts:", error);
+                loadingModal.style.display = "none";
+                Swal.fire("Error", "Failed to generate charts", "error");
+            }
+        }, 100);
     }
 
     // Destroy all chart instances
@@ -1053,10 +1097,15 @@
         ];
         
         charts.forEach(chart => {
-            if (chart) chart.destroy();
+            if (chart) {
+                try {
+                    chart.destroy();
+                } catch (e) {
+                    console.log("Error destroying chart:", e);
+                }
+            }
         });
     }
-
     // 1. Income vs Expenses Trend Chart
     function createIncomeExpenseChart(transactions) {
         const ctx = document.getElementById('incomeExpenseChart').getContext('2d');
