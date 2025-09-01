@@ -486,17 +486,17 @@
       document.getElementById('dashboard').style.display = 'block';
     }
 
-   function loadUserData(userId) {
+  function loadUserData(userId) {
   // Load user profile
   db.collection('users').doc(userId).get().then(doc => {
     if (doc.exists) {
-      userData = doc.data();
+      let userData = doc.data();
       document.getElementById('username').textContent = userData.name;
       document.getElementById('userInitials').textContent = getInitials(userData.name);
     }
   });
 
-  // Load transactions + CoA and link them
+  // Load both transactions and CoA
   Promise.all([
     db.collection('users').doc(userId).collection('transactions').get(),
     db.collection('users').doc(userId).collection('chartOfAccounts').get()
@@ -504,36 +504,36 @@
     let transactions = [];
     let accounts = {};
 
-    // Build accounts dictionary by account name
+    // Build accounts dictionary keyed by "name"
     accSnap.forEach(a => {
       let acc = a.data();
-      accounts[acc.name] = acc; // use "name" as key
+      accounts[acc.name] = acc;
     });
 
-    // Process transactions
+    // Match transactions to accounts
     transSnap.forEach(tr => {
       let t = { id: tr.id, ...tr.data() };
       let acc = accounts[t.ACCOUNT_HEADER]; // match ACCOUNT_HEADER → CoA.name
       if (acc) {
         console.log(`${t.INCOME - t.EXPENSE} → ${acc.name} [${acc.type}]`);
       } else {
-        console.warn(`No matching CoA for ${t.ACCOUNT_HEADER}`);
+        console.warn(`No CoA match for ${t.ACCOUNT_HEADER}`);
       }
       transactions.push(t);
     });
 
-    // Now you can feed transactions into your charts
+    // Update charts and stats
     updateStats(transactions);
     renderAllCharts(transactions, accounts);
   });
 
-  // Populate account dropdown
+  // Populate dropdown
   db.collection('users').doc(userId).collection('chartOfAccounts').get().then(snapshot => {
     let select = document.getElementById('accountDropdown');
     snapshot.forEach(doc => {
       let acc = doc.data();
       let option = document.createElement('option');
-      option.value = acc.name; // match transaction ACCOUNT_HEADER
+      option.value = acc.name; // match ACCOUNT_HEADER in transactions
       option.textContent = `${acc.name} (${acc.type})`;
       select.appendChild(option);
     });
