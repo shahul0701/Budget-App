@@ -748,16 +748,28 @@
     let chartOfAccounts = [];
     let resizeTimeout;
 
-// Auth check: if no user in localStorage → redirect
-document.addEventListener("DOMContentLoaded", () => {
-  const username = localStorage.getItem("username");
-  if (!username) {
-    window.location.href = "index.html"; // back to login
-  } else {
-    console.log("Logged in as:", username);
-    loadTransactions(username);
-  }
-});
+ onAuthStateChanged(auth, async user => {
+      if (user) {
+        currentUser = user;
+        const name = user.displayName || user.email || "User";
+        usernameElem.textContent = name;
+        initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
+        
+        // Load COA data first, then transactions
+        await loadCOAData();
+        await loadTransactions();
+      } else {
+        // not logged in
+        Swal.fire({ icon: 'info', title: 'Please login', text: 'You will be redirected to login.' }).then(()=> {
+          window.location.href = "index.html";
+        });
+      }
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "index.html";
+    });
 
 
     // Theme toggle functionality
@@ -851,94 +863,56 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener('resize', handleChartResize);
 
     // Load chart of accounts
-    async function loadChartOfAccounts() {
-        try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "chartOfAccounts")
-            );
-            const snapshot = await getDocs(q);
-            
-            chartOfAccounts = [];
-            chartAccountFilter.innerHTML = '<option value="all">All Accounts</option>';
-            
-        snapshot.forEach(doc => {
-    const account = { id: doc.id, ...doc.data() };
-    chartOfAccounts.push(account);
+   async function loadCOAData() {
+  try {
+    if (!currentUser) return;
     
-    // Use the correct field name for account display
-    const accountName = account.name || account.ACCOUNT_HEADER || account.BANK_NAME;
+    // Get account headers from chartOfAccounts collection
+    const accountsQuery = query(
+      collection(db, "users", currentUser.uid, "chartOfAccounts"), 
+      where("userId", "==", currentUser.uid)
+    );
+    const accountsSnapshot = await getDocs(accountsQuery);
     
-    const option = document.createElement("option");
-    option.value = accountName;
-    option.textContent = accountName;
-    chartAccountFilter.appendChild(option);
-});
-        } catch (error) {
-            console.error("Error loading chart of accounts:", error);
-            Swal.fire("Error", "Failed to load account data", "error");
-        }
-    }
+    coaAccounts = [];
+    coaBanks = [];
+    
+    accountsSnapshot.forEach(doc => {
+      const data = doc.data();
+      coaAccounts.push(data.name);
 
   // Load all transactions for logged-in user
-async function loadTransactions(username) {
-  try {
-    const txRef = collection(db, "users", username, "transactions");
-    const snapshot = await getDocs(txRef);
-
-    let transactions = [];
-    snapshot.forEach(doc => {
-      transactions.push({ id: doc.id, ...doc.data() });
-    });
-
-    console.log("Transactions loaded:", transactions.length);
-
-
-               // ✅ Call chart builders after data is ready
-    generateAllCharts(transactions);
-    updateSummary(transactions);
-
-  } catch (error) {
-    console.error("Error loading transactions:", error);
-  }
-}
+ async function loadTransactions(){
+      try {
+        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
+        const snap = await getDocs(q);
+        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        allTransactions = txs;
+        filteredTransactions = allTransactions.slice();
+        currentPage = 1;
+        buildTable();
+        updateStats();
+        updateBankBalances();
+        
+        // Initialize voucher numbering
+        await initVoucherNumbering();
+      } catch (err) {
+        console.error("loadTransactions", err);
+        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+      }
+    }
 
     // Filter transactions based on chart controls
-    function getFilteredTransactions() {
-        let filtered = [...allTransactions];
-        
-        // Filter by date range
-        const range = chartDateRange.value;
-        const now = new Date();
-        
-        if (range !== "all") {
-            let startDate;
-            
-            switch(range) {
-                case "month":
-                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-                    break;
-                case "quarter":
-                    const quarter = Math.floor(now.getMonth() / 3);
-                    startDate = new Date(now.getFullYear(), quarter * 3, 1);
-                    break;
-                case "year":
-                    startDate = new Date(now.getFullYear(), 0, 1);
-                    break;
-                case "custom":
-                    if (chartStartDate.value && chartEndDate.value) {
-                        startDate = new Date(chartStartDate.value);
-                        const endDate = new Date(chartEndDate.value);
-                        filtered = filtered.filter(tx => 
-                            tx.dateObj >= startDate && tx.dateObj <= endDate
-                        );
-                    }
-                    break;
-            }
-            
-            if (range !== "custom" && startDate) {
-                filtered = filtered.filter(tx => tx.dateObj >= startDate);
-            }
-        }
+   function applyFilters(){
+      filteredTransactions = allTransactions.slice();
+      const now = new Date();
+
+      function inRange(dateStr, start, end){
+        if (!dateStr) return false;
+        const d = new Date(dateStr);
+        return d >= start && d <= end;
+      }
 
         // Filter by account
         const accountFilter = chartAccountFilter.value;
