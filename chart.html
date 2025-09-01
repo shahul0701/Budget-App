@@ -1063,6 +1063,7 @@
         });
         activeCharts = [];
     }
+
     // Export dashboard function
     function exportDashboard(format) {
         loadingModal.style.display = "flex";
@@ -1086,68 +1087,54 @@
                         while (heightLeft >= 0) {
                             position = heightLeft - imgHeight;
                             doc.addPage();
+                          doc.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                        heightLeft -= pageHeight;
+                        
+                        while (heightLeft >= 0) {
+                            position = heightLeft - imgHeight;
+                            doc.addPage();
                             doc.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
                             heightLeft -= pageHeight;
                         }
                         
-                        doc.save('financial-dashboard.pdf');
+                        doc.save('financial-dashboard-report.pdf');
                         loadingModal.style.display = "none";
                     });
                 } else if (format === 'image') {
                     html2canvas(document.querySelector(".container")).then(canvas => {
                         const link = document.createElement('a');
-                        link.download = 'financial-dashboard.png';
+                        link.download = 'financial-dashboard-screenshot.png';
                         link.href = canvas.toDataURL('image/png');
                         link.click();
                         loadingModal.style.display = "none";
                     });
                 }
             } catch (error) {
-                console.error("Error exporting:", error);
+                console.error("Error exporting dashboard:", error);
                 loadingModal.style.display = "none";
                 Swal.fire("Error", "Failed to export dashboard", "error");
             }
         }, 500);
     }
 
-    // Apply chart filters
-    applyChartFiltersBtn.addEventListener("click", () => {
-        generateAllCharts();
-        updateSummaryCards();
-    });
-
-
-        let activeCharts = [];
-
-function destroyCharts() {
-  activeCharts.forEach(ch => ch.destroy());
-  activeCharts = [];
-}
-
-        function generateAllCharts(transactions) {
-  destroyCharts();
-  activeCharts.push(buildIncomeVsExpensesChart(transactions));
-  activeCharts.push(buildExpenseCategoriesChart(transactions));
-
-
-    // 1. Income vs Expenses Trend Chart
+    // Chart creation functions
     function createIncomeExpenseChart(transactions) {
         const ctx = document.getElementById('incomeExpenseChart').getContext('2d');
         
-        // Group by month
+        // Group transactions by month
         const monthlyData = {};
         transactions.forEach(tx => {
             const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
             if (!monthlyData[monthYear]) {
-                monthlyData[monthYear] = { income: 0, expense: 0 };
+                monthlyData[monthYear] = { income: 0, expenses: 0 };
             }
-            monthlyData[monthYear].income += tx.INCOME;
-            monthlyData[monthYear].expense += tx.EXPENSE;
+            monthlyData[monthYear].income += tx.INCOME || 0;
+            monthlyData[monthYear].expenses += tx.EXPENSE || 0;
         });
         
         const labels = Object.keys(monthlyData);
         const incomeData = labels.map(label => monthlyData[label].income);
-        const expenseData = labels.map(label => monthlyData[label].expense);
+        const expensesData = labels.map(label => monthlyData[label].expenses);
         
         incomeExpenseChart = new Chart(ctx, {
             type: 'line',
@@ -1157,18 +1144,18 @@ function destroyCharts() {
                     {
                         label: 'Income',
                         data: incomeData,
-                        borderColor: 'rgb(54, 162, 235)',
-                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                        fill: true,
-                        tension: 0.3
+                        borderColor: 'rgba(76, 201, 240, 1)',
+                        backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                        tension: 0.3,
+                        fill: true
                     },
                     {
                         label: 'Expenses',
-                        data: expenseData,
-                        borderColor: 'rgb(255, 99, 132)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                        fill: true,
-                        tension: 0.3
+                        data: expensesData,
+                        borderColor: 'rgba(230, 57, 70, 1)',
+                        backgroundColor: 'rgba(230, 57, 70, 0.1)',
+                        tension: 0.3,
+                        fill: true
                     }
                 ]
             },
@@ -1177,11 +1164,7 @@ function destroyCharts() {
                 maintainAspectRatio: false,
                 plugins: {
                     title: {
-                        display: true,
-                        text: 'Income vs Expenses Over Time',
-                        font: {
-                            size: 16
-                        }
+                        display: false
                     },
                     legend: {
                         position: 'top',
@@ -1199,32 +1182,24 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(incomeExpenseChart);
     }
 
-    // 2. Expense Categories Chart
     function createExpenseCategoryChart(transactions) {
-    const ctx = document.getElementById('expenseCategoryChart').getContext('2d');
+        const ctx = document.getElementById('expenseCategoryChart').getContext('2d');
         
-        // Group expenses by category (using ACCOUNT_HEADER as category)
-      const expensesByCategory = {};
-    transactions.forEach(tx => {
-        if (tx.EXPENSE > 0) {
-            // Use the correct field name
-            const category = tx.ACCOUNT_HEADER || 'Uncategorized';
-            if (!expensesByCategory[category]) {
-                expensesByCategory[category] = 0;
+        // Group expenses by category
+        const categoryData = {};
+        transactions.forEach(tx => {
+            if (tx.EXPENSE && tx.EXPENSE > 0) {
+                const category = tx.CATEGORY || 'Uncategorized';
+                categoryData[category] = (categoryData[category] || 0) + tx.EXPENSE;
             }
-            expensesByCategory[category] += tx.EXPENSE;
-        }
-    });
+        });
         
-        // Sort by amount and take top 8 categories
-        const sortedCategories = Object.entries(expensesByCategory)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8);
-        
-        const labels = sortedCategories.map(item => item[0]);
-        const data = sortedCategories.map(item => item[1]);
+        const labels = Object.keys(categoryData);
+        const data = Object.values(categoryData);
         
         expenseCategoryChart = new Chart(ctx, {
             type: 'doughnut',
@@ -1233,14 +1208,13 @@ function destroyCharts() {
                 datasets: [{
                     data: data,
                     backgroundColor: [
-                        'rgba(255, 99, 132, 0.8)',
-                        'rgba(54, 162, 235, 0.8)',
-                        'rgba(255, 205, 86, 0.8)',
-                        'rgba(75, 192, 192, 0.8)',
-                        'rgba(153, 102, 255, 0.8)',
-                        'rgba(255, 159, 64, 0.8)',
-                        'rgba(201, 203, 207, 0.8)',
-                        'rgba(0, 162, 235, 0.8)'
+                        'rgba(230, 57, 70, 0.8)',
+                        'rgba(247, 37, 133, 0.8)',
+                        'rgba(107, 91, 149, 0.8)',
+                        'rgba(72, 149, 239, 0.8)',
+                        'rgba(76, 201, 240, 0.8)',
+                        'rgba(67, 97, 238, 0.8)',
+                        'rgba(63, 55, 201, 0.8)'
                     ],
                     borderWidth: 1
                 }]
@@ -1255,89 +1229,35 @@ function destroyCharts() {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                const label = context.label || '';
-                                const value = context.raw || 0;
+                                const value = context.raw;
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = ((value / total) * 100).toFixed(1);
-                                return `${label}: $${value.toFixed(2)} (${percentage}%)`;
+                                const percentage = Math.round((value / total) * 100);
+                                return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
                             }
                         }
                     }
                 }
             }
         });
+        
+        activeCharts.push(expenseCategoryChart);
     }
 
-    // 3. Income Sources Chart
-   function createIncomeSourceChart(transactions) {
-    const ctx = document.getElementById('incomeSourceChart').getContext('2d');
-    
-    // Group income by source (using ACCOUNT_HEADER as source)
-    const incomeBySource = {};
-    transactions.forEach(tx => {
-        if (tx.INCOME > 0) {
-            // Use the correct field name
-            const source = tx.ACCOUNT_HEADER || 'Other';
-            if (!incomeBySource[source]) {
-                incomeBySource[source] = 0;
-            }
-            incomeBySource[source] += tx.INCOME;
-        }
-    });
-        
-        const labels = Object.keys(incomeBySource);
-        const data = Object.values(incomeBySource);
-        
-        incomeSourceChart = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: data,
-                    backgroundColor: [
-                        'rgba(54, 162, 235, 0.8)',
-                        'rgba(75, 192, 192, 0.8)',
-                        'rgba(255, 205, 86, 0.8)',
-                        'rgba(153, 102, 255, 0.8)',
-                        'rgba(255, 99, 132, 0.8)',
-                        'rgba(255, 159, 64, 0.8)',
-                        'rgba(201, 203, 207, 0.8)'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                    }
-                }
-            }
-        });
-    }
-
-    // 4. Monthly Cash Flow Chart
     function createCashFlowChart(transactions) {
         const ctx = document.getElementById('cashFlowChart').getContext('2d');
         
-        // Group by month and calculate cash flow (income - expenses)
-        const monthlyCashFlow = {};
+        // Group transactions by month and calculate cash flow
+        const monthlyData = {};
         transactions.forEach(tx => {
             const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
-            if (!monthlyCashFlow[monthYear]) {
-                monthlyCashFlow[monthYear] = 0;
+            if (!monthlyData[monthYear]) {
+                monthlyData[monthYear] = 0;
             }
-            monthlyCashFlow[monthYear] += (tx.INCOME - tx.EXPENSE);
+            monthlyData[monthYear] += (tx.INCOME || 0) - (tx.EXPENSE || 0);
         });
         
-        const labels = Object.keys(monthlyCashFlow);
-        const data = Object.values(monthlyCashFlow);
-        
-        // Determine colors (green for positive, red for negative)
-        const backgroundColors = data.map(value => 
-            value >= 0 ? 'rgba(75, 192, 192, 0.8)' : 'rgba(255, 99, 132, 0.8)'
-        );
+        const labels = Object.keys(monthlyData);
+        const data = Object.values(monthlyData);
         
         cashFlowChart = new Chart(ctx, {
             type: 'bar',
@@ -1346,7 +1266,237 @@ function destroyCharts() {
                 datasets: [{
                     label: 'Cash Flow',
                     data: data,
-                    backgroundColor: backgroundColors
+                    backgroundColor: function(context) {
+                        const value = context.dataset.data[context.dataIndex];
+                        return value >= 0 ? 'rgba(76, 201, 240, 0.8)' : 'rgba(230, 57, 70, 0.8)';
+                    },
+                    borderColor: function(context) {
+                        const value = context.dataset.data[context.dataIndex];
+                        return value >= 0 ? 'rgba(76, 201, 240, 1)' : 'rgba(230, 57, 70, 1)';
+                    },
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        activeCharts.push(cashFlowChart);
+    }
+
+    function createAccountBalanceChart(transactions) {
+        const ctx = document.getElementById('accountBalanceChart').getContext('2d');
+        
+        // This is a simplified version - in a real app, you'd track account balances over time
+        const accountBalances = {};
+        transactions.forEach(tx => {
+            const account = tx.ACCOUNT_HEADER || 'Unknown Account';
+            if (!accountBalances[account]) {
+                accountBalances[account] = 0;
+            }
+            accountBalances[account] += (tx.INCOME || 0) - (tx.EXPENSE || 0);
+        });
+        
+        const labels = Object.keys(accountBalances);
+        const data = Object.values(accountBalances);
+        
+        accountBalanceChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Account Balance',
+                    data: data,
+                    backgroundColor: 'rgba(72, 149, 239, 0.8)',
+                    borderColor: 'rgba(72, 149, 239, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        activeCharts.push(accountBalanceChart);
+    }
+
+    function createExpenseBreakdownChart(transactions) {
+        const ctx = document.getElementById('expenseBreakdownChart').getContext('2d');
+        
+        // Similar to expense category chart but with different visualization
+        const categoryData = {};
+        transactions.forEach(tx => {
+            if (tx.EXPENSE && tx.EXPENSE > 0) {
+                const category = tx.CATEGORY || 'Uncategorized';
+                categoryData[category] = (categoryData[category] || 0) + tx.EXPENSE;
+            }
+        });
+        
+        const labels = Object.keys(categoryData);
+        const data = Object.values(categoryData);
+        
+        expenseBreakdownChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: [
+                        'rgba(230, 57, 70, 0.8)',
+                        'rgba(247, 37, 133, 0.8)',
+                        'rgba(107, 91, 149, 0.8)',
+                        'rgba(72, 149, 239, 0.8)',
+                        'rgba(76, 201, 240, 0.8)',
+                        'rgba(67, 97, 238, 0.8)',
+                        'rgba(63, 55, 201, 0.8)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100);
+                                return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        activeCharts.push(expenseBreakdownChart);
+    }
+
+    function createTopExpensesChart(transactions) {
+        const ctx = document.getElementById('topExpensesChart').getContext('2d');
+        
+        // Get top 5 expenses by amount
+        const expenses = transactions
+            .filter(tx => tx.EXPENSE && tx.EXPENSE > 0)
+            .sort((a, b) => b.EXPENSE - a.EXPENSE)
+            .slice(0, 5);
+        
+        const labels = expenses.map(tx => tx.DESCRIPTION || 'Unknown');
+        const data = expenses.map(tx => tx.EXPENSE);
+        
+        topExpensesChart = new Chart(ctx, {
+            type: 'horizontalBar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Amount',
+                    data: data,
+                    backgroundColor: 'rgba(230, 57, 70, 0.8)',
+                    borderColor: 'rgba(230, 57, 70, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        activeCharts.push(topExpensesChart);
+    }
+
+    function createMonthComparisonChart(transactions) {
+        const ctx = document.getElementById('monthComparisonChart').getContext('2d');
+        
+        // Compare current month with previous month
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+        
+        const currentMonthExpenses = transactions
+            .filter(tx => {
+                const txDate = tx.dateObj;
+                return txDate.getMonth() === currentMonth && 
+                       txDate.getFullYear() === currentYear &&
+                       tx.EXPENSE > 0;
+            })
+            .reduce((sum, tx) => sum + tx.EXPENSE, 0);
+            
+        const prevMonthExpenses = transactions
+            .filter(tx => {
+                const txDate = tx.dateObj;
+                return txDate.getMonth() === prevMonth && 
+                       txDate.getFullYear() === prevYear &&
+                       tx.EXPENSE > 0;
+            })
+            .reduce((sum, tx) => sum + tx.EXPENSE, 0);
+        
+        monthComparisonChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: [`${now.toLocaleString('default', { month: 'long' })} ${currentYear}`, 
+                        `${new Date(prevYear, prevMonth).toLocaleString('default', { month: 'long' })} ${prevYear}`],
+                datasets: [{
+                    label: 'Expenses',
+                    data: [currentMonthExpenses, prevMonthExpenses],
+                    backgroundColor: ['rgba(230, 57, 70, 0.8)', 'rgba(72, 149, 239, 0.8)'],
+                    borderColor: ['rgba(230, 57, 70, 1)', 'rgba(72, 149, 239, 1)'],
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -1369,102 +1519,46 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(monthComparisonChart);
     }
 
-    // 5. Account Balances Over Time Chart
-    function createAccountBalanceChart(transactions) {
-        const ctx = document.getElementById('accountBalanceChart').getContext('2d');
+    function createDailySpendingChart(transactions) {
+        const ctx = document.getElementById('dailySpendingChart').getContext('2d');
         
-        // Sort transactions by date
-        const sortedTransactions = [...transactions].sort((a, b) => 
-            a.dateObj - b.dateObj
-        );
+        // Group expenses by day of week
+        const dayOfWeekExpenses = [0, 0, 0, 0, 0, 0, 0]; // Sunday to Saturday
         
-        // Get dates and balances
-        const labels = sortedTransactions.map(tx => 
-            `${tx.dateObj.getDate()}/${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`
-        );
-        const data = sortedTransactions.map(tx => tx.BALANCE);
+        transactions.forEach(tx => {
+            if (tx.EXPENSE && tx.EXPENSE > 0) {
+                const dayOfWeek = tx.dateObj.getDay(); // 0 = Sunday, 6 = Saturday
+                dayOfWeekExpenses[dayOfWeek] += tx.EXPENSE;
+            }
+        });
         
-        accountBalanceChart = new Chart(ctx, {
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        
+        dailySpendingChart = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: labels,
+                labels: days,
                 datasets: [{
-                    label: 'Account Balance',
-                    data: data,
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    fill: true,
-                    tension: 0.1
+                    label: 'Spending',
+                    data: dayOfWeekExpenses,
+                    borderColor: 'rgba(230, 57, 70, 1)',
+                    backgroundColor: 'rgba(230, 57, 70, 0.1)',
+                    tension: 0.3,
+                    fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: false,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value;
-                            }
-                        }
+                plugins: {
+                    legend: {
+                        display: false
                     }
-                }
-            }
-        });
-    }
-
-    // 6. Month Comparison Chart
-    function createMonthComparisonChart(transactions) {
-        const ctx = document.getElementById('monthComparisonChart').getContext('2d');
-        
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-        
-        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-        
-        // Filter transactions for current and previous month
-        const currentMonthTransactions = transactions.filter(tx => 
-            tx.dateObj.getMonth() === currentMonth && 
-            tx.dateObj.getFullYear() === currentYear
-        );
-        
-        const prevMonthTransactions = transactions.filter(tx => 
-            tx.dateObj.getMonth() === prevMonth && 
-            tx.dateObj.getFullYear() === prevYear
-        );
-        
-        // Calculate totals
-        const currentMonthExpense = currentMonthTransactions.reduce((sum, tx) => sum + tx.EXPENSE, 0);
-        const prevMonthExpense = prevMonthTransactions.reduce((sum, tx) => sum + tx.EXPENSE, 0);
-        
-        const currentMonthIncome = currentMonthTransactions.reduce((sum, tx) => sum + tx.INCOME, 0);
-        const prevMonthIncome = prevMonthTransactions.reduce((sum, tx) => sum + tx.INCOME, 0);
-        
-        monthComparisonChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Income', 'Expenses'],
-                datasets: [
-                    {
-                        label: `${now.toLocaleString('default', { month: 'long' })} ${currentYear}`,
-                        data: [currentMonthIncome, currentMonthExpense],
-                        backgroundColor: 'rgba(54, 162, 235, 0.7)'
-                    },
-                    {
-                        label: `${new Date(prevYear, prevMonth).toLocaleString('default', { month: 'long' })} ${prevYear}`,
-                        data: [prevMonthIncome, prevMonthExpense],
-                        backgroundColor: 'rgba(255, 99, 132, 0.7)'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -1477,251 +1571,74 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(dailySpendingChart);
     }
 
-    // 7. Top 5 Expenses Chart
-    function createTopExpensesChart(transactions) {
-        const ctx = document.getElementById('topExpensesChart').getContext('2d');
+    function createIncomeSourceChart(transactions) {
+        const ctx = document.getElementById('incomeSourceChart').getContext('2d');
         
-        // Get all expense transactions
-        const expenseTransactions = transactions
-            .filter(tx => tx.EXPENSE > 0)
-            .sort((a, b) => b.EXPENSE - a.EXPENSE)
-            .slice(0, 5); // Top 5
-        
-        const labels = expenseTransactions.map(tx => 
-            tx.DESCRIPTION ? tx.DESCRIPTION.substring(0, 20) + (tx.DESCRIPTION.length > 20 ? '...' : '') : `Expense on ${tx.DATE}`
-        );
-        const data = expenseTransactions.map(tx => tx.EXPENSE);
-        const colors = [
-            'rgba(255, 99, 132, 0.8)',
-            'rgba(255, 159, 64, 0.8)',
-            'rgba(255, 205, 86, 0.8)',
-            'rgba(75, 192, 192, 0.8)',
-            'rgba(54, 162, 235, 0.8)'
-        ];
-        
-        topExpensesChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Amount',
-                    data: data,
-                    backgroundColor: colors
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // 8. Savings Rate Over Time Chart
-    function createSavingsRateChart(transactions) {
-        const ctx = document.getElementById('savingsRateChart').getContext('2d');
-        
-        // Group by month and calculate savings rate
-        const monthlySavings = {};
+        // Group income by source/description
+        const incomeSources = {};
         transactions.forEach(tx => {
-            const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
-            if (!monthlySavings[monthYear]) {
-                monthlySavings[monthYear] = { income: 0, expense: 0 };
+            if (tx.INCOME && tx.INCOME > 0) {
+                const source = tx.DESCRIPTION || 'Unknown Source';
+                incomeSources[source] = (incomeSources[source] || 0) + tx.INCOME;
             }
-            monthlySavings[monthYear].income += tx.INCOME;
-            monthlySavings[monthYear].expense += tx.EXPENSE;
         });
         
-        const labels = Object.keys(monthlySavings);
-        const data = labels.map(month => {
-            const monthData = monthlySavings[month];
-            if (monthData.income === 0) return 0;
-            return ((monthData.income - monthData.expense) / monthData.income) * 100;
-        });
+        const labels = Object.keys(incomeSources);
+        const data = Object.values(incomeSources);
         
-        savingsRateChart = new Chart(ctx, {
-            type: 'line',
+        incomeSourceChart = new Chart(ctx, {
+            type: 'doughnut',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Savings Rate (%)',
                     data: data,
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    fill: true,
-                    tension: 0.1
+                    backgroundColor: [
+                        'rgba(76, 201, 240, 0.8)',
+                        'rgba(72, 149, 239, 0.8)',
+                        'rgba(67, 97, 238, 0.8)',
+                        'rgba(63, 55, 201, 0.8)',
+                        'rgba(107, 91, 149, 0.8)'
+                    ],
+                    borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        ticks: {
-                            callback: function(value) {
-                                return value + '%';
+                plugins: {
+                    legend: {
+                        position: 'right',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100);
+                                return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
                             }
                         }
                     }
                 }
             }
         });
+        
+        activeCharts.push(incomeSourceChart);
     }
 
-    // 9. Yearly Summary Chart
-    function createYearlySummaryChart(transactions) {
-        const ctx = document.getElementById('yearlySummaryChart').getContext('2d');
-        
-        // Group by year
-        const yearlyData = {};
-        transactions.forEach(tx => {
-            const year = tx.dateObj.getFullYear();
-            if (!yearlyData[year]) {
-                yearlyData[year] = { income: 0, expense: 0, savings: 0 };
-            }
-            yearlyData[year].income += tx.INCOME;
-            yearlyData[year].expense += tx.EXPENSE;
-            yearlyData[year].savings += (tx.INCOME - tx.EXPENSE);
-        });
-        
-        const labels = Object.keys(yearlyData);
-        const incomeData = labels.map(year => yearlyData[year].income);
-        const expenseData = labels.map(year => yearlyData[year].expense);
-        const savingsData = labels.map(year => yearlyData[year].savings);
-        
-        yearlySummaryChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Income',
-                        data: incomeData,
-                        backgroundColor: 'rgba(54, 162, 235, 0.7)'
-                    },
-                    {
-                        label: 'Expenses',
-                        data: expenseData,
-                        backgroundColor: 'rgba(255, 99, 132, 0.7)'
-                    },
-                    {
-                        label: 'Savings',
-                        data: savingsData,
-                        backgroundColor: 'rgba(75, 192, 192, 0.7)'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        stacked: false,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // 10. Expense Breakdown Chart (Stacked Bar)
-    function createExpenseBreakdownChart(transactions) {
-    const ctx = document.getElementById('expenseBreakdownChart').getContext('2d');
-    
-    // Group by month and category
-    const monthlyExpenses = {};
-    const categories = new Set();
-    
-    transactions.forEach(tx => {
-        if (tx.EXPENSE > 0) {
-            const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
-            // Use the correct field name
-            const category = tx.ACCOUNT_HEADER || 'Other';
-            
-            if (!monthlyExpenses[monthYear]) {
-                monthlyExpenses[monthYear] = {};
-            }
-            
-            if (!monthlyExpenses[monthYear][category]) {
-                monthlyExpenses[monthYear][category] = 0;
-            }
-            
-            monthlyExpenses[monthYear][category] += tx.EXPENSE;
-            categories.add(category);
-        }
-    });
-        
-        const labels = Object.keys(monthlyExpenses);
-        const categoryArray = Array.from(categories);
-        
-        const datasets = categoryArray.map((category, index) => {
-            const color = `hsl(${index * 360 / categoryArray.length}, 70%, 60%)`;
-            return {
-                label: category,
-                data: labels.map(month => monthlyExpenses[month][category] || 0),
-                backgroundColor: color
-            };
-        });
-        
-        expenseBreakdownChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        stacked: true,
-                    },
-                    y: {
-                        stacked: true,
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // 11. Income Trend Chart
     function createIncomeTrendChart(transactions) {
         const ctx = document.getElementById('incomeTrendChart').getContext('2d');
         
-        // Group by month
+        // Group income by month
         const monthlyIncome = {};
         transactions.forEach(tx => {
-            if (tx.INCOME > 0) {
+            if (tx.INCOME && tx.INCOME > 0) {
                 const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
-                if (!monthlyIncome[monthYear]) {
-                    monthlyIncome[monthYear] = 0;
-                }
-                monthlyIncome[monthYear] += tx.INCOME;
+                monthlyIncome[monthYear] = (monthlyIncome[monthYear] || 0) + tx.INCOME;
             }
         });
         
@@ -1735,15 +1652,20 @@ function destroyCharts() {
                 datasets: [{
                     label: 'Income',
                     data: data,
-                    borderColor: 'rgb(54, 162, 235)',
-                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                    fill: true,
-                    tension: 0.3
+                    borderColor: 'rgba(76, 201, 240, 1)',
+                    backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                    tension: 0.3,
+                    fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -1756,49 +1678,115 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(incomeTrendChart);
     }
 
-    // 12. Income vs Expenses Ratio Chart
     function createIncomeExpenseRatioChart(transactions) {
         const ctx = document.getElementById('incomeExpenseRatioChart').getContext('2d');
         
-        // Group by month
-        const monthlyData = {};
+        // Calculate income to expense ratio by month
+        const monthlyRatios = {};
         transactions.forEach(tx => {
             const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
-            if (!monthlyData[monthYear]) {
-                monthlyData[monthYear] = { income: 0, expense: 0 };
+            if (!monthlyRatios[monthYear]) {
+                monthlyRatios[monthYear] = { income: 0, expenses: 0 };
             }
-            monthlyData[monthYear].income += tx.INCOME;
-            monthlyData[monthYear].expense += tx.EXPENSE;
+            monthlyRatios[monthYear].income += tx.INCOME || 0;
+            monthlyRatios[monthYear].expenses += tx.EXPENSE || 0;
         });
         
-        const labels = Object.keys(monthlyData);
-        const ratios = labels.map(month => {
-            const data = monthlyData[month];
-            return data.income > 0 ? (data.expense / data.income) * 100 : 0;
+        const labels = Object.keys(monthlyRatios);
+        const data = labels.map(label => {
+            const { income, expenses } = monthlyRatios[label];
+            return expenses > 0 ? (income / expenses).toFixed(2) : 0;
         });
         
         incomeExpenseRatioChart = new Chart(ctx, {
-            type: 'line',
+            type: 'bar',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Expense/Income Ratio (%)',
-                    data: ratios,
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                    fill: true,
-                    tension: 0.3
+                    label: 'Income/Expense Ratio',
+                    data: data,
+                    backgroundColor: function(context) {
+                        const value = context.dataset.data[context.dataIndex];
+                        return value >= 1 ? 'rgba(76, 201, 240, 0.8)' : 'rgba(230, 57, 70, 0.8)';
+                    },
+                    borderColor: function(context) {
+                        const value = context.dataset.data[context.dataIndex];
+                        return value >= 1 ? 'rgba(76, 201, 240, 1)' : 'rgba(230, 57, 70, 1)';
+                    },
+                    borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
-                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + 'x';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        activeCharts.push(incomeExpenseRatioChart);
+    }
+
+    function createSavingsRateChart(transactions) {
+        const ctx = document.getElementById('savingsRateChart').getContext('2d');
+        
+        // Calculate savings rate by month
+        const monthlySavings = {};
+        transactions.forEach(tx => {
+            const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
+            if (!monthlySavings[monthYear]) {
+                monthlySavings[monthYear] = { income: 0, expenses: 0 };
+            }
+            monthlySavings[monthYear].income += tx.INCOME || 0;
+            monthlySavings[monthYear].expenses += tx.EXPENSE || 0;
+        });
+        
+        const labels = Object.keys(monthlySavings);
+        const data = labels.map(label => {
+            const { income, expenses } = monthlySavings[label];
+            return income > 0 ? ((income - expenses) / income * 100).toFixed(1) : 0;
+        });
+        
+        savingsRateChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Savings Rate (%)',
+                    data: data,
+                    borderColor: 'rgba(76, 201, 240, 1)',
+                    backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
                         ticks: {
                             callback: function(value) {
                                 return value + '%';
@@ -1808,42 +1796,57 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(savingsRateChart);
     }
 
-    // 13. Daily Spending Chart
-    function createDailySpendingChart(transactions) {
-        const ctx = document.getElementById('dailySpendingChart').getContext('2d');
+    function createYearlySummaryChart(transactions) {
+        const ctx = document.getElementById('yearlySummaryChart').getContext('2d');
         
-        // Group by day of week
-        const dailySpending = {
-            'Sunday': 0, 'Monday': 0, 'Tuesday': 0, 'Wednesday': 0,
-            'Thursday': 0, 'Friday': 0, 'Saturday': 0
-        };
-        
+        // Group by year
+        const yearlyData = {};
         transactions.forEach(tx => {
-            if (tx.EXPENSE > 0) {
-                const dayOfWeek = tx.dateObj.getDay(); // 0 = Sunday, 1 = Monday, etc.
-                const dayName = Object.keys(dailySpending)[dayOfWeek];
-                dailySpending[dayName] += tx.EXPENSE;
+            const year = tx.dateObj.getFullYear();
+            if (!yearlyData[year]) {
+                yearlyData[year] = { income: 0, expenses: 0 };
             }
+            yearlyData[year].income += tx.INCOME || 0;
+            yearlyData[year].expenses += tx.EXPENSE || 0;
         });
         
-        const labels = Object.keys(dailySpending);
-        const data = Object.values(dailySpending);
+        const labels = Object.keys(yearlyData);
+        const incomeData = labels.map(year => yearlyData[year].income);
+        const expensesData = labels.map(year => yearlyData[year].expenses);
         
-        dailySpendingChart = new Chart(ctx, {
+        yearlySummaryChart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: labels,
-                datasets: [{
-                    label: 'Spending by Day',
-                    data: data,
-                    backgroundColor: 'rgba(255, 99, 132, 0.7)'
-                }]
+                datasets: [
+                    {
+                        label: 'Income',
+                        data: incomeData,
+                        backgroundColor: 'rgba(76, 201, 240, 0.8)',
+                        borderColor: 'rgba(76, 201, 240, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Expenses',
+                        data: expensesData,
+                        backgroundColor: 'rgba(230, 57, 70, 0.8)',
+                        borderColor: 'rgba(230, 57, 70, 1)',
+                        borderWidth: 1
+                    }
+                ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -1856,100 +1859,110 @@ function destroyCharts() {
                 }
             }
         });
+        
+        activeCharts.push(yearlySummaryChart);
     }
 
-    // 14. Financial Health Chart
     function createFinancialHealthChart(transactions) {
         const ctx = document.getElementById('financialHealthChart').getContext('2d');
         
-        // Calculate financial health score (simplified)
-        const totalIncome = transactions.reduce((sum, tx) => sum + tx.INCOME, 0);
-        const totalExpenses = transactions.reduce((sum, tx) => sum + tx.EXPENSE, 0);
-        const savings = totalIncome - totalExpenses;
-        const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+        // Calculate a simple financial health score based on savings rate and consistency
+        const monthlyHealth = {};
+        transactions.forEach(tx => {
+            const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
+            if (!monthlyHealth[monthYear]) {
+                monthlyHealth[monthYear] = { income: 0, expenses: 0 };
+            }
+            monthlyHealth[monthYear].income += tx.INCOME || 0;
+            monthlyHealth[monthYear].expenses += tx.EXPENSE || 0;
+        });
         
-        // Simple scoring algorithm
-        const expenseRatio = totalIncome > 0 ? (totalExpenses / totalIncome) * 100 : 100;
-        let score = 100 - (expenseRatio * 0.8); // Basic score based on expense ratio
-        
-        // Adjust based on savings
-        if (savingsRate > 20) score += 10;
-        else if (savingsRate < 0) score -= 20;
-        
-        // Cap between 0 and 100
-        score = Math.max(0, Math.min(100, score));
+        const labels = Object.keys(monthlyHealth);
+        const data = labels.map(label => {
+            const { income, expenses } = monthlyHealth[label];
+            if (income === 0) return 0;
+            
+            const savingsRate = (income - expenses) / income;
+            
+            // Score based on savings rate (0-100 scale)
+            let score = Math.min(100, Math.max(0, savingsRate * 200));
+            
+            // Bonus for consistency (if we have multiple months)
+            if (labels.length > 1) {
+                score = Math.min(100, score + 10);
+            }
+            
+            return Math.round(score);
+        });
         
         financialHealthChart = new Chart(ctx, {
-            type: 'doughnut',
+            type: 'line',
             data: {
-                labels: ['Financial Health', 'Needs Improvement'],
+                labels: labels,
                 datasets: [{
-                    data: [score, 100 - score],
-                    backgroundColor: [
-                        score >= 70 ? 'rgba(75, 192, 192, 0.8)' : 
-                        score >= 40 ? 'rgba(255, 205, 86, 0.8)' : 'rgba(255, 99, 132, 0.8)',
-                        'rgba(201, 203, 207, 0.2)'
-                    ],
-                    borderWidth: 0
+                    label: 'Financial Health Score',
+                    data: data,
+                    borderColor: 'rgba(76, 201, 240, 1)',
+                    backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                    tension: 0.3,
+                    fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                cutout: '70%',
                 plugins: {
                     legend: {
                         display: false
-                    },
-                    tooltip: {
-                        enabled: false
-                    },
-                    title: {
-                        display: true,
-                        text: `${score.toFixed(0)}/100`,
-                        position: 'bottom',
-                        font: {
-                            size: 24,
-                            weight: 'bold'
-                        },
-                        color: score >= 70 ? 'rgba(75, 192, 192, 1)' : 
-                               score >= 40 ? 'rgba(255, 205, 86, 1)' : 'rgba(255, 99, 132, 1)'
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '/100';
+                            }
+                        }
                     }
                 }
             }
         });
+        
+        activeCharts.push(financialHealthChart);
     }
 
-    // 15. Projection Chart
     function createProjectionChart(transactions) {
         const ctx = document.getElementById('projectionChart').getContext('2d');
         
-        // Calculate average monthly savings
+        // Simple projection based on average monthly savings
         const monthlySavings = {};
         transactions.forEach(tx => {
             const monthYear = `${tx.dateObj.getMonth()+1}/${tx.dateObj.getFullYear()}`;
             if (!monthlySavings[monthYear]) {
                 monthlySavings[monthYear] = 0;
             }
-            monthlySavings[monthYear] += (tx.INCOME - tx.EXPENSE);
+            monthlySavings[monthYear] += (tx.INCOME || 0) - (tx.EXPENSE || 0);
         });
         
         const savingsValues = Object.values(monthlySavings);
-        const avgMonthlySavings = savingsValues.reduce((sum, val) => sum + val, 0) / savingsValues.length;
+        const avgMonthlySavings = savingsValues.reduce((a, b) => a + b, 0) / Math.max(1, savingsValues.length);
         
         // Create projection for next 12 months
         const now = new Date();
         const labels = [];
-        const projectedData = [];
+        const data = [];
         
-        let currentSavings = transactions.length > 0 ? transactions[0].BALANCE : 0;
+        let cumulative = savingsValues.reduce((a, b) => a + b, 0);
         
         for (let i = 0; i < 12; i++) {
-            const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
-            labels.push(`${futureDate.toLocaleString('default', { month: 'short' })} ${futureDate.getFullYear()}`);
+            const futureMonth = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
+            const label = `${futureMonth.getMonth()+1}/${futureMonth.getFullYear()}`;
+            labels.push(label);
             
-            projectedData.push(currentSavings);
-            currentSavings += avgMonthlySavings;
+            cumulative += avgMonthlySavings;
+            data.push(cumulative);
         }
         
         projectionChart = new Chart(ctx, {
@@ -1958,38 +1971,67 @@ function destroyCharts() {
                 labels: labels,
                 datasets: [{
                     label: 'Projected Savings',
-                    data: projectedData,
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    data: data,
+                    borderColor: 'rgba(76, 201, 240, 1)',
+                    backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                    tension: 0.3,
                     fill: true,
-                    tension: 0.3
+                    borderDash: [5, 5]
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
-                        beginAtZero: true,
                         ticks: {
                             callback: function(value) {
-                                return '$' + value;
+                                return '$' + value.toFixed(0);
                             }
                         }
                     }
                 }
             }
         });
+        
+        activeCharts.push(projectionChart);
     }
 
-    // Set default date range inputs to current month
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    
-    chartStartDate.value = firstDay.toISOString().slice(0, 10);
-    chartEndDate.value = lastDay.toISOString().slice(0, 10);
-</script>
+    // Authentication state observer
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            currentUser = user;
+            usernameElem.textContent = user.displayName || user.email;
+            initialsElem.textContent = user.displayName 
+                ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase()
+                : user.email[0].toUpperCase();
+            
+            // Initialize the dashboard
+            initDashboard();
+            
+            // Load transactions and chart of accounts
+            loadTransactions();
+        } else {
+            // Redirect to login page if not authenticated
+            window.location.href = 'login.html';
+        }
+    });
 
+    // Logout functionality
+    logoutBtn.addEventListener('click', () => {
+        signOut(auth).then(() => {
+            window.location.href = 'login.html';
+        }).catch((error) => {
+            console.error('Logout error:', error);
+            Swal.fire("Error", "Failed to logout", "error");
+        });
+    });
+</script>
 </body>
 </html>
+
