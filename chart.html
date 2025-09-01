@@ -19,6 +19,10 @@
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.3.0/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.min.js"></script>
   
+  <!-- Export libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
   <style>
     :root{
       --purple-1:#6f42c1;
@@ -176,6 +180,27 @@
       color: var(--purple-1);
     }
     
+    /* Export Modal */
+    .export-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .export-modal-content {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      width: 300px;
+    }
+    
     /* Responsive */
     @media (max-width: 980px) {
       .top-cards { grid-template-columns: repeat(2,1fr); }
@@ -200,44 +225,6 @@
   </style>
 </head>
 <body>
-  <!-- Auth Container (initially visible) -->
-  <div id="authContainer" class="auth-container">
-    <div class="auth-tabs">
-      <div class="auth-tab active" id="loginTab">Login</div>
-      <div class="auth-tab" id="registerTab">Register</div>
-    </div>
-    
-    <form id="loginForm" class="auth-form">
-      <div class="mb-3">
-        <label for="loginEmail" class="form-label">Email</label>
-        <input type="email" class="form-control" id="loginEmail" required>
-      </div>
-      <div class="mb-3">
-        <label for="loginPassword" class="form-label">Password</label>
-        <input type="password" class="form-control" id="loginPassword" required>
-      </div>
-      <button type="submit" class="btn btn-primary">Login</button>
-      <div id="loginError" class="text-danger mt-2" style="display: none;"></div>
-    </form>
-    
-    <form id="registerForm" class="auth-form" style="display: none;">
-      <div class="mb-3">
-        <label for="registerName" class="form-label">Full Name</label>
-        <input type="text" class="form-control" id="registerName" required>
-      </div>
-      <div class="mb-3">
-        <label for="registerEmail" class="form-label">Email</label>
-        <input type="email" class="form-control" id="registerEmail" required>
-      </div>
-      <div class="mb-3">
-        <label for="registerPassword" class="form-label">Password</label>
-        <input type="password" class="form-control" id="registerPassword" required minlength="6">
-      </div>
-      <button type="submit" class="btn btn-primary">Register</button>
-      <div id="registerError" class="text-danger mt-2" style="display: none;"></div>
-    </form>
-  </div>
-
   <!-- Main Dashboard (initially hidden) -->
   <div id="dashboard" class="page" style="display: none;">
     <!-- Navigation buttons -->
@@ -420,20 +407,37 @@
     </div>
   </div>
 
+  <!-- Export Modal -->
+  <div id="exportModal" class="export-modal" style="display: none;">
+    <div class="export-modal-content">
+      <h4>Export Options</h4>
+      <div class="d-flex flex-column gap-2 mt-3">
+        <button id="exportExcelBtn" class="btn btn-success">
+          <i class="fas fa-file-excel me-2"></i> Export to Excel
+        </button>
+        <button id="exportPdfBtn" class="btn btn-danger">
+          <i class="fas fa-file-pdf me-2"></i> Export Charts to PDF
+        </button>
+        <button id="cancelExportBtn" class="btn btn-secondary mt-2">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
     // Firebase configuration - replace with your actual config
-const firebaseConfig = {
-  apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-  authDomain: "budget-app-1365f.firebaseapp.com",
-  projectId: "budget-app-1365f",
-  storageBucket: "budget-app-1365f.firebasestorage.app",
-  messagingSenderId: "1036194450411",
-  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-  measurementId: "G-YFFJL2H54X"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.firebasestorage.app",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+    
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
@@ -448,9 +452,9 @@ const firebaseConfig = {
 
     // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
-      initAuth();
       initNavigation();
       initTabEvents();
+      initExportModal();
       
       // Check if user is already logged in
       auth.onAuthStateChanged(user => {
@@ -458,86 +462,15 @@ const firebaseConfig = {
           showDashboard();
           loadUserData(user.uid);
         } else {
-          showAuth();
+          // Redirect to index.html if not logged in
+          window.location.href = "index.html";
         }
       });
     });
 
-    function initAuth() {
-      // Auth tabs switching
-      document.getElementById('loginTab').addEventListener('click', () => {
-        document.getElementById('loginTab').classList.add('active');
-        document.getElementById('registerTab').classList.remove('active');
-        document.getElementById('loginForm').style.display = 'flex';
-        document.getElementById('registerForm').style.display = 'none';
-      });
-      
-      document.getElementById('registerTab').addEventListener('click', () => {
-        document.getElementById('registerTab').classList.add('active');
-        document.getElementById('loginTab').classList.remove('active');
-        document.getElementById('registerForm').style.display = 'flex';
-        document.getElementById('loginForm').style.display = 'none';
-      });
-      
-      // Login form submission
-      document.getElementById('loginForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
-        
-        loginUser(email, password);
-      });
-      
-      // Register form submission
-      document.getElementById('registerForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const name = document.getElementById('registerName').value;
-        const email = document.getElementById('registerEmail').value;
-        const password = document.getElementById('registerPassword').value;
-        
-        registerUser(name, email, password);
-      });
-    }
-
-    function loginUser(email, password) {
-      setLoading(true);
-      auth.signInWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          setLoading(false);
-          // User logged in successfully
-        })
-        .catch((error) => {
-          setLoading(false);
-          document.getElementById('loginError').textContent = error.message;
-          document.getElementById('loginError').style.display = 'block';
-        });
-    }
-
-    function registerUser(name, email, password) {
-      setLoading(true);
-      auth.createUserWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          // Create user document in Firestore
-          return db.collection('users').doc(userCredential.user.uid).set({
-            name: name,
-            email: email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        })
-        .then(() => {
-          setLoading(false);
-          // User registered and logged in successfully
-        })
-        .catch((error) => {
-          setLoading(false);
-          document.getElementById('registerError').textContent = error.message;
-          document.getElementById('registerError').style.display = 'block';
-        });
-    }
-
     function logoutUser() {
       auth.signOut().then(() => {
-        showAuth();
+        window.location.href = "index.html";
       });
     }
 
@@ -549,13 +482,7 @@ const firebaseConfig = {
       }
     }
 
-    function showAuth() {
-      document.getElementById('authContainer').style.display = 'block';
-      document.getElementById('dashboard').style.display = 'none';
-    }
-
     function showDashboard() {
-      document.getElementById('authContainer').style.display = 'none';
       document.getElementById('dashboard').style.display = 'block';
     }
 
@@ -626,8 +553,32 @@ const firebaseConfig = {
       });
       
       document.getElementById('exportBtn').addEventListener('click', () => {
-        exportData();
+        showExportModal();
       });
+    }
+
+    function initExportModal() {
+      document.getElementById('exportExcelBtn').addEventListener('click', () => {
+        exportToExcel();
+        hideExportModal();
+      });
+      
+      document.getElementById('exportPdfBtn').addEventListener('click', () => {
+        exportChartsToPdf();
+        hideExportModal();
+      });
+      
+      document.getElementById('cancelExportBtn').addEventListener('click', () => {
+        hideExportModal();
+      });
+    }
+
+    function showExportModal() {
+      document.getElementById('exportModal').style.display = 'flex';
+    }
+
+    function hideExportModal() {
+      document.getElementById('exportModal').style.display = 'none';
     }
 
     function initTabEvents() {
@@ -693,6 +644,17 @@ const firebaseConfig = {
       renderExpensesByCategoryChart();
       renderMonthlyExpensesChart();
       renderIncomeExpenseTrendChart();
+      renderIncomeByMonthChart();
+      renderExpensesByMonthChart();
+      renderIncomeCompositionChart();
+      renderExpenseCompositionChart();
+      renderForecastChart();
+      renderCumulativeBalanceChart();
+      renderYoyComparisonChart();
+      renderMonthlyComparisonChart();
+      renderExpenseIncomeRatioChart();
+      renderPaymentMethodsChart();
+      renderTopSpendingChart();
     }
 
     function renderIncomeExpensePieChart() {
@@ -872,7 +834,7 @@ const firebaseConfig = {
       transactions
         .filter(t => t.TYPE === 'Income')
         .forEach(t => {
-          const category = t.DESCRIPTION || 'Uncategorized';
+          const category = t.CATEGORY || 'Uncategorized';
           incomeByCategory[category] = (incomeByCategory[category] || 0) + (t.INCOME || 0);
         });
       
@@ -947,7 +909,7 @@ const firebaseConfig = {
       transactions
         .filter(t => t.TYPE === 'Expense')
         .forEach(t => {
-          const category = t.DESCRIPTION || 'Uncategorized';
+          const category = t.CATEGORY || 'Uncategorized';
           expensesByCategory[category] = (expensesByCategory[category] || 0) + (t.EXPENSE || 0);
         });
       
@@ -1015,134 +977,270 @@ const firebaseConfig = {
       });
     }
 
+   
     function renderIncomeExpenseTrendChart() {
       const ctx = document.getElementById('incomeExpenseTrendChart').getContext('2d');
-      
-      // Group by month
-      const monthlyData = {};
+
+      const monthly = {};
       transactions.forEach(t => {
         if (!t.DATE) return;
-        
-        const month = t.DATE.substring(0, 7); // YYYY-MM
-        if (!monthlyData[month]) {
-          monthlyData[month] = { income: 0, expense: 0 };
-        }
-        
-        if (t.TYPE === 'Income') {
-          monthlyData[month].income += t.INCOME || 0;
-        } else if (t.TYPE === 'Expense') {
-          monthlyData[month].expense += t.EXPENSE || 0;
-        }
+        const month = t.DATE.substring(0, 7);
+        if (!monthly[month]) monthly[month] = { income: 0, expense: 0 };
+        if (t.TYPE === 'Income') monthly[month].income += t.INCOME || 0;
+        if (t.TYPE === 'Expense') monthly[month].expense += t.EXPENSE || 0;
       });
-      
-      const months = Object.keys(monthlyData).sort();
-      const incomeData = months.map(m => monthlyData[m].income);
-      const expenseData = months.map(m => monthlyData[m].expense);
-      
+
+      const months = Object.keys(monthly).sort();
+      const income = months.map(m => monthly[m].income);
+      const expense = months.map(m => monthly[m].expense);
+
       chartInstances.incomeExpenseTrendChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: months,
           datasets: [
-            {
-              label: 'Income',
-              data: incomeData,
-              borderColor: '#0f7a3a',
-              backgroundColor: 'rgba(15, 122, 58, 0.1)',
-              fill: true,
-              tension: 0.3
-            },
-            {
-              label: 'Expenses',
-              data: expenseData,
-              borderColor: '#c92a2a',
-              backgroundColor: 'rgba(201, 42, 42, 0.1)',
-              fill: true,
-              tension: 0.3
-            }
+            { label: 'Income', data: income, borderColor: '#0f7a3a', tension: 0.3 },
+            { label: 'Expenses', data: expense, borderColor: '#c92a2a', tension: 0.3 }
           ]
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true
-            }
-          }
-        }
+        options: { responsive: true, maintainAspectRatio: false }
       });
     }
 
-    function exportData() {
-      // Create CSV content
-      let csvContent = "Date,Description,Type,Amount,Category,Bank\n";
-      
-      transactions.forEach(transaction => {
-        const date = transaction.DATE || '';
-        const description = transaction.DESCRIPTION || '';
-        const type = transaction.TYPE || '';
-        const amount = transaction.TYPE === 'Income' ? transaction.INCOME : transaction.EXPENSE;
-        const category = transaction.CATEGORY || '';
-        const bank = transaction.BANK_NAME || '';
-        
-        csvContent += `"${date}","${description}","${type}","${amount}","${category}","${bank}"\n`;
+    function renderIncomeByMonthChart() {
+      const ctx = document.getElementById('incomeByMonthChart').getContext('2d');
+      const monthly = {};
+      transactions.filter(t => t.TYPE === 'Income').forEach(t => {
+        if (!t.DATE) return;
+        const month = t.DATE.substring(0, 7);
+        monthly[month] = (monthly[month] || 0) + (t.INCOME || 0);
       });
-      
-      // Create download link
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      const date = new Date().toISOString().slice(0, 10);
-      
-      link.setAttribute("href", url);
-      link.setAttribute("download", `financial_data_${date}.csv`);
-      link.style.visibility = 'hidden';
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const months = Object.keys(monthly).sort();
+      chartInstances.incomeByMonthChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: months,
+          datasets: [{ label: 'Income', data: months.map(m => monthly[m]), backgroundColor: '#0f7a3a' }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
     }
 
-    // Additional chart rendering functions would go here
     function renderExpensesByMonthChart() {
-      // Implementation for expenses by month chart
+      const ctx = document.getElementById('expensesByMonthChart').getContext('2d');
+      const monthly = {};
+      transactions.filter(t => t.TYPE === 'Expense').forEach(t => {
+        if (!t.DATE) return;
+        const month = t.DATE.substring(0, 7);
+        monthly[month] = (monthly[month] || 0) + (t.EXPENSE || 0);
+      });
+      const months = Object.keys(monthly).sort();
+      chartInstances.expensesByMonthChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: months,
+          datasets: [{ label: 'Expenses', data: months.map(m => monthly[m]), backgroundColor: '#c92a2a' }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
     }
 
     function renderIncomeCompositionChart() {
-      // Implementation for income composition chart
+      const ctx = document.getElementById('incomeCompositionChart').getContext('2d');
+      const byCat = {};
+      transactions.filter(t => t.TYPE === 'Income').forEach(t => {
+        const cat = t.CATEGORY || 'Other';
+        byCat[cat] = (byCat[cat] || 0) + (t.INCOME || 0);
+      });
+      chartInstances.incomeCompositionChart = new Chart(ctx, {
+        type: 'pie',
+        data: { labels: Object.keys(byCat), datasets: [{ data: Object.values(byCat) }] },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
     }
 
     function renderExpenseCompositionChart() {
-      // Implementation for expense composition chart
+      const ctx = document.getElementById('expenseCompositionChart').getContext('2d');
+      const byCat = {};
+      transactions.filter(t => t.TYPE === 'Expense').forEach(t => {
+        const cat = t.CATEGORY || 'Other';
+        byCat[cat] = (byCat[cat] || 0) + (t.EXPENSE || 0);
+      });
+      chartInstances.expenseCompositionChart = new Chart(ctx, {
+        type: 'pie',
+        data: { labels: Object.keys(byCat), datasets: [{ data: Object.values(byCat) }] },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
     }
 
     function renderForecastChart() {
-      // Implementation for forecast chart
+      const ctx = document.getElementById('forecastChart').getContext('2d');
+      // simple 6-month projection using avg balance
+      const monthly = {};
+      transactions.forEach(t => {
+        if (!t.DATE) return;
+        const month = t.DATE.substring(0, 7);
+        monthly[month] = (monthly[month] || 0) + (t.INCOME || 0) - (t.EXPENSE || 0);
+      });
+      const months = Object.keys(monthly).sort();
+      const balances = [];
+      let running = 0;
+      months.forEach(m => {
+        running += monthly[m];
+        balances.push(running);
+      });
+      // project next 6 months
+      const avg = balances.length ? balances[balances.length-1]/balances.length : 0;
+      const forecast = [];
+      for(let i=1;i<=6;i++) forecast.push((balances[balances.length-1]||0) + avg*i);
+      chartInstances.forecastChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [...months, ...Array.from({length:6},(_,i)=>`+${i+1}M`)],
+          datasets: [{ label: 'Balance Forecast', data: [...balances, ...forecast], borderColor:'#5b2ce7' }]
+        },
+        options:{ responsive:true, maintainAspectRatio:false }
+      });
     }
 
     function renderCumulativeBalanceChart() {
-      // Implementation for cumulative balance chart
+      const ctx = document.getElementById('cumulativeBalanceChart').getContext('2d');
+      let running = 0;
+      const dates = [];
+      const balances = [];
+      transactions.sort((a,b)=>new Date(a.DATE)-new Date(b.DATE)).forEach(t => {
+        if (!t.DATE) return;
+        running += (t.INCOME||0)-(t.EXPENSE||0);
+        dates.push(t.DATE);
+        balances.push(running);
+      });
+      chartInstances.cumulativeBalanceChart = new Chart(ctx, {
+        type:'line',
+        data:{ labels:dates, datasets:[{ label:'Balance', data:balances, borderColor:'#5b2ce7'}]},
+        options:{ responsive:true, maintainAspectRatio:false }
+      });
     }
 
     function renderYoyComparisonChart() {
-      // Implementation for year-over-year comparison chart
+      const ctx=document.getElementById('yoyComparisonChart').getContext('2d');
+      const byYear={};
+      transactions.forEach(t=>{
+        if(!t.DATE) return;
+        const year=t.DATE.substring(0,4);
+        if(!byYear[year]) byYear[year]={income:0,expense:0};
+        if(t.TYPE==='Income') byYear[year].income+=(t.INCOME||0);
+        if(t.TYPE==='Expense') byYear[year].expense+=(t.EXPENSE||0);
+      });
+      const years=Object.keys(byYear).sort();
+      chartInstances.yoyComparisonChart=new Chart(ctx,{
+        type:'bar',
+        data:{labels:years,datasets:[
+          {label:'Income',data:years.map(y=>byYear[y].income),backgroundColor:'#0f7a3a'},
+          {label:'Expenses',data:years.map(y=>byYear[y].expense),backgroundColor:'#c92a2a'}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false}
+      });
     }
 
     function renderMonthlyComparisonChart() {
-      // Implementation for monthly comparison chart
+      const ctx=document.getElementById('monthlyComparisonChart').getContext('2d');
+      const byMonth={};
+      transactions.forEach(t=>{
+        if(!t.DATE) return;
+        const m=t.DATE.substring(0,7);
+        if(!byMonth[m]) byMonth[m]={income:0,expense:0};
+        if(t.TYPE==='Income') byMonth[m].income+=(t.INCOME||0);
+        if(t.TYPE==='Expense') byMonth[m].expense+=(t.EXPENSE||0);
+      });
+      const months=Object.keys(byMonth).sort();
+      chartInstances.monthlyComparisonChart=new Chart(ctx,{
+        type:'line',
+        data:{labels:months,datasets:[
+          {label:'Income',data:months.map(m=>byMonth[m].income),borderColor:'#0f7a3a'},
+          {label:'Expenses',data:months.map(m=>byMonth[m].expense),borderColor:'#c92a2a'}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false}
+      });
     }
 
     function renderExpenseIncomeRatioChart() {
-      // Implementation for expense to income ratio chart
+      const ctx=document.getElementById('expenseIncomeRatioChart').getContext('2d');
+      const ratio = [];
+      const months=[];
+      const byMonth={};
+      transactions.forEach(t=>{
+        if(!t.DATE) return;
+        const m=t.DATE.substring(0,7);
+        if(!byMonth[m]) byMonth[m]={income:0,expense:0};
+        if(t.TYPE==='Income') byMonth[m].income+=(t.INCOME||0);
+        if(t.TYPE==='Expense') byMonth[m].expense+=(t.EXPENSE||0);
+      });
+      Object.keys(byMonth).sort().forEach(m=>{
+        months.push(m);
+        const inc=byMonth[m].income||1;
+        ratio.push((byMonth[m].expense/inc*100).toFixed(2));
+      });
+      chartInstances.expenseIncomeRatioChart=new Chart(ctx,{
+        type:'bar',
+        data:{labels:months,datasets:[{label:'Expense/Income %',data:ratio,backgroundColor:'#5b2ce7'}]},
+        options:{responsive:true,maintainAspectRatio:false}
+      });
     }
 
     function renderPaymentMethodsChart() {
-      // Implementation for payment methods chart
+      const ctx=document.getElementById('paymentMethodsChart').getContext('2d');
+      const byMethod={};
+      transactions.forEach(t=>{
+        const method=t.PAYMENT_METHOD||'Other';
+        byMethod[method]=(byMethod[method]||0)+ (t.INCOME||0)+(t.EXPENSE||0);
+      });
+      chartInstances.paymentMethodsChart=new Chart(ctx,{
+        type:'pie',
+        data:{labels:Object.keys(byMethod),datasets:[{data:Object.values(byMethod)}]},
+        options:{responsive:true,maintainAspectRatio:false}
+      });
     }
 
     function renderTopSpendingChart() {
-      // Implementation for top spending categories chart
+      const ctx=document.getElementById('topSpendingChart').getContext('2d');
+      const byCat={};
+      transactions.filter(t=>t.TYPE==='Expense').forEach(t=>{
+        const cat=t.CATEGORY||'Other';
+        byCat[cat]=(byCat[cat]||0)+(t.EXPENSE||0);
+      });
+      const entries=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      chartInstances.topSpendingChart=new Chart(ctx,{
+        type:'bar',
+        data:{labels:entries.map(e=>e[0]),datasets:[{label:'Spent',data:entries.map(e=>e[1]),backgroundColor:'#c92a2a'}]},
+        options:{responsive:true,maintainAspectRatio:false}
+      });
+    }
+
+    // Export to Excel
+    function exportToExcel() {
+      const ws = XLSX.utils.json_to_sheet(transactions);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+      XLSX.writeFile(wb, "transactions.xlsx");
+    }
+
+    // Export charts to PDF
+    async function exportChartsToPdf() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF("p", "mm", "a4");
+      let y = 10;
+
+      for (const [key, chart] of Object.entries(chartInstances)) {
+        const canvas = chart.canvas;
+        const imgData = canvas.toDataURL("image/png", 1.0);
+        doc.addImage(imgData, "PNG", 10, y, 180, 90);
+        y += 95;
+        if (y > 260) {
+          doc.addPage();
+          y = 10;
+        }
+      }
+      doc.save("charts.pdf");
     }
   </script>
 </body>
