@@ -910,34 +910,64 @@
         reader.readAsText(file);
     }
 
-    // Function to parse CSV file
-    function parseCsvFile(csvText) {
-        try {
-            const {transactions, errors} = parseCSV(csvText);
-            
-            if (errors.length > 0) {
-                Swal.fire({
-                    title: 'CSV Format Issues',
-                    html: `Found ${errors.length} issue(s) in your CSV file:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-                    icon: 'warning'
-                });
-            }
-            
-            csvTransactions = transactions;
-            
-            // Calculate balances for the imported transactions
-            calculateBalancesForImportedTransactions();
-            
-            // Show import summary
-            showImportSummary();
-            
-        } catch (error) {
-            console.error("Error parsing CSV:", error);
-            Swal.fire("Error", "Failed to parse CSV file. Please check the format.", "error");
-        }
+    // Function to handle CSV file selection
+function handleCsvFileSelect(file) {
+    if (!file) return;
+    
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        Swal.fire("Error", "Please select a CSV file", "error");
+        return;
     }
+    
+    csvFileName.textContent = file.name;
+    importCsvBtn.disabled = false;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        parseCsvFile(e.target.result);
+    };
+    reader.readAsText(file);
+}
 
-  function calculateBalancesForImportedTransactions() {
+// Helper function to clean and parse numbers
+function cleanNumber(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+        // Remove currency symbols, commas, and other non-numeric characters
+        const cleaned = value.replace(/[^\d.-]/g, '');
+        return parseFloat(cleaned) || 0;
+    }
+    return 0;
+}
+
+// Function to parse CSV file
+function parseCsvFile(csvText) {
+    try {
+        const {transactions, errors} = parseCSV(csvText);
+        
+        if (errors.length > 0) {
+            Swal.fire({
+                title: 'CSV Format Issues',
+                html: `Found ${errors.length} issue(s) in your CSV file:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
+                icon: 'warning'
+            });
+        }
+        
+        csvTransactions = transactions;
+        
+        // Calculate balances for the imported transactions
+        calculateBalancesForImportedTransactions();
+        
+        // Show import summary
+        showImportSummary();
+        
+    } catch (error) {
+        console.error("Error parsing CSV:", error);
+        Swal.fire("Error", "Failed to parse CSV file. Please check the format.", "error");
+    }
+}
+
+function calculateBalancesForImportedTransactions() {
     if (csvTransactions.length === 0) return;
     
     // Sort transactions by date only (remove time comparison)
@@ -956,226 +986,233 @@
             const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
             return dateA - dateB;
         });
-        startingBalance = sortedTransactions[sortedTransactions.length - 1].BALANCE || 0;
+        startingBalance = cleanNumber(sortedTransactions[sortedTransactions.length - 1].BALANCE);
     }
     
     // Calculate balances for each transaction
-    let currentBalance = parseFloat(startingBalance);
+    let currentBalance = cleanNumber(startingBalance);
     
     for (const transaction of csvTransactions) {
-        // Handle different amount column names
-        const income = parseFloat((transaction.INCOME || '').toString().replace(/[^\d.-]/g, '')) || 0;
-const expense = parseFloat((transaction.EXPENSE || '').toString().replace(/[^\d.-]/g, '')) || 0;
+        // Use the cleanNumber function to ensure we get proper numbers
+        const income = cleanNumber(transaction.INCOME);
+        const expense = cleanNumber(transaction.EXPENSE);
         
         currentBalance += income - expense;
         transaction.BALANCE = currentBalance.toFixed(2);
     }
 }
 
-    // Function to show import summary
-    function showImportSummary() {
-        if (csvTransactions.length === 0) return;
-        
-        let totalIncome = 0;
-        let totalExpense = 0;
-        
-for (const transaction of csvTransactions) {
-    totalIncome += parseFloat(transaction.INCOME.toString().replace(/[^\d.-]/g, '')) || 0;
-    totalExpense += parseFloat(transaction.EXPENSE.toString().replace(/[^\d.-]/g, '')) || 0;
+// Function to show import summary
+function showImportSummary() {
+    if (csvTransactions.length === 0) return;
+    
+    let totalIncome = 0;
+    let totalExpense = 0;
+    
+    for (const transaction of csvTransactions) {
+        totalIncome += cleanNumber(transaction.INCOME);
+        totalExpense += cleanNumber(transaction.EXPENSE);
+    }
+    
+    summaryCount.textContent = csvTransactions.length;
+    summaryIncome.textContent = `$${totalIncome.toFixed(2)}`;
+    summaryExpense.textContent = `$${totalExpense.toFixed(2)}`;
+    
+    importSummary.style.display = 'block';
 }
-        
-        summaryCount.textContent = csvTransactions.length;
-        summaryIncome.textContent = `$${totalIncome.toFixed(2)}`;
-        summaryExpense.textContent = `$${totalExpense.toFixed(2)}`;
-        
-        importSummary.style.display = 'block';
-    }
 
-    // Function to import CSV transactions
-    async function importCsvTransactions() {
-        if (csvTransactions.length === 0) {
-            Swal.fire("Error", "No valid transactions to import", "error");
-            return;
-        }
+// Function to import CSV transactions
+async function importCsvTransactions() {
+    if (csvTransactions.length === 0) {
+        Swal.fire("Error", "No valid transactions to import", "error");
+        return;
+    }
+    
+    progressContainer.style.display = 'block';
+    importCsvBtn.disabled = true;
+    cancelCsvBtn.disabled = true;
+    
+    let importedCount = 0;
+    let errors = [];
+    
+    for (let i = 0; i < csvTransactions.length; i++) {
+        const transaction = csvTransactions[i];
         
-        progressContainer.style.display = 'block';
-        importCsvBtn.disabled = true;
-        cancelCsvBtn.disabled = true;
-        
-        let importedCount = 0;
-        let errors = [];
-        
-        for (let i = 0; i < csvTransactions.length; i++) {
-            const transaction = csvTransactions[i];
-            
-            try {
-                // Add transaction to Firestore
-                await addDoc(collection(db, "users", currentUser.uid, "transactions"), {
-                    ...transaction,
-                    userId: currentUser.uid,
-                    createdAt: new Date()
-                });
-                
-                importedCount++;
-            } catch (error) {
-                errors.push(`Row ${i+1}: ${error.message}`);
-                console.error("Error importing transaction:", error);
-            }
-            
-            // Update progress
-            const progress = ((i + 1) / csvTransactions.length) * 100;
-            progressBar.style.width = `${progress}%`;
-        }
-        
-        // Show result
-        if (errors.length === 0) {
-            Swal.fire("Success", `Successfully imported ${importedCount} transactions`, "success");
-        } else {
-            Swal.fire({
-                title: 'Import Completed with Errors',
-                html: `Imported ${importedCount} transactions successfully.<br>
-                       ${errors.length} transactions failed:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-                icon: 'warning'
+        try {
+            // Add transaction to Firestore
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), {
+                ...transaction,
+                // Convert numeric fields to numbers before storing
+                INCOME: cleanNumber(transaction.INCOME),
+                EXPENSE: cleanNumber(transaction.EXPENSE),
+                BALANCE: cleanNumber(transaction.BALANCE),
+                userId: currentUser.uid,
+                createdAt: new Date()
             });
+            
+            importedCount++;
+        } catch (error) {
+            errors.push(`Row ${i+1}: ${error.message}`);
+            console.error("Error importing transaction:", error);
         }
         
-        // Reload transactions and close modal
-        await loadTransactions();
-        csvModal.style.display = "none";
-        resetCsvModal();
+        // Update progress
+        const progress = ((i + 1) / csvTransactions.length) * 100;
+        progressBar.style.width = `${progress}%`;
     }
-
-    // Function to reset CSV modal
-    function resetCsvModal() {
-        csvFileName.textContent = "No file selected";
-        importCsvBtn.disabled = true;
-        progressContainer.style.display = 'none';
-        progressBar.style.width = '0%';
-        importSummary.style.display = 'none';
-        csvTransactions = [];
+    
+    // Show result
+    if (errors.length === 0) {
+        Swal.fire("Success", `Successfully imported ${importedCount} transactions`, "success");
+    } else {
+        Swal.fire({
+            title: 'Import Completed with Errors',
+            html: `Imported ${importedCount} transactions successfully.<br>
+                   ${errors.length} transactions failed:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
+            icon: 'warning'
+        });
     }
+    
+    // Reload transactions and close modal
+    await loadTransactions();
+    csvModal.style.display = "none";
+    resetCsvModal();
+}
 
-    // Function to parse CSV content
-    function parseCSV(csvText) {
-        const lines = csvText.split('\n').filter(line => line.trim() !== '');
-        if (lines.length < 2) {
-            return {transactions: [], errors: ["CSV file is empty or has only headers"]};
-        }
-        
-        const headers = lines[0].split(',').map(h => h.trim());
-        const transactions = [];
-        const errors = [];
-        
-        // Check required headers
-        const requiredHeaders = ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'INCOME', 'EXPENSE', 'DESCRIPTION'];
-        const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-        
-        if (missingHeaders.length > 0) {
-            errors.push(`Missing required headers: ${missingHeaders.join(', ')}`);
-            return {transactions, errors};
-        }
-        
-        // Process each line
-        for (let i = 1; i < lines.length; i++) {
-            const values = parseCSVLine(lines[i]);
-            
-            if (values.length !== headers.length) {
-                errors.push(`Row ${i+1}: Column count doesn't match header count`);
-                continue;
-            }
-            
-            const transaction = {};
-            for (let j = 0; j < headers.length; j++) {
-                transaction[headers[j]] = values[j].trim();
-            }
-            
-            // Validate required fields
-            if (!transaction.DATE) {
-                errors.push(`Row ${i+1}: DATE is required`);
-                continue;
-            }
-            
-            if (!transaction.TIME) {
-                errors.push(`Row ${i+1}: TIME is required`);
-                continue;
-            }
-            
-            if (!transaction['ACCOUNT HEADER']) {
-                errors.push(`Row ${i+1}: ACCOUNT HEADER is required`);
-                continue;
-            }
-            
-            // Validate income/expense
-            const income = parseFloat(transaction.INCOME) || 0;
-            const expense = parseFloat(transaction.EXPENSE) || 0;
-            
-            if (isNaN(income) || income < 0) {
-                errors.push(`Row ${i+1}: INCOME must be a positive number`);
-                continue;
-            }
-            
-            if (isNaN(expense) || expense < 0) {
-                errors.push(`Row ${i+1}: EXPENSE must be a positive number`);
-                continue;
-            }
-            
-            if (income > 0 && expense > 0) {
-                errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE in the same transaction`);
-                continue;
-            }
-            
-            transactions.push(transaction);
-        }
-        
+// Function to reset CSV modal
+function resetCsvModal() {
+    csvFileName.textContent = "No file selected";
+    importCsvBtn.disabled = true;
+    progressContainer.style.display = 'none';
+    progressBar.style.width = '0%';
+    importSummary.style.display = 'none';
+    csvTransactions = [];
+}
+
+// Function to parse CSV content
+function parseCSV(csvText) {
+    const lines = csvText.split('\n').filter(line => line.trim() !== '');
+    if (lines.length < 2) {
+        return {transactions: [], errors: ["CSV file is empty or has only headers"]};
+    }
+    
+    const headers = lines[0].split(',').map(h => h.trim());
+    const transactions = [];
+    const errors = [];
+    
+    // Check required headers
+    const requiredHeaders = ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'INCOME', 'EXPENSE', 'DESCRIPTION'];
+    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+    
+    if (missingHeaders.length > 0) {
+        errors.push(`Missing required headers: ${missingHeaders.join(', ')}`);
         return {transactions, errors};
     }
-
-    // Helper function to parse CSV line (handles quoted values)
-    function parseCSVLine(line) {
-        const values = [];
-        let current = '';
-        let inQuotes = false;
+    
+    // Process each line
+    for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
         
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            
-            if (char === '"') {
-                inQuotes = !inQuotes;
-            } else if (char === ',' && !inQuotes) {
-                values.push(current);
-                current = '';
-            } else {
-                current += char;
-            }
+        if (values.length !== headers.length) {
+            errors.push(`Row ${i+1}: Column count doesn't match header count`);
+            continue;
         }
         
-        values.push(current);
-        return values;
+        const transaction = {};
+        for (let j = 0; j < headers.length; j++) {
+            transaction[headers[j]] = values[j].trim();
+        }
+        
+        // Validate required fields
+        if (!transaction.DATE) {
+            errors.push(`Row ${i+1}: DATE is required`);
+            continue;
+        }
+        
+        if (!transaction.TIME) {
+            errors.push(`Row ${i+1}: TIME is required`);
+            continue;
+        }
+        
+        if (!transaction['ACCOUNT HEADER']) {
+            errors.push(`Row ${i+1}: ACCOUNT HEADER is required`);
+            continue;
+        }
+        
+        // Validate income/expense using cleanNumber to handle string values
+        const income = cleanNumber(transaction.INCOME);
+        const expense = cleanNumber(transaction.EXPENSE);
+        
+        if (isNaN(income) || income < 0) {
+            errors.push(`Row ${i+1}: INCOME must be a positive number`);
+            continue;
+        }
+        
+        if (isNaN(expense) || expense < 0) {
+            errors.push(`Row ${i+1}: EXPENSE must be a positive number`);
+            continue;
+        }
+        
+        if (income > 0 && expense > 0) {
+            errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE in the same transaction`);
+            continue;
+        }
+        
+        // Convert numeric fields to numbers for consistency
+        transaction.INCOME = income;
+        transaction.EXPENSE = expense;
+        
+        transactions.push(transaction);
     }
+    
+    return {transactions, errors};
+}
 
-    // Function to download sample CSV
-    function downloadSampleCsvFile() {
-        const sampleData = [
-            ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION'],
-            ['1', '2023-10-15', '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary'],
-            ['2', '2023-10-16', '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries'],
-            ['3', '2023-10-17', '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill']
-        ];
+// Helper function to parse CSV line (handles quoted values)
+function parseCSVLine(line) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
         
-        const csvContent = sampleData.map(row => row.join(',')).join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'expense_tracker_sample.csv');
-        link.style.visibility = 'hidden';
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+            values.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
     }
+    
+    values.push(current);
+    return values;
+}
 
+// Function to download sample CSV
+function downloadSampleCsvFile() {
+    const sampleData = [
+        ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION'],
+        ['1', '2023-10-15', '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary'],
+        ['2', '2023-10-16', '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries'],
+        ['3', '2023-10-17', '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill']
+    ];
+    
+    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'expense_tracker_sample.csv');
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
     // Load chart of accounts for dropdown
     async function loadAccounts() {
         try {
