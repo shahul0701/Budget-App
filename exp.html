@@ -1167,11 +1167,8 @@ function parseCSV(csvText) {
         return {transactions, errors};
     }
     
-    // Check if ACCOUNT HEADER column exists
-    const hasAccountHeader = normalizedHeaders.includes('ACCOUNT HEADER');
-    if (!hasAccountHeader) {
-        errors.push('Warning: No ACCOUNT HEADER column found. Using "Uncategorized" for all transactions.');
-    }
+    // Check if DESCRIPTION column exists for auto-detection
+    const hasDescription = normalizedHeaders.includes('DESCRIPTION');
     
     // Process each line
     for (let i = 1; i < lines.length; i++) {
@@ -1186,19 +1183,40 @@ function parseCSV(csvText) {
         for (let j = 0; j < headers.length; j++) {
             const standardHeader = normalizedHeaders[j];
             transaction[standardHeader] = values[j].trim();
-            
-            // If ACCOUNT HEADER is empty or doesn't exist, try to auto-detect from description
-            if (standardHeader === 'ACCOUNT HEADER' && (!values[j].trim() || values[j].trim() === '')) {
-                const description = transaction['DESCRIPTION'] || '';
-                transaction[standardHeader] = detectAccountHeaderFromDescription(description);
+        }
+        
+        // DEBUG: Check what values we have for potential account header columns
+        console.log('Row data:', values);
+        
+        // Try to find account header from various sources
+        let accountHeader = '';
+        
+        // 1. First try explicit account header columns
+        const accountHeaderKeys = ['ACCOUNT HEADER', 'ACCOUNT', 'CATEGORY', 'HEADER', 'TYPE'];
+        for (const key of accountHeaderKeys) {
+            if (transaction[key] && transaction[key].trim() !== '') {
+                accountHeader = transaction[key].trim();
+                break;
             }
         }
         
-        // If no ACCOUNT HEADER column exists at all, create one
-        if (!hasAccountHeader) {
-            const description = transaction['DESCRIPTION'] || '';
-            transaction['ACCOUNT HEADER'] = detectAccountHeaderFromDescription(description);
+        // 2. If still empty, try to auto-dectect from description
+        if (!accountHeader && hasDescription && transaction['DESCRIPTION']) {
+            accountHeader = detectAccountHeaderFromDescription(transaction['DESCRIPTION']);
         }
+        
+        // 3. If still empty, try to detect from mode (CASH/BANK might indicate type)
+        if (!accountHeader && transaction['MODE']) {
+            accountHeader = transaction['MODE'] === 'CASH' ? 'Cash Expense' : 'Bank Expense';
+        }
+        
+        // 4. Final fallback
+        if (!accountHeader) {
+            accountHeader = 'Uncategorized';
+        }
+        
+        // Set the account header
+        transaction['ACCOUNT HEADER'] = accountHeader;
         
         console.log('Processing row:', i+1, transaction);
         
@@ -1236,6 +1254,83 @@ function parseCSV(csvText) {
     
     console.log('Parsed transactions:', transactions);
     return {transactions, errors};
+}
+
+
+
+
+// Enhanced function to auto-detect account header from multiple sources
+function detectAccountHeaderFromDescription(description) {
+    if (!description) return 'Uncategorized';
+    
+    const desc = description.toLowerCase();
+    
+    // More comprehensive mapping
+    const mapping = {
+        'food': 'Food & Dining',
+        'meal': 'Food & Dining', 
+        'restaurant': 'Food & Dining',
+        'grocery': 'Food & Dining',
+        'supermarket': 'Food & Dining',
+        'dinner': 'Food & Dining',
+        'lunch': 'Food & Dining',
+        'breakfast': 'Food & Dining',
+        
+        'rent': 'Housing',
+        'house': 'Housing',
+        'apartment': 'Housing',
+        'mortgage': 'Housing',
+        'electricity': 'Utilities',
+        'water': 'Utilities',
+        'internet': 'Utilities',
+        'phone': 'Utilities',
+        'wifi': 'Utilities',
+        'broadband': 'Utilities',
+        
+        'transport': 'Transportation',
+        'bus': 'Transportation',
+        'train': 'Transportation',
+        'taxi': 'Transportation',
+        'gas': 'Transportation',
+        'petrol': 'Transportation',
+        'fuel': 'Transportation',
+        'uber': 'Transportation',
+        'ola': 'Transportation',
+        
+        'medical': 'Healthcare',
+        'doctor': 'Healthcare',
+        'hospital': 'Healthcare',
+        'medicine': 'Healthcare',
+        'pharmacy': 'Healthcare',
+        
+        'salary': 'Income',
+        'income': 'Income',
+        'payment': 'Income',
+        'freelance': 'Income',
+        'client': 'Income',
+        
+        'shopping': 'Shopping',
+        'clothes': 'Shopping',
+        'store': 'Shopping',
+        'market': 'Shopping',
+        'mall': 'Shopping',
+        
+        'entertain': 'Entertainment',
+        'movie': 'Entertainment',
+        'game': 'Entertainment',
+        'netflix': 'Entertainment',
+        'amazon': 'Entertainment',
+        'streaming': 'Entertainment'
+    };
+    
+    // Check each keyword
+    for (const [keyword, category] of Object.entries(mapping)) {
+        if (desc.includes(keyword)) {
+            return category;
+        }
+    }
+    
+    return 'Uncategorized';
 }
 
 // Helper function to parse CSV line (handles quoted values)
