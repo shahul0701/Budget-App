@@ -893,25 +893,52 @@
     }
 
     // Load all transactions for user
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        let q;
         try {
-            let q;
-            try {
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc")
-                );
-            } catch (error) {
-                // Fallback if index doesn't exist
-                q = query(collection(db, "users", currentUser.uid, "txId"));
-            }
-            
+            // First attempt: query with ordering by DATE
+            q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("DATE", "desc")
+            );
             const snapshot = await getDocs(q);
             allTransactions = snapshot.docs.map(doc => ({ 
                 id: doc.id, 
                 ...doc.data() 
             }));
+            
+        } catch (error) {
+            console.warn("Index error, falling back to unordered query:", error);
+            
+            // Fallback: query without ordering if index doesn't exist
+            q = query(collection(db, "users", currentUser.uid, "transactions"));
+            const snapshot = await getDocs(q);
+            allTransactions = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data() 
+            }));
+            
+            // Sort manually on client side
+            allTransactions.sort((a, b) => {
+                if (a.DATE && b.DATE) {
+                    return new Date(b.DATE) - new Date(a.DATE);
+                }
+                return 0;
+            });
+        }
+        
+        // Process and display transactions...
+        displayTransactions(allTransactions);
+        
+    } catch (error) {
+        console.error("Error loading transactions:", error);
+        showNotification("Failed to load transactions", "error");
+    } finally {
+        loadingModal.style.display = "none";
+    }
+}
             
             // Convert string values to numbers and dates to Date objects
             allTransactions = allTransactions.map(tx => ({
