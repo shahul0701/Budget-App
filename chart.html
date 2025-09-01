@@ -681,9 +681,13 @@
 </div>
 
 <script type="module">
-<script type="module">
     // Firebase Initialization & Imports
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { 
+        getAuth, 
+        onAuthStateChanged, 
+        signOut 
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import {
         getFirestore,
         collection,
@@ -692,10 +696,8 @@
         where,
         orderBy
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-   import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-    const db = getFirestore();
 
-    const app = initializeApp({
+    const firebaseConfig = {
         apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
         authDomain: "budget-app-1365f.firebaseapp.com",
         projectId: "budget-app-1365f",
@@ -703,10 +705,11 @@
         messagingSenderId: "1036194450411",
         appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
         measurementId: "G-YFFJL2H54X"
-    });
+    };
 
-    const db = getFirestore();
+    const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
+    const db = getFirestore(app);
 
     // DOM references
     const usernameElem = document.getElementById("username");
@@ -739,7 +742,7 @@
 
     // Chart instances (placeholders)
     let incomeExpenseChart, expenseCategoryChart, incomeSourceChart, cashFlowChart;
-    let paymentMethodChart, accountBalanceChart, monthComparisonChart, topExpensesChart;
+    let accountBalanceChart, monthComparisonChart, topExpensesChart;
     let savingsRateChart, yearlySummaryChart, expenseBreakdownChart, incomeTrendChart;
     let incomeExpenseRatioChart, dailySpendingChart, financialHealthChart, projectionChart;
 
@@ -747,107 +750,108 @@
     let allTransactions = [];
     let chartOfAccounts = [];
     let resizeTimeout;
+    let activeCharts = [];
 
- onAuthStateChanged(auth, async user => {
-      if (user) {
-        currentUser = user;
-        const name = user.displayName || user.email || "User";
-        usernameElem.textContent = name;
-        initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
+    // Initialize the dashboard
+    function initDashboard() {
+        // Set default date range inputs to current month
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         
-        // Load COA data first, then transactions
-        await loadCOAData();
-        await loadTransactions();
-      } else {
-        // not logged in
-        Swal.fire({ icon: 'info', title: 'Please login', text: 'You will be redirected to login.' }).then(()=> {
-          window.location.href = "index.html";
-        });
-      }
-    });
-
-    logoutBtn.addEventListener("click", async () => {
-      await signOut(auth);
-      window.location.href = "index.html";
-    });
-
-
-    // Theme toggle functionality
-    themeToggle.addEventListener("click", () => {
-        document.body.classList.toggle("dark-mode");
-        const icon = themeToggle.querySelector("i");
-        if (document.body.classList.contains("dark-mode")) {
-            icon.classList.remove("fa-moon");
-            icon.classList.add("fa-sun");
-            localStorage.setItem("theme", "dark");
-        } else {
-            icon.classList.remove("fa-sun");
-            icon.classList.add("fa-moon");
-            localStorage.setItem("theme", "light");
-        }
-    });
-
-    // Check for saved theme preference
-    if (localStorage.getItem("theme") === "dark") {
-        document.body.classList.add("dark-mode");
-        const icon = themeToggle.querySelector("i");
-        icon.classList.remove("fa-moon");
-        icon.classList.add("fa-sun");
+        chartStartDate.value = firstDay.toISOString().slice(0, 10);
+        chartEndDate.value = lastDay.toISOString().slice(0, 10);
+        
+        // Set up event listeners
+        setupEventListeners();
+        
+        // Load account filters
+        loadAccountFilters();
     }
 
-    // Tab functionality
-    tabs.forEach(tab => {
-        tab.addEventListener("click", () => {
-            const tabId = tab.getAttribute("data-tab");
-            
-            // Update active tab
-            tabs.forEach(t => t.classList.remove("active"));
-            tab.classList.add("active");
-            
-            // Show active tab content
-            tabContents.forEach(content => content.classList.remove("active"));
-            document.getElementById(`${tabId}Tab`).classList.add("active");
-            
-            // Resize charts after a short delay to ensure the tab is visible
-            setTimeout(() => {
-                const charts = Chart.instances;
-                charts.forEach(chart => {
-                    chart.resize();
-                });
-            }, 100);
+    // Set up all event listeners
+    function setupEventListeners() {
+        // Theme toggle functionality
+        themeToggle.addEventListener("click", () => {
+            document.body.classList.toggle("dark-mode");
+            const icon = themeToggle.querySelector("i");
+            if (document.body.classList.contains("dark-mode")) {
+                icon.classList.remove("fa-moon");
+                icon.classList.add("fa-sun");
+                localStorage.setItem("theme", "dark");
+            } else {
+                icon.classList.remove("fa-sun");
+                icon.classList.add("fa-moon");
+                localStorage.setItem("theme", "light");
+            }
         });
-    });
 
-    logoutBtn.addEventListener("click", async () => {
-        await signOut(auth);
-        window.location.href = "index.html";
-    });
+        // Check for saved theme preference
+        if (localStorage.getItem("theme") === "dark") {
+            document.body.classList.add("dark-mode");
+            const icon = themeToggle.querySelector("i");
+            icon.classList.remove("fa-moon");
+            icon.classList.add("fa-sun");
+        }
 
-    // Toggle custom date range visibility
-    chartDateRange.addEventListener("change", () => {
-        chartCustomRange.style.display = 
-            chartDateRange.value === "custom" ? "flex" : "none";
-    });
+        // Tab functionality
+        tabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                const tabId = tab.getAttribute("data-tab");
+                
+                // Update active tab
+                tabs.forEach(t => t.classList.remove("active"));
+                tab.classList.add("active");
+                
+                // Show active tab content
+                tabContents.forEach(content => content.classList.remove("active"));
+                document.getElementById(`${tabId}Tab`).classList.add("active");
+                
+                // Resize charts after a short delay to ensure the tab is visible
+                setTimeout(() => {
+                    const charts = Chart.instances;
+                    charts.forEach(chart => {
+                        chart.resize();
+                    });
+                }, 100);
+            });
+        });
 
-    // Reset filters
-    resetChartFiltersBtn.addEventListener("click", () => {
-        chartDateRange.value = "month";
-        chartAccountFilter.value = "all";
-        chartGroupBy.value = "month";
-        chartCustomRange.style.display = "none";
-        
-        generateAllCharts();
-        updateSummaryCards();
-    });
+        // Toggle custom date range visibility
+        chartDateRange.addEventListener("change", () => {
+            chartCustomRange.style.display = 
+                chartDateRange.value === "custom" ? "flex" : "none";
+        });
 
-    // Export functionality
-    exportPDFBtn.addEventListener("click", () => {
-        exportDashboard('pdf');
-    });
+        // Apply chart filters
+        applyChartFiltersBtn.addEventListener("click", () => {
+            generateAllCharts();
+            updateSummaryCards();
+        });
 
-    exportImageBtn.addEventListener("click", () => {
-        exportDashboard('image');
-    });
+        // Reset filters
+        resetChartFiltersBtn.addEventListener("click", () => {
+            chartDateRange.value = "month";
+            chartAccountFilter.value = "all";
+            chartGroupBy.value = "month";
+            chartCustomRange.style.display = "none";
+            
+            generateAllCharts();
+            updateSummaryCards();
+        });
+
+        // Export functionality
+        exportPDFBtn.addEventListener("click", () => {
+            exportDashboard('pdf');
+        });
+
+        exportImageBtn.addEventListener("click", () => {
+            exportDashboard('image');
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', handleChartResize);
+    }
 
     // Handle chart resizing when window is resized
     function handleChartResize() {
@@ -860,75 +864,121 @@
         }, 250);
     }
 
-    window.addEventListener('resize', handleChartResize);
+    // Load account filters from COA
+    async function loadAccountFilters() {
+        try {
+            if (!currentUser) return;
+            
+            // Clear existing options except the first one
+            while (chartAccountFilter.options.length > 1) {
+                chartAccountFilter.remove(1);
+            }
+            
+            // Get account headers from chartOfAccounts collection
+            const accountsQuery = query(
+                collection(db, "users", currentUser.uid, "chartOfAccounts")
+            );
+            const accountsSnapshot = await getDocs(accountsQuery);
+            
+            accountsSnapshot.forEach(doc => {
+                const data = doc.data();
+                const option = document.createElement("option");
+                option.value = data.name;
+                option.textContent = data.name;
+                chartAccountFilter.appendChild(option);
+            });
+        } catch (error) {
+            console.error("Error loading account filters:", error);
+        }
+    }
 
-    // Load chart of accounts
-   async function loadCOAData() {
-  try {
-    if (!currentUser) return;
-    
-    // Get account headers from chartOfAccounts collection
-    const accountsQuery = query(
-      collection(db, "users", currentUser.uid, "chartOfAccounts"), 
-      where("userId", "==", currentUser.uid)
-    );
-    const accountsSnapshot = await getDocs(accountsQuery);
-    
-    coaAccounts = [];
-    coaBanks = [];
-    
-    accountsSnapshot.forEach(doc => {
-      const data = doc.data();
-      coaAccounts.push(data.name);
-
-  // Load all transactions for logged-in user
- async function loadTransactions(){
-      try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
-        const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
-        const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        allTransactions = txs;
-        filteredTransactions = allTransactions.slice();
-        currentPage = 1;
-        buildTable();
-        updateStats();
-        updateBankBalances();
-        
-        // Initialize voucher numbering
-        await initVoucherNumbering();
-      } catch (err) {
-        console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
-      }
+    // Load all transactions for logged-in user
+    async function loadTransactions() {
+        try {
+            if (!currentUser) return;
+            
+            loadingModal.style.display = "flex";
+            
+            const q = query(
+                collection(db, "users", currentUser.uid, "transactions"), 
+                orderBy("DATE", "desc")
+            );
+            const querySnapshot = await getDocs(q);
+            
+            allTransactions = [];
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                // Add a date object for easier date manipulation
+                data.dateObj = data.DATE ? new Date(data.DATE) : new Date();
+                allTransactions.push(data);
+            });
+            
+            // Update UI with loaded data
+            updateSummaryCards();
+            generateAllCharts();
+            
+            loadingModal.style.display = "none";
+        } catch (error) {
+            console.error("Error loading transactions:", error);
+            loadingModal.style.display = "none";
+            Swal.fire("Error", "Failed to load transactions", "error");
+        }
     }
 
     // Filter transactions based on chart controls
-   function applyFilters(){
-      filteredTransactions = allTransactions.slice();
-      const now = new Date();
+    function getFilteredTransactions() {
+        let filtered = [...allTransactions];
+        const now = new Date();
 
-      function inRange(dateStr, start, end){
-        if (!dateStr) return false;
-        const d = new Date(dateStr);
-        return d >= start && d <= end;
-      }
+        // Filter by date range
+        const dateRange = chartDateRange.value;
+        if (dateRange !== "all") {
+            let startDate, endDate;
+            
+            switch(dateRange) {
+                case "month":
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    break;
+                case "quarter":
+                    const quarter = Math.floor(now.getMonth() / 3);
+                    startDate = new Date(now.getFullYear(), quarter * 3, 1);
+                    endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+                    break;
+                case "year":
+                    startDate = new Date(now.getFullYear(), 0, 1);
+                    endDate = new Date(now.getFullYear(), 11, 31);
+                    break;
+                case "custom":
+                    startDate = new Date(chartStartDate.value);
+                    endDate = new Date(chartEndDate.value);
+                    break;
+            }
+            
+            filtered = filtered.filter(tx => {
+                const txDate = tx.dateObj;
+                return txDate >= startDate && txDate <= endDate;
+            });
+        }
 
         // Filter by account
         const accountFilter = chartAccountFilter.value;
-     if (accountFilter !== "all") {
-    filtered = filtered.filter(tx => 
-        (tx.ACCOUNT_HEADER || tx.BANK_NAME) === accountFilter
-    );
-}
+        if (accountFilter !== "all") {
+            filtered = filtered.filter(tx => 
+                tx.ACCOUNT_HEADER === accountFilter
+            );
+        }
+
+        return filtered;
+    }
 
     // Update summary cards with financial overview
     function updateSummaryCards() {
         const filteredTransactions = getFilteredTransactions();
         
         // Calculate totals
-        const totalIncome = filteredTransactions.reduce((sum, tx) => sum + tx.INCOME, 0);
-        const totalExpenses = filteredTransactions.reduce((sum, tx) => sum + tx.EXPENSE, 0);
+        const totalIncome = filteredTransactions.reduce((sum, tx) => sum + (tx.INCOME || 0), 0);
+        const totalExpenses = filteredTransactions.reduce((sum, tx) => sum + (tx.EXPENSE || 0), 0);
         const netCashFlow = totalIncome - totalExpenses;
         const savingsRate = totalIncome > 0 ? (netCashFlow / totalIncome) * 100 : 0;
         
@@ -958,7 +1008,7 @@
     }
 
     // Generate all charts
-    async function generateAllCharts() {
+    function generateAllCharts() {
         const filteredTransactions = getFilteredTransactions();
         
         loadingModal.style.display = "flex";
@@ -967,22 +1017,29 @@
             try {
                 destroyCharts();
                 
-                // Placeholder calls - you should implement these chart creation functions
-                createIncomeExpenseChart(filteredTransactions);
-                createExpenseCategoryChart(filteredTransactions);
-                createIncomeSourceChart(filteredTransactions);
-                createCashFlowChart(filteredTransactions);
-                createAccountBalanceChart(filteredTransactions);
-                createMonthComparisonChart(filteredTransactions);
-                createTopExpensesChart(filteredTransactions);
-                createSavingsRateChart(filteredTransactions);
-                createYearlySummaryChart(filteredTransactions);
-                createExpenseBreakdownChart(filteredTransactions);
-                createIncomeTrendChart(filteredTransactions);
-                createIncomeExpenseRatioChart(filteredTransactions);
-                createDailySpendingChart(filteredTransactions);
-                createFinancialHealthChart(filteredTransactions);
-                createProjectionChart(filteredTransactions);
+                // Create charts based on active tab
+                const activeTab = document.querySelector(".tab.active").getAttribute("data-tab");
+                
+                if (activeTab === "overview") {
+                    createIncomeExpenseChart(filteredTransactions);
+                    createExpenseCategoryChart(filteredTransactions);
+                    createCashFlowChart(filteredTransactions);
+                    createAccountBalanceChart(filteredTransactions);
+                } else if (activeTab === "expenses") {
+                    createExpenseBreakdownChart(filteredTransactions);
+                    createTopExpensesChart(filteredTransactions);
+                    createMonthComparisonChart(filteredTransactions);
+                    createDailySpendingChart(filteredTransactions);
+                } else if (activeTab === "income") {
+                    createIncomeSourceChart(filteredTransactions);
+                    createIncomeTrendChart(filteredTransactions);
+                    createIncomeExpenseRatioChart(filteredTransactions);
+                } else if (activeTab === "trends") {
+                    createSavingsRateChart(filteredTransactions);
+                    createYearlySummaryChart(filteredTransactions);
+                    createFinancialHealthChart(filteredTransactions);
+                    createProjectionChart(filteredTransactions);
+                }
                 
                 loadingModal.style.display = "none";
             } catch (error) {
@@ -995,14 +1052,7 @@
 
     // Destroy all chart instances
     function destroyCharts() {
-        const charts = [
-            incomeExpenseChart, expenseCategoryChart, incomeSourceChart, cashFlowChart,
-            accountBalanceChart, monthComparisonChart, topExpensesChart, savingsRateChart,
-            yearlySummaryChart, expenseBreakdownChart, incomeTrendChart, incomeExpenseRatioChart,
-            dailySpendingChart, financialHealthChart, projectionChart
-        ];
-        
-        charts.forEach(chart => {
+        activeCharts.forEach(chart => {
             if (chart) {
                 try {
                     chart.destroy();
@@ -1011,8 +1061,8 @@
                 }
             }
         });
+        activeCharts = [];
     }
-
     // Export dashboard function
     function exportDashboard(format) {
         loadingModal.style.display = "flex";
