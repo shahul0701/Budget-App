@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Financial Dashboard with Charts</title>
 
+  <!-- Firebase and Firestore SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  
   <!-- CSS libs -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
@@ -136,6 +141,41 @@
       color: white;
     }
     
+    /* Auth forms */
+    .auth-container {
+      max-width: 400px;
+      margin: 50px auto;
+      padding: 30px;
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(26,29,40,0.1);
+    }
+    
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    
+    .auth-tabs {
+      display: flex;
+      margin-bottom: 20px;
+    }
+    
+    .auth-tab {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+    
+    .auth-tab.active {
+      border-bottom: 2px solid var(--purple-1);
+      font-weight: 600;
+      color: var(--purple-1);
+    }
+    
     /* Responsive */
     @media (max-width: 980px) {
       .top-cards { grid-template-columns: repeat(2,1fr); }
@@ -152,10 +192,54 @@
     .expense-color {
       color: #c92a2a;
     }
+    
+    .loading {
+      opacity: 0.7;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
-  <div class="page">
+  <!-- Auth Container (initially visible) -->
+  <div id="authContainer" class="auth-container">
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="loginTab">Login</div>
+      <div class="auth-tab" id="registerTab">Register</div>
+    </div>
+    
+    <form id="loginForm" class="auth-form">
+      <div class="mb-3">
+        <label for="loginEmail" class="form-label">Email</label>
+        <input type="email" class="form-control" id="loginEmail" required>
+      </div>
+      <div class="mb-3">
+        <label for="loginPassword" class="form-label">Password</label>
+        <input type="password" class="form-control" id="loginPassword" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Login</button>
+      <div id="loginError" class="text-danger mt-2" style="display: none;"></div>
+    </form>
+    
+    <form id="registerForm" class="auth-form" style="display: none;">
+      <div class="mb-3">
+        <label for="registerName" class="form-label">Full Name</label>
+        <input type="text" class="form-control" id="registerName" required>
+      </div>
+      <div class="mb-3">
+        <label for="registerEmail" class="form-label">Email</label>
+        <input type="email" class="form-control" id="registerEmail" required>
+      </div>
+      <div class="mb-3">
+        <label for="registerPassword" class="form-label">Password</label>
+        <input type="password" class="form-control" id="registerPassword" required minlength="6">
+      </div>
+      <button type="submit" class="btn btn-primary">Register</button>
+      <div id="registerError" class="text-danger mt-2" style="display: none;"></div>
+    </form>
+  </div>
+
+  <!-- Main Dashboard (initially hidden) -->
+  <div id="dashboard" class="page" style="display: none;">
     <!-- Navigation buttons -->
     <div class="nav-buttons">
       <button id="backBtn" class="btn btn-outline-primary">
@@ -340,36 +424,189 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    // Sample data for demonstration
-    const sampleData = {
-      transactions: [
-        { id: 1, DATE: '2023-01-15', TYPE: 'Income', DESCRIPTION: 'Salary', INCOME: 5000, EXPENSE: 0, BANK_NAME: 'AXIS' },
-        { id: 2, DATE: '2023-01-20', TYPE: 'Expense', DESCRIPTION: 'Rent', INCOME: 0, EXPENSE: 1200, BANK_NAME: 'AXIS' },
-        { id: 3, DATE: '2023-01-22', TYPE: 'Expense', DESCRIPTION: 'Groceries', INCOME: 0, EXPENSE: 350, BANK_NAME: 'BOM' },
-        { id: 4, DATE: '2023-02-05', TYPE: 'Income', DESCRIPTION: 'Freelance Work', INCOME: 2500, EXPENSE: 0, BANK_NAME: 'BOM' },
-        { id: 5, DATE: '2023-02-10', TYPE: 'Expense', DESCRIPTION: 'Utilities', INCOME: 0, EXPENSE: 200, BANK_NAME: 'AXIS' },
-        { id: 6, DATE: '2023-02-15', TYPE: 'Expense', DESCRIPTION: 'Dining', INCOME: 0, EXPENSE: 180, BANK_NAME: 'BOM' },
-        { id: 7, DATE: '2023-03-01', TYPE: 'Income', DESCRIPTION: 'Investment', INCOME: 1500, EXPENSE: 0, BANK_NAME: 'AXIS' },
-        { id: 8, DATE: '2023-03-05', TYPE: 'Expense', DESCRIPTION: 'Shopping', INCOME: 0, EXPENSE: 450, BANK_NAME: 'BOM' },
-        { id: 9, DATE: '2023-03-10', TYPE: 'Expense', DESCRIPTION: 'Transportation', INCOME: 0, EXPENSE: 120, BANK_NAME: 'AXIS' },
-        { id: 10, DATE: '2023-03-15', TYPE: 'Income', DESCRIPTION: 'Bonus', INCOME: 1000, EXPENSE: 0, BANK_NAME: 'BOM' },
-        { id: 11, DATE: '2023-03-20', TYPE: 'Expense', DESCRIPTION: 'Entertainment', INCOME: 0, EXPENSE: 200, BANK_NAME: 'AXIS' },
-        { id: 12, DATE: '2023-03-25', TYPE: 'Expense', DESCRIPTION: 'Healthcare', INCOME: 0, EXPENSE: 300, BANK_NAME: 'BOM' },
-      ],
-      accounts: ['AXIS', 'BOM'],
-      categories: {
-        income: ['Salary', 'Freelance Work', 'Investment', 'Bonus'],
-        expense: ['Rent', 'Groceries', 'Utilities', 'Dining', 'Shopping', 'Transportation', 'Entertainment', 'Healthcare']
-      }
+    // Firebase configuration - replace with your actual config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "your-project.firebaseapp.com",
+      projectId: "your-project-id",
+      storageBucket: "your-project.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "YOUR_APP_ID"
     };
 
-    // Initialize all charts
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // Global variables
+    let userData = null;
+    let transactions = [];
+    let accounts = [];
+    let categories = [];
+    let chartInstances = {};
+
+    // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
+      initAuth();
       initNavigation();
       initTabEvents();
-      updateStats();
-      renderAllCharts();
+      
+      // Check if user is already logged in
+      auth.onAuthStateChanged(user => {
+        if (user) {
+          showDashboard();
+          loadUserData(user.uid);
+        } else {
+          showAuth();
+        }
+      });
     });
+
+    function initAuth() {
+      // Auth tabs switching
+      document.getElementById('loginTab').addEventListener('click', () => {
+        document.getElementById('loginTab').classList.add('active');
+        document.getElementById('registerTab').classList.remove('active');
+        document.getElementById('loginForm').style.display = 'flex';
+        document.getElementById('registerForm').style.display = 'none';
+      });
+      
+      document.getElementById('registerTab').addEventListener('click', () => {
+        document.getElementById('registerTab').classList.add('active');
+        document.getElementById('loginTab').classList.remove('active');
+        document.getElementById('registerForm').style.display = 'flex';
+        document.getElementById('loginForm').style.display = 'none';
+      });
+      
+      // Login form submission
+      document.getElementById('loginForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        
+        loginUser(email, password);
+      });
+      
+      // Register form submission
+      document.getElementById('registerForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('registerName').value;
+        const email = document.getElementById('registerEmail').value;
+        const password = document.getElementById('registerPassword').value;
+        
+        registerUser(name, email, password);
+      });
+    }
+
+    function loginUser(email, password) {
+      setLoading(true);
+      auth.signInWithEmailAndPassword(email, password)
+        .then((userCredential) => {
+          setLoading(false);
+          // User logged in successfully
+        })
+        .catch((error) => {
+          setLoading(false);
+          document.getElementById('loginError').textContent = error.message;
+          document.getElementById('loginError').style.display = 'block';
+        });
+    }
+
+    function registerUser(name, email, password) {
+      setLoading(true);
+      auth.createUserWithEmailAndPassword(email, password)
+        .then((userCredential) => {
+          // Create user document in Firestore
+          return db.collection('users').doc(userCredential.user.uid).set({
+            name: name,
+            email: email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        })
+        .then(() => {
+          setLoading(false);
+          // User registered and logged in successfully
+        })
+        .catch((error) => {
+          setLoading(false);
+          document.getElementById('registerError').textContent = error.message;
+          document.getElementById('registerError').style.display = 'block';
+        });
+    }
+
+    function logoutUser() {
+      auth.signOut().then(() => {
+        showAuth();
+      });
+    }
+
+    function setLoading(loading) {
+      if (loading) {
+        document.body.classList.add('loading');
+      } else {
+        document.body.classList.remove('loading');
+      }
+    }
+
+    function showAuth() {
+      document.getElementById('authContainer').style.display = 'block';
+      document.getElementById('dashboard').style.display = 'none';
+    }
+
+    function showDashboard() {
+      document.getElementById('authContainer').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+    }
+
+    function loadUserData(userId) {
+      // Load user profile
+      db.collection('users').doc(userId).get()
+        .then(doc => {
+          if (doc.exists) {
+            userData = doc.data();
+            document.getElementById('username').textContent = userData.name;
+            document.getElementById('userInitials').textContent = getInitials(userData.name);
+          }
+        });
+      
+      // Set up real-time listener for transactions
+      db.collection('users').doc(userId).collection('transactions')
+        .orderBy('DATE', 'desc')
+        .onSnapshot(snapshot => {
+          transactions = [];
+          snapshot.forEach(doc => {
+            transactions.push({ id: doc.id, ...doc.data() });
+          });
+          
+          updateStats();
+          renderAllCharts();
+        });
+      
+      // Load accounts
+      db.collection('users').doc(userId).collection('bankAccounts')
+        .get()
+        .then(snapshot => {
+          accounts = [];
+          snapshot.forEach(doc => {
+            accounts.push({ id: doc.id, ...doc.data() });
+          });
+        });
+      
+      // Load categories
+      db.collection('users').doc(userId).collection('categories')
+        .get()
+        .then(snapshot => {
+          categories = [];
+          snapshot.forEach(doc => {
+            categories.push({ id: doc.id, ...doc.data() });
+          });
+        });
+    }
+
+    function getInitials(name) {
+      return name.split(' ').map(n => n[0]).join('').toUpperCase();
+    }
 
     function initNavigation() {
       document.getElementById('backBtn').addEventListener('click', () => {
@@ -385,13 +622,11 @@
       });
       
       document.getElementById('logoutBtn').addEventListener('click', () => {
-        // Logout logic
-        alert('Logout clicked');
+        logoutUser();
       });
       
       document.getElementById('exportBtn').addEventListener('click', () => {
-        // Export logic
-        alert('Export functionality would be implemented here');
+        exportData();
       });
     }
 
@@ -418,16 +653,22 @@
     }
 
     function updateStats() {
-      const totalIncome = sampleData.transactions
+      const totalIncome = transactions
         .filter(t => t.TYPE === 'Income')
-        .reduce((sum, t) => sum + t.INCOME, 0);
+        .reduce((sum, t) => sum + (t.INCOME || 0), 0);
         
-      const totalExpense = sampleData.transactions
+      const totalExpense = transactions
         .filter(t => t.TYPE === 'Expense')
-        .reduce((sum, t) => sum + t.EXPENSE, 0);
+        .reduce((sum, t) => sum + (t.EXPENSE || 0), 0);
         
       const balance = totalIncome - totalExpense;
-      const transactionCount = sampleData.transactions.length;
+      
+      // Count transactions from current month
+      const currentMonth = new Date().toISOString().substring(0, 7);
+      const transactionCount = transactions.filter(t => {
+        const txMonth = t.DATE ? t.DATE.substring(0, 7) : '';
+        return txMonth === currentMonth;
+      }).length;
       
       document.getElementById('statIncome').textContent = `$${totalIncome.toFixed(2)}`;
       document.getElementById('statExpense').textContent = `$${totalExpense.toFixed(2)}`;
@@ -436,40 +677,35 @@
     }
 
     function renderAllCharts() {
+      // Destroy existing charts to avoid memory leaks
+      Object.values(chartInstances).forEach(chart => {
+        if (chart) chart.destroy();
+      });
+      
+      chartInstances = {};
+      
       renderIncomeExpensePieChart();
       renderMonthlyCashFlowChart();
       renderAccountBalancesChart();
       renderDailyTransactionsChart();
       renderIncomeByCategoryChart();
       renderMonthlyIncomeChart();
-      renderIncomeByMonthChart();
-      renderIncomeCompositionChart();
       renderExpensesByCategoryChart();
       renderMonthlyExpensesChart();
-      renderExpensesByMonthChart();
-      renderExpenseCompositionChart();
       renderIncomeExpenseTrendChart();
-      renderForecastChart();
-      renderCumulativeBalanceChart();
-      renderYoyComparisonChart();
-      renderMonthlyComparisonChart();
-      renderExpenseIncomeRatioChart();
-      renderPaymentMethodsChart();
-      renderTopSpendingChart();
     }
 
-    // Chart rendering functions
     function renderIncomeExpensePieChart() {
       const ctx = document.getElementById('incomeExpensePieChart').getContext('2d');
-      const totalIncome = sampleData.transactions
+      const totalIncome = transactions
         .filter(t => t.TYPE === 'Income')
-        .reduce((sum, t) => sum + t.INCOME, 0);
+        .reduce((sum, t) => sum + (t.INCOME || 0), 0);
         
-      const totalExpense = sampleData.transactions
+      const totalExpense = transactions
         .filter(t => t.TYPE === 'Expense')
-        .reduce((sum, t) => sum + t.EXPENSE, 0);
+        .reduce((sum, t) => sum + (t.EXPENSE || 0), 0);
       
-      new Chart(ctx, {
+      chartInstances.incomeExpensePieChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
           labels: ['Income', 'Expenses'],
@@ -496,16 +732,18 @@
       
       // Group by month
       const monthlyData = {};
-      sampleData.transactions.forEach(t => {
+      transactions.forEach(t => {
+        if (!t.DATE) return;
+        
         const month = t.DATE.substring(0, 7); // YYYY-MM
         if (!monthlyData[month]) {
           monthlyData[month] = { income: 0, expense: 0 };
         }
         
         if (t.TYPE === 'Income') {
-          monthlyData[month].income += t.INCOME;
-        } else {
-          monthlyData[month].expense += t.EXPENSE;
+          monthlyData[month].income += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyData[month].expense += t.EXPENSE || 0;
         }
       });
       
@@ -513,7 +751,7 @@
       const incomeData = months.map(m => monthlyData[m].income);
       const expenseData = months.map(m => monthlyData[m].expense);
       
-      new Chart(ctx, {
+      chartInstances.monthlyCashFlowChart = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: months,
@@ -547,19 +785,19 @@
       
       // Calculate balances for each account
       const accountBalances = {};
-      sampleData.accounts.forEach(account => {
-        accountBalances[account] = 0;
+      accounts.forEach(account => {
+        accountBalances[account.name] = 0;
       });
       
-      sampleData.transactions.forEach(t => {
+      transactions.forEach(t => {
         if (t.TYPE === 'Income') {
-          accountBalances[t.BANK_NAME] += t.INCOME;
-        } else {
-          accountBalances[t.BANK_NAME] -= t.EXPENSE;
+          accountBalances[t.BANK_NAME] = (accountBalances[t.BANK_NAME] || 0) + (t.INCOME || 0);
+        } else if (t.TYPE === 'Expense') {
+          accountBalances[t.BANK_NAME] = (accountBalances[t.BANK_NAME] || 0) - (t.EXPENSE || 0);
         }
       });
       
-      new Chart(ctx, {
+      chartInstances.accountBalancesChart = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: Object.keys(accountBalances),
@@ -584,17 +822,31 @@
     function renderDailyTransactionsChart() {
       const ctx = document.getElementById('dailyTransactionsChart').getContext('2d');
       
-      // This would normally be calculated from transaction dates
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const transactionsPerDay = [12, 19, 8, 15, 12, 6, 9]; // Sample data
+      // Group transactions by day of week
+      const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const transactionsByDay = [0, 0, 0, 0, 0, 0, 0];
       
-      new Chart(ctx, {
+      transactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const date = new Date(t.DATE);
+        const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        transactionsByDay[dayOfWeek]++;
+      });
+      
+      // Reorder to start with Monday
+      const reorderedData = [
+        ...transactionsByDay.slice(1),
+        transactionsByDay[0]
+      ];
+      
+      chartInstances.dailyTransactionsChart = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: days,
+          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
           datasets: [{
             label: 'Transactions',
-            data: transactionsPerDay,
+            data: reorderedData,
             borderColor: '#5b2ce7',
             tension: 0.1,
             fill: false
@@ -617,23 +869,20 @@
       
       // Group income by category
       const incomeByCategory = {};
-      sampleData.transactions
+      transactions
         .filter(t => t.TYPE === 'Income')
         .forEach(t => {
-          const category = t.DESCRIPTION;
-          if (!incomeByCategory[category]) {
-            incomeByCategory[category] = 0;
-          }
-          incomeByCategory[category] += t.INCOME;
+          const category = t.DESCRIPTION || 'Uncategorized';
+          incomeByCategory[category] = (incomeByCategory[category] || 0) + (t.INCOME || 0);
         });
       
-      new Chart(ctx, {
+      chartInstances.incomeByCategoryChart = new Chart(ctx, {
         type: 'pie',
         data: {
           labels: Object.keys(incomeByCategory),
           datasets: [{
             data: Object.values(incomeByCategory),
-            backgroundColor: ['#0f7a3a', '#1e9c4f', '#2dbc64', '#3cdb79']
+            backgroundColor: ['#0f7a3a', '#1e9c4f', '#2dbc64', '#3cdb79', '#5cec8d']
           }]
         },
         options: {
@@ -651,11 +900,21 @@
     function renderMonthlyIncomeChart() {
       const ctx = document.getElementById('monthlyIncomeChart').getContext('2d');
       
-      // Sample data for monthly income
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      const incomeData = [5000, 2500, 2500, 5000, 3000, 4000];
+      // Group income by month
+      const monthlyIncome = {};
+      transactions
+        .filter(t => t.TYPE === 'Income')
+        .forEach(t => {
+          if (!t.DATE) return;
+          
+          const month = t.DATE.substring(0, 7); // YYYY-MM
+          monthlyIncome[month] = (monthlyIncome[month] || 0) + (t.INCOME || 0);
+        });
       
-      new Chart(ctx, {
+      const months = Object.keys(monthlyIncome).sort();
+      const incomeData = months.map(m => monthlyIncome[m]);
+      
+      chartInstances.monthlyIncomeChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: months,
@@ -680,23 +939,26 @@
       });
     }
 
-    // Additional chart rendering functions would follow the same pattern
-    // For brevity, I'll implement a few and note that the rest would follow similar patterns
-
     function renderExpensesByCategoryChart() {
       const ctx = document.getElementById('expensesByCategoryChart').getContext('2d');
       
-      // Sample data for expenses by category
-      const categories = ['Rent', 'Groceries', 'Utilities', 'Entertainment', 'Transportation'];
-      const amounts = [1200, 800, 300, 400, 250];
+      // Group expenses by category
+      const expensesByCategory = {};
+      transactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          const category = t.DESCRIPTION || 'Uncategorized';
+          expensesByCategory[category] = (expensesByCategory[category] || 0) + (t.EXPENSE || 0);
+        });
       
-      new Chart(ctx, {
+      chartInstances.expensesByCategoryChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-          labels: categories,
+          labels: Object.keys(expensesByCategory),
           datasets: [{
-            data: amounts,
-            backgroundColor: ['#c92a2a', '#e03e3e', '#f03e3e', '#ff6b6b', '#ff8787']
+            data: Object.values(expensesByCategory),
+            backgroundColor:
+            ['#c92a2a', '#e03a3a', '#f74a4a', '#ff5a5a', '#ff6a6a']
           }]
         },
         options: {
@@ -714,11 +976,21 @@
     function renderMonthlyExpensesChart() {
       const ctx = document.getElementById('monthlyExpensesChart').getContext('2d');
       
-      // Sample data for monthly expenses
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      const expenseData = [1550, 730, 1070, 1550, 1200, 1400];
+      // Group expenses by month
+      const monthlyExpenses = {};
+      transactions
+        .filter(t => t.TYPE === 'Expense')
+        .forEach(t => {
+          if (!t.DATE) return;
+          
+          const month = t.DATE.substring(0, 7); // YYYY-MM
+          monthlyExpenses[month] = (monthlyExpenses[month] || 0) + (t.EXPENSE || 0);
+        });
       
-      new Chart(ctx, {
+      const months = Object.keys(monthlyExpenses).sort();
+      const expenseData = months.map(m => monthlyExpenses[m]);
+      
+      chartInstances.monthlyExpensesChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: months,
@@ -746,12 +1018,28 @@
     function renderIncomeExpenseTrendChart() {
       const ctx = document.getElementById('incomeExpenseTrendChart').getContext('2d');
       
-      // Sample data for income vs expenses trend
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      const incomeData = [5000, 2500, 2500, 5000, 3000, 4000];
-      const expenseData = [1550, 730, 1070, 1550, 1200, 1400];
+      // Group by month
+      const monthlyData = {};
+      transactions.forEach(t => {
+        if (!t.DATE) return;
+        
+        const month = t.DATE.substring(0, 7); // YYYY-MM
+        if (!monthlyData[month]) {
+          monthlyData[month] = { income: 0, expense: 0 };
+        }
+        
+        if (t.TYPE === 'Income') {
+          monthlyData[month].income += t.INCOME || 0;
+        } else if (t.TYPE === 'Expense') {
+          monthlyData[month].expense += t.EXPENSE || 0;
+        }
+      });
       
-      new Chart(ctx, {
+      const months = Object.keys(monthlyData).sort();
+      const incomeData = months.map(m => monthlyData[m].income);
+      const expenseData = months.map(m => monthlyData[m].expense);
+      
+      chartInstances.incomeExpenseTrendChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: months,
@@ -786,62 +1074,75 @@
       });
     }
 
-    // The remaining chart functions would follow similar patterns
-    // For the purpose of this example, I'll create placeholder functions
+    function exportData() {
+      // Create CSV content
+      let csvContent = "Date,Description,Type,Amount,Category,Bank\n";
+      
+      transactions.forEach(transaction => {
+        const date = transaction.DATE || '';
+        const description = transaction.DESCRIPTION || '';
+        const type = transaction.TYPE || '';
+        const amount = transaction.TYPE === 'Income' ? transaction.INCOME : transaction.EXPENSE;
+        const category = transaction.CATEGORY || '';
+        const bank = transaction.BANK_NAME || '';
+        
+        csvContent += `"${date}","${description}","${type}","${amount}","${category}","${bank}"\n`;
+      });
+      
+      // Create download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const date = new Date().toISOString().slice(0, 10);
+      
+      link.setAttribute("href", url);
+      link.setAttribute("download", `financial_data_${date}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
 
-    function renderIncomeByMonthChart() {
-      // Implementation similar to other charts
-      console.log("Income by Month chart would be rendered here");
+    // Additional chart rendering functions would go here
+    function renderExpensesByMonthChart() {
+      // Implementation for expenses by month chart
     }
 
     function renderIncomeCompositionChart() {
-      // Implementation similar to other charts
-      console.log("Income Composition chart would be rendered here");
-    }
-
-    function renderExpensesByMonthChart() {
-      // Implementation similar to other charts
-      console.log("Expenses by Month chart would be rendered here");
+      // Implementation for income composition chart
     }
 
     function renderExpenseCompositionChart() {
-      // Implementation similar to other charts
-      console.log("Expense Composition chart would be rendered here");
+      // Implementation for expense composition chart
     }
 
     function renderForecastChart() {
-      // Implementation similar to other charts
-      console.log("Forecast chart would be rendered here");
+      // Implementation for forecast chart
     }
 
     function renderCumulativeBalanceChart() {
-      // Implementation similar to other charts
-      console.log("Cumulative Balance chart would be rendered here");
+      // Implementation for cumulative balance chart
     }
 
     function renderYoyComparisonChart() {
-      // Implementation similar to other charts
-      console.log("Year-over-Year Comparison chart would be rendered here");
+      // Implementation for year-over-year comparison chart
     }
 
     function renderMonthlyComparisonChart() {
-      // Implementation similar to other charts
-      console.log("Monthly Comparison chart would be rendered here");
+      // Implementation for monthly comparison chart
     }
 
     function renderExpenseIncomeRatioChart() {
-      // Implementation similar to other charts
-      console.log("Expense to Income Ratio chart would be rendered here");
+      // Implementation for expense to income ratio chart
     }
 
     function renderPaymentMethodsChart() {
-      // Implementation similar to other charts
-      console.log("Payment Methods chart would be rendered here");
+      // Implementation for payment methods chart
     }
 
     function renderTopSpendingChart() {
-      // Implementation similar to other charts
-      console.log("Top Spending Categories chart would be rendered here");
+      // Implementation for top spending categories chart
     }
   </script>
 </body>
