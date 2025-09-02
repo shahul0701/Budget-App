@@ -1295,31 +1295,33 @@ function downloadSampleCsvFile() {
     }
 
     // Enhanced loadTransactions function
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+  async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        let q;
         try {
-            let q;
-            try {
-                // Try to order by both date and time if possible
+            // First try ordering by createdAt (timestamp)
+            q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("createdAt", "desc")
+            );
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                console.log("Index missing for createdAt, trying DATE field...");
+                // Fallback to date-only ordering
                 q = query(
                     collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("createdAt", "desc") // Use timestamp for consistent ordering
+                    orderBy("DATE", "desc")
                 );
-            } catch (error) {
-                if (error.code === 'failed-precondition') {
-                    // Fallback to date-only ordering
-                    q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                } else {
-                    throw error;
-                }
+            } else {
+                throw error;
             }
+        }
 
-            const snap = await getDocs(q);
-            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
+        const snap = await getDocs(q);
+        let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        console.log("Raw transactions loaded:", transactions.length);
             // Get account from URL
             const selectedAccount = getAccountFromURL();
 
@@ -1343,7 +1345,24 @@ function downloadSampleCsvFile() {
         } finally {
             loadingModal.style.display = "none";
         }
+    }} catch (err) {
+        console.error("Error loading transactions:", err);
+        // Check if it's an index error
+        if (err.code === 'failed-precondition') {
+            Swal.fire({
+                title: "Index Required",
+                text: "Please create the required Firestore index. Check the browser console for the link.",
+                icon: "warning"
+            });
+            // This will show the direct link to create the missing index
+            console.error("Missing index error. Follow this link to create it:", err.message);
+        } else {
+            Swal.fire("Error", "Error loading transactions: " + err.message, "error");
+        }
+    } finally {
+        loadingModal.style.display = "none";
     }
+}
 
     // Enhanced function to calculate running balance for transactions
     function calculateRunningBalance(transactions) {
