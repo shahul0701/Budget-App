@@ -936,6 +936,17 @@ function debugCSVContent(csvText) {
     console.log('======================');
 }
 
+    // Add this to your loadTransactions function after getting transactions
+console.log("Loaded transactions:", transactions.length);
+transactions.forEach((tx, index) => {
+    console.log(`Tx ${index}:`, {
+        id: tx.id,
+        DATE: tx.DATE,
+        createdAt: tx.createdAt,
+        parsedDate: parseTransactionDate(tx)
+    });
+});
+
 // Parse CSV wrapper
 function parseCsvFile(csvText) {
     try {
@@ -1295,55 +1306,66 @@ function downloadSampleCsvFile() {
     }
 
     // Enhanced loadTransactions function
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+   // Enhanced loadTransactions function
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        let transactions = [];
+        
+        // Try to get transactions ordered by createdAt first (most reliable)
         try {
-            let q;
-            try {
-                // Try to order by both date and time if possible
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("createdAt", "desc") // Use timestamp for consistent ordering
-                );
-            } catch (error) {
-                if (error.code === 'failed-precondition') {
-                    // Fallback to date-only ordering
-                    q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                } else {
-                    throw error;
-                }
-            }
-
+            const q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("createdAt", "desc")
+            );
             const snap = await getDocs(q);
-            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // Get account from URL
-            const selectedAccount = getAccountFromURL();
-
-            // Filter if opened from trial balance
-            if (selectedAccount) {
-                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+            transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                console.log("No createdAt index, falling back to DATE field");
+                
+                // Fallback: try to order by DATE field
+                const q = query(
+                    collection(db, "users", currentUser.uid, "transactions")
+                );
+                const snap = await getDocs(q);
+                transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                // Sort manually by date (newest first)
+                transactions.sort((a, b) => {
+                    const dateA = parseTransactionDate(a) || new Date(0);
+                    const dateB = parseTransactionDate(b) || new Date(0);
+                    return dateB - dateA; // Newest first
+                });
             } else {
-                document.getElementById("accountTitle").textContent = "All Transactions";
+                throw error;
             }
-
-            allTransactions = calculateRunningBalance(transactions);
-            populateFiltersOptions(allTransactions);
-            applyFilters();
-            
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            if (!handleFirestoreError(err, "load transactions")) {
-                Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
-            }
-        } finally {
-            loadingModal.style.display = "none";
         }
+
+        // Get account from URL
+        const selectedAccount = getAccountFromURL();
+
+        // Filter if opened from trial balance
+        if (selectedAccount) {
+            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+        } else {
+            document.getElementById("accountTitle").textContent = "All Transactions";
+        }
+
+        allTransactions = calculateRunningBalance(transactions);
+        populateFiltersOptions(allTransactions);
+        applyFilters();
+        
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        if (!handleFirestoreError(err, "load transactions")) {
+            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+        }
+    } finally {
+        loadingModal.style.display = "none";
     }
+}
 
     // Enhanced function to calculate running balance for transactions
     function calculateRunningBalance(transactions) {
@@ -1798,32 +1820,40 @@ function downloadSampleCsvFile() {
     }
 
     // Helper function for date comparison
-    function parseTransactionDate(transaction) {
-        if (!transaction.DATE) return null;
+   // Enhanced date parser
+function parseTransactionDate(transaction) {
+    if (!transaction.DATE) return null;
+    
+    try {
+        let dateStr = transaction.DATE;
         
-        try {
-            // Handle different date formats
-            const dateStr = transaction.DATE;
-            let date;
-            
-            if (dateStr.includes('-')) {
-                // Assuming YYYY-MM-DD format
-                date = new Date(dateStr);
-            } else if (dateStr.includes('/')) {
-                // Handle MM/DD/YYYY format
-                const parts = dateStr.split('/');
-                date = new Date(parts[2], parts[0] - 1, parts[1]);
-            } else {
-                // Try default parsing
-                date = new Date(dateStr);
+        // If it's a Firestore Timestamp object
+        if (dateStr && typeof dateStr.toDate === 'function') {
+            return dateStr.toDate();
+        }
+        
+        // If it's already a Date object
+        if (dateStr instanceof Date) {
+            return dateStr;
+        }
+        
+        // Handle string dates
+        if (typeof dateStr === 'string') {
+            // Try ISO format first (YYYY-MM-DD)
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                return new Date(dateStr + 'T00:00:00');
             }
             
-            return isNaN(date.getTime()) ? null : date;
-        } catch (e) {
-            console.warn("Error parsing date:", transaction.DATE, e);
-            return null;
+            // Try other common formats
+            return new Date(dateStr);
         }
+        
+        return null;
+    } catch (e) {
+        console.warn("Error parsing date:", transaction.DATE, e);
+        return null;
     }
+}
 
     // Filter transactions according to selected criteria
     function applyFilters() {
