@@ -1295,55 +1295,60 @@ function downloadSampleCsvFile() {
     }
 
     // Enhanced loadTransactions function
-    async function loadTransactions() {
-        loadingModal.style.display = "flex";
+async function loadTransactions() {
+    loadingModal.style.display = "flex";
+    try {
+        let q;
         try {
-            let q;
-            try {
-                // Try to order by both date and time if possible
+            // Try to order by both date and time if possible
+            q = query(
+                collection(db, "users", currentUser.uid, "transactions"),
+                orderBy("createdAt", "desc") // Use timestamp for consistent ordering
+            );
+        } catch (error) {
+            if (error.code === 'failed-precondition') {
+                // Fallback to date-only ordering
                 q = query(
                     collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("createdAt", "desc") // Use timestamp for consistent ordering
+                    orderBy("DATE", "desc")
                 );
-            } catch (error) {
-                if (error.code === 'failed-precondition') {
-                    // Fallback to date-only ordering
-                    q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                } else {
-                    throw error;
-                }
-            }
-
-            const snap = await getDocs(q);
-            let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // Get account from URL
-            const selectedAccount = getAccountFromURL();
-
-            // Filter if opened from trial balance
-            if (selectedAccount) {
-                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
             } else {
-                document.getElementById("accountTitle").textContent = "All Transactions";
+                throw error;
             }
-
-            allTransactions = calculateRunningBalance(transactions);
-            populateFiltersOptions(allTransactions);
-            applyFilters();
-            
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            if (!handleFirestoreError(err, "load transactions")) {
-                Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
-            }
-        } finally {
-            loadingModal.style.display = "none";
         }
+
+        const snap = await getDocs(q);
+        let transactions = snap.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(),
+            // Ensure SINO field exists and has a value
+            SINO: doc.data().SINO || `VOUCHER-${(snap.docs.indexOf(doc) + 1).toString().padStart(3, '0')}`
+        }));
+
+        // Get account from URL
+        const selectedAccount = getAccountFromURL();
+
+        // Filter if opened from trial balance
+        if (selectedAccount) {
+            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+        } else {
+            document.getElementById("accountTitle").textContent = "All Transactions";
+        }
+
+        allTransactions = calculateRunningBalance(transactions);
+        populateFiltersOptions(allTransactions);
+        applyFilters();
+        
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        if (!handleFirestoreError(err, "load transactions")) {
+            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+        }
+    } finally {
+        loadingModal.style.display = "none";
     }
+}
 
     // Enhanced function to calculate running balance for transactions
     function calculateRunningBalance(transactions) {
