@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -730,146 +729,358 @@
       }
     });
 
-
-    logoutBtn.addEventListener("click", async () => {
+        logoutBtn.addEventListener("click", async () => {
       await signOut(auth);
       window.location.href = "index.html";
     });
 
-    // UI wiring
-    newTxBtn.addEventListener("click", openAddModal);
-    floatingAdd.addEventListener("click", openAddModal);
-    
-    // Balance visibility toggle
-    balanceToggle.addEventListener("click", () => {
-      balanceVisible = !balanceVisible;
-      updateBalanceVisibility();
-    });
-
-    dateFilter.addEventListener("change", () => {
-      if (dateFilter.value === "custom") customRangeControls.style.display = "flex";
-      else customRangeControls.style.display = "none";
-    });
-
-    applyFiltersBtn.addEventListener("click", () => { applyFilters(); });
-    resetFiltersBtn.addEventListener("click", () => {
-      dateFilter.value = "all";
-      typeFilter.value = "all";
-      bankFilter.value = "all";
-      searchDesc.value = "";
-      startDateInput.value = "";
-      endDateInput.value = "";
-      customRangeControls.style.display = "none";
-      applyFilters();
-    });
-
-    // load transactions
-    async function loadTransactions(){
+    // Initialize voucher numbering
+    async function initVoucherNumbering() {
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
-        const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
+        // Get the highest existing voucher numbers for each type
+        const q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          orderBy("VOUCHER_TYPE"),
+          orderBy("SINO", "desc")
+        );
         const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        allTransactions = txs;
-        filteredTransactions = allTransactions.slice();
-        currentPage = 1;
-        buildTable();
-        updateStats();
-        updateBankBalances();
         
-        // Initialize voucher numbering
-        await initVoucherNumbering();
-      } catch (err) {
-        console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        lastVoucherNumber = {
+          Payment: 0,
+          Receipt: 0,
+          Journal: 0
+        };
+        
+        if (!snap.empty) {
+          snap.forEach(doc => {
+            const tx = doc.data();
+            if (tx.SINO && tx.VOUCHER_TYPE) {
+              const match = tx.SINO.match(/\d+$/);
+              if (match) {
+                const num = parseInt(match[0]);
+                const voucherType = tx.VOUCHER_TYPE;
+                if (num > lastVoucherNumber[voucherType]) {
+                  lastVoucherNumber[voucherType] = num;
+                }
+              }
+            }
+          });
+        }
+      } catch (error) {
+        console.error("Error initializing voucher numbering:", error);
+        // Initialize with defaults if error occurs
+        lastVoucherNumber = {
+          Payment: 0,
+          Receipt: 0,
+          Journal: 0
+        };
       }
     }
 
-    // Add this function to initialize voucher numbering
-   // Replace the initVoucherNumbering function with:
-async function initVoucherNumbering() {
-  try {
-    // Get the highest existing voucher numbers for each type
-    const q = query(
-      collection(db, "users", currentUser.uid, "transactions"),
-      orderBy("VOUCHER_TYPE"),
-      orderBy("SINO", "desc")
-    );
-    const snap = await getDocs(q);
-    
-    lastVoucherNumber = {
-      Payment: 0,
-      Receipt: 0,
-      Journal: 0
-    };
-    
-    if (!snap.empty) {
-      snap.forEach(doc => {
-        const tx = doc.data();
-        if (tx.SINO && tx.VOUCHER_TYPE) {
-          const match = tx.SINO.match(/\d+$/);
-          if (match) {
-            const num = parseInt(match[0]);
-            const voucherType = tx.VOUCHER_TYPE;
-            if (num > lastVoucherNumber[voucherType]) {
-              lastVoucherNumber[voucherType] = num;
+    async function getNextVoucherNumber(voucherType) {
+      try {
+        // Get the highest existing voucher number for this type
+        const q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          where("VOUCHER_TYPE", "==", voucherType),
+          orderBy("SINO", "desc"),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+        
+        let lastNumber = 0;
+        
+        if (!snap.empty) {
+          const lastTx = snap.docs[0].data();
+          if (lastTx.SINO) {
+            // Extract number from voucher format like "PAYMENT-001"
+            const match = lastTx.SINO.match(/\d+$/);
+            if (match) {
+              lastNumber = parseInt(match[0]);
             }
           }
         }
-      });
-    }
-  } catch (error) {
-    console.error("Error initializing voucher numbering:", error);
-    // Initialize with defaults if error occurs
-    lastVoucherNumber = {
-      Payment: 0,
-      Receipt: 0,
-      Journal: 0
-    };
-  }
-}
-    // Add this function to generate voucher numbers
-    async function getNextVoucherNumber(voucherType) {
-  try {
-    // Get the highest existing voucher number for this type
-    const q = query(
-      collection(db, "users", currentUser.uid, "transactions"),
-      where("VOUCHER_TYPE", "==", voucherType),
-      orderBy("SINO", "desc"),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    
-    let lastNumber = 0;
-    
-    if (!snap.empty) {
-      const lastTx = snap.docs[0].data();
-      if (lastTx.SINO) {
-        // Extract number from voucher format like "PAYMENT-001"
-        const match = lastTx.SINO.match(/\d+$/);
-        if (match) {
-          lastNumber = parseInt(match[0]);
-        }
-      }
-    }
-    
-    // Increment and format with leading zeros
-    lastNumber++;
-    return `${voucherType.toUpperCase()}-${lastNumber.toString().padStart(3, '0')}`;
-  } catch (error) {
-    console.error("Error getting voucher number:", error);
-    // Fallback: use timestamp
-    return `${voucherType.toUpperCase()}-${Date.now().toString().slice(-6)}`;
-  }
-}
         
         // Increment and format with leading zeros
-        lastVoucherNumber++;
-        return `VOUCHER-${lastVoucherNumber.toString().padStart(3, '0')}`;
+        lastNumber++;
+        return `${voucherType.toUpperCase()}-${lastNumber.toString().padStart(3, '0')}`;
       } catch (error) {
         console.error("Error getting voucher number:", error);
         // Fallback: use timestamp
-        return `VOUCHER-${Date.now().toString().slice(-6)}`;
+        return `${voucherType.toUpperCase()}-${Date.now().toString().slice(-6)}`;
+      }
+    }
+
+    // Load transactions from Firestore
+    async function loadTransactions() {
+      try {
+        if (!currentUser) return;
+        
+        const q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          orderBy("DATE", "desc")
+        );
+        const querySnapshot = await getDocs(q);
+        
+        allTransactions = [];
+        txMap = {};
+        
+        querySnapshot.forEach(doc => {
+          const tx = { id: doc.id, ...doc.data() };
+          allTransactions.push(tx);
+          txMap[doc.id] = tx;
+        });
+        
+        await initVoucherNumbering();
+        applyFilters();
+        calculateBankBalances();
+        updateStats();
+      } catch (error) {
+        console.error("Error loading transactions:", error);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to load transactions.' });
+      }
+    }
+
+    // Filter transactions based on selected filters
+    function applyFilters() {
+      let filtered = [...allTransactions];
+      
+      // Date filter
+      const dateFilterValue = dateFilter.value;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (dateFilterValue === "today") {
+        filtered = filtered.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          txDate.setHours(0, 0, 0, 0);
+          return txDate.getTime() === today.getTime();
+        });
+      } else if (dateFilterValue === "week") {
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay());
+        
+        filtered = filtered.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          return txDate >= weekStart;
+        });
+      } else if (dateFilterValue === "month") {
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+        
+        filtered = filtered.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          return txDate >= monthStart;
+        });
+      } else if (dateFilterValue === "year") {
+        const yearStart = new Date(today.getFullYear(), 0, 1);
+        
+        filtered = filtered.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          return txDate >= yearStart;
+        });
+      } else if (dateFilterValue === "custom") {
+        const startDate = new Date(startDateInput.value);
+        const endDate = new Date(endDateInput.value);
+        endDate.setHours(23, 59, 59, 999);
+        
+        if (startDateInput.value && endDateInput.value) {
+          filtered = filtered.filter(tx => {
+            const txDate = new Date(tx.DATE);
+            return txDate >= startDate && txDate <= endDate;
+          });
+        }
+      }
+      
+      // Type filter
+      const typeFilterValue = typeFilter.value;
+      if (typeFilterValue !== "all") {
+        filtered = filtered.filter(tx => tx.TYPE === typeFilterValue);
+      }
+      
+      // Bank filter
+      const bankFilterValue = bankFilter.value;
+      if (bankFilterValue !== "all") {
+        filtered = filtered.filter(tx => tx.BANKNAME === bankFilterValue);
+      }
+      
+      // Search filter
+      const searchValue = searchDesc.value.toLowerCase();
+      if (searchValue) {
+        filtered = filtered.filter(tx => 
+          (tx.NOTES && tx.NOTES.toLowerCase().includes(searchValue)) ||
+          (tx.ACCOUNTHEADER && tx.ACCOUNTHEADER.toLowerCase().includes(searchValue)) ||
+          (tx.SINO && tx.SINO.toLowerCase().includes(searchValue))
+        );
+      }
+      
+      filteredTransactions = filtered;
+      currentPage = 1;
+      buildTable();
+      buildPagination();
+    }
+
+    // Build the transactions table
+    function buildTable() {
+      transactionsTableBody.innerHTML = "";
+      
+      if (filteredTransactions.length === 0) {
+        transactionsTableBody.innerHTML = `
+          <tr>
+            <td colspan="10" class="text-center text-muted py-4">
+              No transactions found matching your criteria.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+      
+      // Calculate pagination
+      const startIndex = (currentPage - 1) * rowsPerPage;
+      const endIndex = Math.min(startIndex + rowsPerPage, filteredTransactions.length);
+      const pageTransactions = filteredTransactions.slice(startIndex, endIndex);
+      
+      pageTransactions.forEach(tx => {
+        const date = formatDate(tx.DATE);
+        const income = tx.INCOME ? parseFloat(tx.INCOME).toFixed(2) : "0.00";
+        const expense = tx.EXPENSE ? parseFloat(tx.EXPENSE).toFixed(2) : "0.00";
+        const balance = tx.BALANCE ? parseFloat(tx.BALANCE).toFixed(2) : "0.00";
+        
+        const row = document.createElement("tr");
+        
+        // Format income/expense with color coding
+        const incomeDisplay = tx.INCOME ? 
+          `<span class="income-color">$${income}</span>` : "$0.00";
+        const expenseDisplay = tx.EXPENSE ? 
+          `<span class="expense-color">$${expense}</span>` : "$0.00";
+        
+        // Attachment indicator
+        let attachmentIcon = "";
+        if (tx.ATTACH) {
+          attachmentIcon = `<i class="fa fa-paperclip" title="Has attachment"></i>`;
+        }
+        
+        row.innerHTML = `
+          <td>${date}</td>
+          <td>${escapeHtml(tx.NOTES || "")}</td>
+          <td><span class="badge ${tx.TYPE === 'Income' ? 'badge-income' : 'badge-expense'}">${tx.TYPE}</span></td>
+          <td>${escapeHtml(tx.SINO || "")}</td>
+          <td>${escapeHtml(tx.BANKNAME || "")}</td>
+          <td style="text-align:right;">${incomeDisplay}</td>
+          <td style="text-align:right;">${expenseDisplay}</td>
+          <td style="text-align:right;">$${balance}</td>
+          <td>${attachmentIcon}</td>
+          <td>
+            <button class="action-btn btn-view" data-id="${tx.id}" title="View attachment">
+              <i class="fa fa-eye"></i>
+            </button>
+            <button class="action-btn btn-edit" data-id="${tx.id}" title="Edit">
+              <i class="fa fa-edit"></i>
+            </button>
+            <button class="action-btn btn-del" data-id="${tx.id}" title="Delete">
+              <i class="fa fa-trash"></i>
+            </button>
+          </td>
+        `;
+        
+        transactionsTableBody.appendChild(row);
+      });
+      
+      // Add event listeners to action buttons
+      document.querySelectorAll(".btn-view").forEach(btn => {
+        btn.addEventListener("click", () => viewAttachment(btn.dataset.id));
+      });
+      
+      document.querySelectorAll(".btn-edit").forEach(btn => {
+        btn.addEventListener("click", () => openEditModal(btn.dataset.id));
+      });
+      
+      document.querySelectorAll(".btn-del").forEach(btn => {
+        btn.addEventListener("click", () => confirmDelete(btn.dataset.id));
+      });
+    }
+
+    // Build pagination controls
+    function buildPagination() {
+      const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+      
+      if (totalPages <= 1) {
+        paginationControls.innerHTML = "";
+        return;
+      }
+      
+      let paginationHTML = `
+        <nav>
+          <ul class="pagination">
+            <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+              <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+            </li>
+      `;
+      
+      for (let i = 1; i <= totalPages; i++) {
+        paginationHTML += `
+          <li class="page-item ${i === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" data-page="${i}">${i}</a>
+          </li>
+        `;
+      }
+      
+      paginationHTML += `
+            <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+              <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
+            </li>
+          </ul>
+        </nav>
+      `;
+      
+      paginationControls.innerHTML = paginationHTML;
+      
+      // Add event listeners to pagination links
+      document.querySelectorAll(".page-link").forEach(link => {
+        link.addEventListener("click", e => {
+          e.preventDefault();
+          const page = parseInt(link.dataset.page);
+          if (page && page !== currentPage) {
+            currentPage = page;
+            buildTable();
+            buildPagination();
+          }
+        });
+      });
+    }
+
+    // Update statistics
+    function updateStats() {
+      // Calculate total income and expenses
+      const totalIncome = allTransactions
+        .filter(tx => tx.TYPE === "Income")
+        .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+      
+      const totalExpense = allTransactions
+        .filter(tx => tx.TYPE === "Expense")
+        .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+      
+      const balance = totalIncome - totalExpense;
+      
+      // Update stats display
+      statIncome.textContent = `$${totalIncome.toFixed(2)}`;
+      statExpense.textContent = `$${totalExpense.toFixed(2)}`;
+      statBalance.textContent = `$${balance.toFixed(2)}`;
+      
+      // Count transactions this month
+      const thisMonth = new Date().getMonth();
+      const thisYear = new Date().getFullYear();
+      const monthCount = allTransactions.filter(tx => {
+        const txDate = new Date(tx.DATE);
+        return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
+      }).length;
+      
+      statCount.textContent = monthCount;
+      
+      // Apply balance visibility setting
+      if (!balanceVisible) {
+        statBalance.classList.add("balance-hidden");
+      } else {
+        statBalance.classList.remove("balance-hidden");
       }
     }
 
@@ -877,695 +1088,363 @@ async function initVoucherNumbering() {
     function calculateBankBalances() {
       const bankBalances = {};
       
-      // Initialize all known banks with 0 balance
+      // Initialize all known banks with zero balance
       coaBanks.forEach(bank => {
         bankBalances[bank] = 0;
       });
       
-      // Calculate balances based on transactions
+      // Calculate balances from transactions
       allTransactions.forEach(tx => {
-        const bankName = tx.BANK_NAME || tx.MODE || "";
-        if (bankName && coaBanks.includes(bankName)) {
-          const income = parseFloat(tx.INCOME) || 0;
-          const expense = parseFloat(tx.EXPENSE) || 0;
-          bankBalances[bankName] += (income - expense);
+        if (tx.BANKNAME && bankBalances[tx.BANKNAME] !== undefined) {
+          if (tx.TYPE === "Income") {
+            bankBalances[tx.BANKNAME] += parseFloat(tx.INCOME) || 0;
+          } else if (tx.TYPE === "Expense") {
+            bankBalances[tx.BANKNAME] -= parseFloat(tx.EXPENSE) || 0;
+          }
         }
       });
       
-      return bankBalances;
-    }
-    
-    // Update bank balances display
-    function updateBankBalances() {
-      const bankBalances = calculateBankBalances();
-      
+      // Update bank balances display
       bankBalancesContainer.innerHTML = "";
       
-      // Add a section for cash if it exists in transactions
-      let hasCash = false;
-      allTransactions.forEach(tx => {
-        if ((tx.BANK_NAME === "Cash" || tx.MODE === "Cash") && !coaBanks.includes("Cash")) {
-          hasCash = true;
-        }
-      });
-      
-      if (hasCash) {
-        let cashBalance = 0;
-        allTransactions.forEach(tx => {
-          if (tx.BANK_NAME === "Cash" || tx.MODE === "Cash") {
-            const income = parseFloat(tx.INCOME) || 0;
-            const expense = parseFloat(tx.EXPENSE) || 0;
-            cashBalance += (income - expense);
-          }
-        });
+      Object.entries(bankBalances).forEach(([bank, balance]) => {
+        const balanceItem = document.createElement("div");
+        balanceItem.className = "bank-balance-item";
         
-        const cashItem = document.createElement("div");
-        cashItem.className = "bank-balance-item";
-        cashItem.innerHTML = `
-          <div class="bank-balance-name">Cash</div>
-          <div class="bank-balance-value ${cashBalance >= 0 ? 'positive-balance' : 'negative-balance'}">
-            ${balanceVisible ? `$${cashBalance.toFixed(2)}` : '••••'}
-          </div>
-          <button class="balance-toggle" title="Toggle balance visibility">
-            <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
-          </button>
-        `;
-        bankBalancesContainer.appendChild(cashItem);
+        const balanceClass = balance >= 0 ? "positive-balance" : "negative-balance";
+        const formattedBalance = balance.toFixed(2);
         
-        // Add event listener to the cash balance toggle
-        cashItem.querySelector('.balance-toggle').addEventListener('click', () => {
-          balanceVisible = !balanceVisible;
-          updateBalanceVisibility();
-        });
-      }
-      
-      // Add bank balances
-      Object.entries(bankBalances).forEach(([bankName, balance]) => {
-        const bankItem = document.createElement("div");
-        bankItem.className = "bank-balance-item";
-        bankItem.innerHTML = `
-          <div class="bank-balance-name">${escapeHtml(bankName)}</div>
-          <div class="bank-balance-value ${balance >= 0 ? 'positive-balance' : 'negative-balance'}">
-            ${balanceVisible ? `$${balance.toFixed(2)}` : '••••'}
-          </div>
-          <button class="balance-toggle" title="Toggle balance visibility">
-            <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
-          </button>
-        `;
-        bankBalancesContainer.appendChild(bankItem);
-        
-        // Add event listener to the bank balance toggle
-        bankItem.querySelector('.balance-toggle').addEventListener('click', () => {
-          balanceVisible = !balanceVisible;
-          updateBalanceVisibility();
-        });
-      });
-    }
-    
-    // Update balance visibility across the app
-    function updateBalanceVisibility() {
-      // Update main balance
-      const totalIncome = allTransactions.reduce((s,t)=> s + (parseFloat(t.INCOME)||0), 0);
-      const totalExpense = allTransactions.reduce((s,t)=> s + (parseFloat(t.EXPENSE)||0), 0);
-      const balance = totalIncome - totalExpense;
-      
-      statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
-      statBalance.classList.toggle('balance-hidden', !balanceVisible);
-      
-      // Update toggle button icon
-      balanceToggle.innerHTML = `<i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
-      
-      // Update bank balances
-      updateBankBalances();
-    }
-
-    // filters
-    function applyFilters(){
-      filteredTransactions = allTransactions.slice();
-      const now = new Date();
-
-      function inRange(dateStr, start, end){
-        if (!dateStr) return false;
-        const d = new Date(dateStr);
-        return d >= start && d <= end;
-      }
-
-      // Date filter
-      if (dateFilter.value !== "all") {
-        let start, end;
-        switch (dateFilter.value) {
-          case "today":
-            start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-            break;
-          case "week":
-            const day = now.getDay();
-            start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
-            end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - day) + 1);
-            break;
-          case "month":
-            start = new Date(now.getFullYear(), now.getMonth(), 1);
-            end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-            break;
-          case "year":
-            start = new Date(now.getFullYear(), 0, 1);
-            end = new Date(now.getFullYear() + 1, 0, 1);
-            break;
-          case "custom":
-            if (startDateInput.value && endDateInput.value) {
-              start = new Date(startDateInput.value);
-              end = new Date(endDateInput.value);
-              end.setDate(end.getDate() + 1); // include end date
-            }
-            break;
-        }
-        if (start && end) {
-          filteredTransactions = filteredTransactions.filter(t => inRange(t.DATE, start, end));
-        }
-      }
-
-      // Type filter
-      if (typeFilter.value !== "all") {
-        filteredTransactions = filteredTransactions.filter(t => t.TYPE === typeFilter.value);
-      }
-
-      // Bank filter
-      if (bankFilter.value !== "all") {
-        filteredTransactions = filteredTransactions.filter(t => 
-          (t.BANK_NAME || t.MODE || "") === bankFilter.value
-        );
-      }
-
-      // Search filter
-      if (searchDesc.value.trim()) {
-        const term = searchDesc.value.trim().toLowerCase();
-        filteredTransactions = filteredTransactions.filter(t => 
-          (t.DESCRIPTION || "").toLowerCase().includes(term) ||
-          (t.NOTES || "").toLowerCase().includes(term)
-        );
-      }
-
-      currentPage = 1;
-      buildTable();
-      updateStats();
-    }
-
-    // Add this function to format dates as yyyy-mmm-dd
-function formatDate(dateStr) {
-  if (!dateStr) return "";
-  
-  const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = monthNames[date.getMonth()];
-  const day = date.getDate().toString().padStart(2, '0');
-  
-  return `${year}-${month}-${day}`;
-}
-
-    // build table
-    function buildTable(){
-      if (filteredTransactions.length === 0) {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
-        paginationControls.innerHTML = "";
-        return;
-      }
-
-      const startIndex = (currentPage - 1) * rowsPerPage;
-      const endIndex = Math.min(startIndex + rowsPerPage, filteredTransactions.length);
-      const pageTransactions = filteredTransactions.slice(startIndex, endIndex);
-
-      let html = "";
-      pageTransactions.forEach(tx => {
-        const date = formatDate(tx.DATE);
-        const income = parseFloat(tx.INCOME) || 0;
-        const expense = parseFloat(tx.EXPENSE) || 0;
-        const balance = parseFloat(tx.BALANCE) || 0;
-        
-        // Apply color coding
-        const incomeDisplay = income > 0 ? `<span class="income-color">$${income.toFixed(2)}</span>` : "$0.00";
-        const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
-        const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
-        
-        html += `
-          <tr>
-            <td>${escapeHtml(date)}</td>
-            <td>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</td>
-            <td><span class="badge ${tx.TYPE === 'Income' ? 'badge-income' : 'badge-expense'}">${escapeHtml(tx.TYPE)}</span></td>
-            <td>${escapeHtml(tx.SINO || "")}</td>
-            <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
-            <td style="text-align:right;">${incomeDisplay}</td>
-            <td style="text-align:right;">${expenseDisplay}</td>
-            <td style="text-align:right;" class="${balanceVisible ? '' : 'balance-hidden'}">${balanceDisplay}</td>
-            <td>
+        balanceItem.innerHTML = `
+          <span class="bank-balance-name">${escapeHtml(bank)}:</span>
+          <span class="bank-balance-value ${balanceClass}">$${formattedBalance}</span>
         `;
         
-        // Attachment handling
-        if (tx.ATTACHMENT) {
-          html += `
-            <button class="btn btn-sm btn-outline-primary view-attachment" data-attachment="${escapeHtml(tx.ATTACHMENT)}">
-              <i class="fa fa-paperclip"></i> View
-            </button>
-          `;
-        } else {
-          html += `<span class="text-muted">None</span>`;
-        }
-        
-        html += `
-            </td>
-            <td>
-              <div class="d-flex gap-1">
-                <button class="action-btn btn-view view-tx" data-id="${tx.id}"><i class="fa fa-eye"></i></button>
-                <button class="action-btn btn-edit edit-tx" data-id="${tx.id}"><i class="fa fa-edit"></i></button>
-                <button class="action-btn btn-del delete-tx" data-id="${tx.id}"><i class="fa fa-trash"></i></button>
-              </div>
-            </td>
-          </tr>
-        `;
-      });
-      
-      transactionsTableBody.innerHTML = html;
-
-      // Add event listeners
-      document.querySelectorAll(".view-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
-          viewTransaction(id);
-        });
-      });
-
-      document.querySelectorAll(".edit-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
-          editTransaction(id);
-        });
-      });
-
-      document.querySelectorAll(".delete-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
-          confirmDelete(id);
-        });
-      });
-
-      document.querySelectorAll(".view-attachment").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const attachment = e.currentTarget.getAttribute("data-attachment");
-          viewAttachment(attachment);
-        });
-      });
-
-      // Build pagination
-      buildPagination();
-    }
-
-    function buildPagination() {
-      const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
-      if (totalPages <= 1) {
-        paginationControls.innerHTML = "";
-        return;
-      }
-
-      let html = `<nav><ul class="pagination pagination-sm">`;
-
-      const startPage = Math.max(1, currentPage - 2);
-      const endPage = Math.min(totalPages, startPage + 4);
-
-      html += `
-        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-          <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
-        </li>
-      `;
-
-      for (let i = startPage; i <= endPage; i++) {
-        html += `
-          <li class="page-item ${i === currentPage ? 'active' : ''}">
-            <a class="page-link" href="#" data-page="${i}">${i}</a>
-          </li>
-        `;
-      }
-
-      html += `
-        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-          <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
-        </li>
-      `;
-
-      paginationControls.innerHTML = html;
-
-      paginationControls.querySelectorAll(".page-link").forEach(link => {
-        link.addEventListener("click", e => {
-          e.preventDefault();
-          const page = parseInt(e.target.getAttribute("data-page"));
-          if (page && page !== currentPage && page > 0 && page <= totalPages) {
-            currentPage = page;
-            buildTable();
-          }
-        });
+        bankBalancesContainer.appendChild(balanceItem);
       });
     }
 
-    function updateStats(){
-      const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
-      const totalExpense = filteredTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
-      const balance = totalIncome - totalExpense;
-      
-      statIncome.textContent = `$${totalIncome.toFixed(2)}`;
-      statExpense.textContent = `$${totalExpense.toFixed(2)}`;
-      statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
-      statCount.textContent = filteredTransactions.length;
-      
-      // Apply color coding
-      statIncome.className = "stat-value income-color";
-      statExpense.className = "stat-value expense-color";
-    }
-
-    // Add this function to handle income/expense field behavior
-    function setupIncomeExpenseBehavior() {
-      const typeSelect = document.getElementById("formTYPE");
-      const incomeInput = document.getElementById("formINCOME");
-      const expenseInput = document.getElementById("formEXPENSE");
-      
-      function updateFieldVisibility() {
-        if (typeSelect.value === "Income") {
-          incomeInput.disabled = false;
-          expenseInput.disabled = true;
-          expenseInput.value = "";
-        } else if (typeSelect.value === "Expense") {
-          incomeInput.disabled = true;
-          incomeInput.value = "";
-          expenseInput.disabled = false;
-        } else {
-          incomeInput.disabled = false;
-          expenseInput.disabled = false;
-        }
-      }
-      
-      // Set initial state
-      updateFieldVisibility();
-      
-      // Update on change
-      typeSelect.addEventListener("change", updateFieldVisibility);
-    }
-
-    async function openAddModal(){
-      txIdInput.value = "";
+    // Open modal for adding a new transaction
+    async function openAddModal() {
+      transactionModalEl.querySelector(".modal-title").textContent = "Add Transaction";
       form.reset();
-      formDATE.value = new Date().toISOString().split('T')[0];
-      formTYPE.value = "Income";
-      formVOUCHERTYPE.value = "Payment";
-
-      formVOUCHERTYPE.addEventListener("change", async function() {
-  if (!txIdInput.value) { // Only auto-generate for new transactions
-    formSINO.value = await getNextVoucherNumber(this.value);
-  }
-});
+      txIdInput.value = "";
       
-      // Auto-generate voucher number
+      // Set default values
+      const today = new Date().toISOString().split('T')[0];
+      formDATE.value = today;
+      formVOUCHERTYPE.value = "Payment";
+      formTYPE.value = "Expense";
+      
+      // Generate voucher number
       formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
       
-      formINCOME.value = "";
-      formEXPENSE.value = "";
-      formBALANCE.value = "";
-      formNOTES.value = "";
+      // Reset attachment fields
       formATTACH.value = "";
+      formATTACHFILE.value = "";
       attachmentPreview.style.display = "none";
       attachmentInfo.textContent = "";
-      uploadProgress.style.display = "none";
       
-      // Enable all fields when opening modal
-      Array.from(form.elements).forEach(el => el.disabled = false);
-      saveTransactionBtn.style.display = "block";
-      saveTransactionBtn.disabled = false;
-      saveTransactionBtn.innerHTML = 'Save Transaction';
-      
-      // Set up income/expense field behavior
-      setupIncomeExpenseBehavior();
-      
-      document.getElementById("transactionModalLabel").textContent = "Add Transaction";
       transactionModal.show();
     }
 
-    function viewTransaction(id){
-      const tx = allTransactions.find(t => t.id === id);
+    // Open modal for editing an existing transaction
+    async function openEditModal(id) {
+      const tx = txMap[id];
       if (!tx) return;
       
-      txIdInput.value = tx.id;
-      formDATE.value = tx.DATE || "";
+      transactionModalEl.querySelector(".modal-title").textContent = "Edit Transaction";
+      form.reset();
+      txIdInput.value = id;
+      
+      // Fill form with transaction data
+      formDATE.value = tx.DATE ? new Date(tx.DATE).toISOString().split('T')[0] : "";
       formSINO.value = tx.SINO || "";
-      formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+      formACCOUNTHEADER.value = tx.ACCOUNTHEADER || "";
       formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
-      formTYPE.value = tx.TYPE || "Income";
-      formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+      formTYPE.value = tx.TYPE || "Expense";
+      formBANKNAME.value = tx.BANKNAME || "";
       formINCOME.value = tx.INCOME || "";
       formEXPENSE.value = tx.EXPENSE || "";
       formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || tx.DESCRIPTION || "";
-      formATTACH.value = tx.ATTACHMENT || "";
+      formNOTES.value = tx.NOTES || "";
+      formATTACH.value = tx.ATTACH || "";
       
       // Show attachment if exists
-      if (tx.ATTACHMENT) {
-        attachmentInfo.textContent = "Attachment: " + tx.ATTACHMENT;
-        // For viewing only, don't show preview if it's not an image
+      if (tx.ATTACH) {
+        attachmentInfo.textContent = "Existing attachment: " + tx.ATTACH.split('/').pop();
+        
+        // Show preview if it's an image
+        if (tx.ATTACH.match(/\.(jpeg|jpg|gif|png)$/i)) {
+          attachmentPreview.src = tx.ATTACH;
+          attachmentPreview.style.display = "block";
+        }
       } else {
+        attachmentPreview.style.display = "none";
         attachmentInfo.textContent = "";
       }
-      
-      document.getElementById("transactionModalLabel").textContent = "View Transaction";
-      
-      // Disable all fields for view mode
-      Array.from(form.elements).forEach(el => el.disabled = true);
-      saveTransactionBtn.style.display = "none";
       
       transactionModal.show();
     }
 
-    function editTransaction(id){
-      const tx = allTransactions.find(t => t.id === id);
-      if (!tx) return;
-      
-      txIdInput.value = tx.id;
-      formDATE.value = tx.DATE || "";
-      formSINO.value = tx.SINO || "";
-      formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
-      formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
-      formTYPE.value = tx.TYPE || "Income";
-      formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
-      formINCOME.value = tx.INCOME || "";
-      formEXPENSE.value = tx.EXPENSE || "";
-      formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || tx.DESCRIPTION || "";
-      formATTACH.value = tx.ATTACHMENT || "";
-      
-      // Show attachment info if exists
-      if (tx.ATTACHMENT) {
-        attachmentInfo.textContent = "Current: " + tx.ATTACHMENT;
-      } else {
-        attachmentInfo.textContent = "";
+    // View attachment
+    function viewAttachment(id) {
+      const tx = txMap[id];
+      if (!tx || !tx.ATTACH) {
+        Swal.fire({ icon: 'info', title: 'No Attachment', text: 'This transaction has no attachment.' });
+        return;
       }
       
-      // Set up income/expense field behavior
-      setupIncomeExpenseBehavior();
+      attachmentModalBody.innerHTML = "";
       
-      document.getElementById("transactionModalLabel").textContent = "Edit Transaction";
+      if (tx.ATTACH.match(/\.(jpeg|jpg|gif|png)$/i)) {
+        // Image attachment
+        const img = document.createElement("img");
+        img.src = tx.ATTACH;
+        img.style.maxWidth = "100%";
+        img.style.maxHeight = "70vh";
+        attachmentModalBody.appendChild(img);
+      } else if (tx.ATTACH.match(/\.(pdf)$/i)) {
+        // PDF attachment
+        const iframe = document.createElement("iframe");
+        iframe.src = tx.ATTACH;
+        iframe.style.width = "100%";
+        iframe.style.height = "70vh";
+        attachmentModalBody.appendChild(iframe);
+      } else {
+        // Other file types - show download link
+        const link = document.createElement("a");
+        link.href = tx.ATTACH;
+        link.target = "_blank";
+        link.className = "btn btn-primary";
+        link.innerHTML = `<i class="fa fa-download me-2"></i> Download Attachment`;
+        attachmentModalBody.appendChild(link);
+        
+        const fileName = document.createElement("p");
+        fileName.className = "mt-3";
+        fileName.textContent = "File: " + tx.ATTACH.split('/').pop();
+        attachmentModalBody.appendChild(fileName);
+      }
       
-      // Enable all fields for edit mode
-      Array.from(form.elements).forEach(el => el.disabled = false);
-      saveTransactionBtn.style.display = "block";
-      saveTransactionBtn.disabled = false;
-      saveTransactionBtn.innerHTML = 'Save Transaction';
-      
-      transactionModal.show();
+      attachmentModal.show();
     }
 
-    function confirmDelete(id){
+    // Confirm delete transaction
+    function confirmDelete(id) {
       txToDelete = id;
       confirmDeleteModal.show();
     }
 
-    confirmDeleteBtn.addEventListener("click", async () => {
+    // Delete transaction
+    async function deleteTransaction() {
       if (!txToDelete) return;
       
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
-        Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
+        Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully.' });
+        
+        // Reload transactions
         await loadTransactions();
+        
         confirmDeleteModal.hide();
-      } catch (err) {
-        console.error("deleteTransaction", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
+        txToDelete = null;
+      } catch (error) {
+        console.error("Error deleting transaction:", error);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction.' });
       }
-    });
-
-    // Add this function to reset the save button state
-    function resetSaveButton() {
-      isSubmitting = false;
-      saveTransactionBtn.disabled = false;
-      saveTransactionBtn.innerHTML = 'Save Transaction';
     }
 
-    // Handle file attachment
-    formATTACHFILE.addEventListener("change", async function () {
-      const file = this.files[0];
-      if (!file) return;
-      
-      // Check file size (limit to 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        Swal.fire({ icon: 'error', title: 'File too large', text: 'Please select a file smaller than 10MB' });
-        this.value = '';
-        return;
-      }
-
-      // Check if Cloudinary is configured
-      if (CLOUDINARY_CLOUD_NAME === "your_cloud_name_here" || CLOUDINARY_UPLOAD_PRESET === "your_upload_preset_here") {
-        Swal.fire({ 
-          icon: 'error', 
-          title: 'Configuration Error', 
-          html: 'Cloudinary is not properly configured.<br>Please set your Cloudinary cloud name and upload preset in the script.'
-        });
-        this.value = '';
-        return;
-      }
-
-      // Upload to Cloudinary
-      try {
+    // Upload file to Cloudinary
+    async function uploadFile(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) {
+          resolve(null);
+          return;
+        }
+        
+        // Show progress bar
         uploadProgress.style.display = "block";
         uploadProgressBar.style.width = "0%";
         
-        const uploadedUrl = await uploadToCloudinary(file, (progress) => {
-          uploadProgressBar.style.width = `${progress}%`;
-        });
-        
-        formATTACH.value = uploadedUrl;
-        attachmentInfo.textContent = "Uploaded: " + file.name;
-
-        // Show preview if it's an image
-        if (file.type.startsWith('image/')) {
-          attachmentPreview.src = uploadedUrl;
-          attachmentPreview.style.display = "block";
-        } else {
-          attachmentPreview.style.display = "none";
-        }
-        
-        uploadProgress.style.display = "none";
-
-      } catch (err) {
-        console.error("Upload failed", err);
-        uploadProgress.style.display = "none";
-        Swal.fire({ 
-          icon: 'error', 
-          title: 'Upload failed', 
-          text: 'Could not upload attachment. Please check your Cloudinary configuration.' 
-        });
-        this.value = '';
-      }
-    });
-
-    // Save transaction
-    saveTransactionBtn.addEventListener("click", async () => {
-      // Prevent duplicate submissions
-      if (isSubmitting) return;
-      isSubmitting = true;
-      
-      // Show loading state
-      saveTransactionBtn.disabled = true;
-      saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
-      
-      // Validate form
-      if (!formDATE.value) {
-        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
-        resetSaveButton();
-        return;
-      }
-      
-      const txData = {
-        DATE: formDATE.value,
-        SINO: formSINO.value,
-        ACCOUNT_HEADER: formACCOUNTHEADER.value,
-        VOUCHER_TYPE: formVOUCHERTYPE.value,
-        TYPE: formTYPE.value,
-        BANK_NAME: formBANKNAME.value,
-        INCOME: parseFloat(formINCOME.value) || 0,
-        EXPENSE: parseFloat(formEXPENSE.value) || 0,
-        BALANCE: parseFloat(formBALANCE.value) || 0,
-        NOTES: formNOTES.value,
-        DESCRIPTION: formNOTES.value, // For backward compatibility
-        ATTACHMENT: formATTACH.value,
-        MODE: formBANKNAME.value, // For backward compatibility
-        UPDATED_AT: new Date().toISOString()
-      };
-      
-      try {
-        if (txIdInput.value) {
-          // Update existing transaction
-          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
-          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
-        } else {
-          // Add new transaction
-          txData.CREATED_AT = new Date().toISOString();
-          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
-        }
-        
-        transactionModal.hide();
-        await loadTransactions();
-      } catch (err) {
-        console.error("saveTransaction", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
-      } finally {
-        resetSaveButton();
-      }
-    });
-
-    // View attachment
-    function viewAttachment(attachmentUrl) {
-      if (!attachmentUrl) return;
-
-      const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(attachmentUrl);
-      const isPDF = /\.(pdf)$/i.test(attachmentUrl);
-      const isDocument = /\.(doc|docx|xls|xlsx|txt)$/i.test(attachmentUrl);
-
-      attachmentModalBody.innerHTML = `
-        <div class="mb-3">
-          <h6>Attachment Preview</h6>
-          ${isImage 
-            ? `<img src="${attachmentUrl}" class="img-fluid" style="max-height: 400px;" />`
-            : isPDF
-              ? `<iframe src="${attachmentUrl}" width="100%" height="400px"></iframe>`
-              : isDocument
-                ? `<div class="alert alert-info">Document files can be downloaded but not previewed</div>`
-                : `<div class="alert alert-info">File type not supported for preview</div>`
-          }
-        </div>
-        <div>
-          <a class="btn btn-primary" href="${attachmentUrl}" download target="_blank">
-            <i class="fa fa-download me-1"></i> Download
-          </a>
-        </div>
-      `;
-
-      attachmentModal.show();
-    }
-
-    // Upload to Cloudinary with progress tracking
-    async function uploadToCloudinary(file, onProgress) {
-      return new Promise((resolve, reject) => {
         const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+        formData.append("file", file);
+        formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
         
         const xhr = new XMLHttpRequest();
         
-        xhr.upload.addEventListener('progress', (e) => {
+        xhr.upload.addEventListener("progress", e => {
           if (e.lengthComputable) {
             const percent = Math.round((e.loaded / e.total) * 100);
-            if (onProgress) onProgress(percent);
+            uploadProgressBar.style.width = percent + "%";
           }
         });
         
-        xhr.addEventListener('load', () => {
+        xhr.addEventListener("load", () => {
+          uploadProgress.style.display = "none";
+          
           if (xhr.status >= 200 && xhr.status < 300) {
             const response = JSON.parse(xhr.responseText);
             resolve(response.secure_url);
           } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
+            reject(new Error("Upload failed"));
           }
         });
         
-        xhr.addEventListener('error', () => {
-          reject(new Error('Upload failed'));
+        xhr.addEventListener("error", () => {
+          uploadProgress.style.display = "none";
+          reject(new Error("Upload failed"));
         });
         
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
+        xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
         xhr.send(formData);
       });
     }
-    
-    // Initialize with balance hidden
-    updateBalanceVisibility();
-  </script>
 
-  <!-- Bootstrap JS -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    // Save transaction (add or update)
+    async function saveTransaction() {
+      if (isSubmitting) return;
+      isSubmitting = true;
+      
+      try {
+        // Validate form
+        if (!formDATE.value) {
+          Swal.fire({ icon: 'error', title: 'Error', text: 'Date is required.' });
+          isSubmitting = false;
+          return;
+        }
+        
+        // Prepare transaction data
+        const txData = {
+          DATE: formDATE.value,
+          SINO: formSINO.value,
+          ACCOUNTHEADER: formACCOUNTHEADER.value,
+          VOUCHER_TYPE: formVOUCHERTYPE.value,
+          TYPE: formTYPE.value,
+          BANKNAME: formBANKNAME.value,
+          INCOME: formINCOME.value ? parseFloat(formINCOME.value) : 0,
+          EXPENSE: formEXPENSE.value ? parseFloat(formEXPENSE.value) : 0,
+          BALANCE: formBALANCE.value ? parseFloat(formBALANCE.value) : 0,
+          NOTES: formNOTES.value,
+          ATTACH: formATTACH.value,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        
+        // Upload file if selected
+        if (formATTACHFILE.files.length > 0) {
+          const fileUrl = await uploadFile(formATTACHFILE.files[0]);
+          if (fileUrl) {
+            txData.ATTACH = fileUrl;
+          }
+        }
+        
+        // Save to Firestore
+        if (txIdInput.value) {
+          // Update existing transaction
+          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
+          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully.' });
+        } else {
+          // Add new transaction
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully.' });
+        }
+        
+        // Reload transactions and close modal
+        await loadTransactions();
+        transactionModal.hide();
+        
+      } catch (error) {
+        console.error("Error saving transaction:", error);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction.' });
+      } finally {
+        isSubmitting = false;
+      }
+    }
+
+    // Event listeners
+    newTxBtn.addEventListener("click", openAddModal);
+    floatingAdd.addEventListener("click", openAddModal);
+    
+    formVOUCHERTYPE.addEventListener("change", async function() {
+      if (!txIdInput.value) { // Only auto-generate for new transactions
+        formSINO.value = await getNextVoucherNumber(this.value);
+      }
+    });
+    
+    formTYPE.addEventListener("change", function() {
+      // Clear the opposite field when type changes
+      if (this.value === "Income") {
+        formEXPENSE.value = "";
+      } else {
+        formINCOME.value = "";
+      }
+    });
+    
+    formATTACHFILE.addEventListener("change", function() {
+      if (this.files.length > 0) {
+        const file = this.files[0];
+        attachmentInfo.textContent = `Selected file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        
+        // Show preview if it's an image
+        if (file.type.match('image.*')) {
+          const reader = new FileReader();
+          reader.onload = e => {
+            attachmentPreview.src = e.target.result;
+            attachmentPreview.style.display = "block";
+          };
+          reader.readAsDataURL(file);
+        } else {
+          attachmentPreview.style.display = "none";
+        }
+      } else {
+        attachmentPreview.style.display = "none";
+        attachmentInfo.textContent = "";
+      }
+    });
+    
+    saveTransactionBtn.addEventListener("click", saveTransaction);
+    confirmDeleteBtn.addEventListener("click", deleteTransaction);
+    
+    // Filter event listeners
+    dateFilter.addEventListener("change", function() {
+      if (this.value === "custom") {
+        customRangeControls.style.display = "flex";
+      } else {
+        customRangeControls.style.display = "none";
+      }
+    });
+    
+    applyFiltersBtn.addEventListener("click", applyFilters);
+    resetFiltersBtn.addEventListener("click", () => {
+      dateFilter.value = "all";
+      typeFilter.value = "all";
+      bankFilter.value = "all";
+      searchDesc.value = "";
+      customRangeControls.style.display = "none";
+      applyFilters();
+    });
+    
+    // Balance visibility toggle
+    balanceToggle.addEventListener("click", function() {
+      balanceVisible = !balanceVisible;
+      if (balanceVisible) {
+        statBalance.classList.remove("balance-hidden");
+        this.innerHTML = '<i class="fa fa-eye"></i>';
+        this.title = "Hide balance";
+      } else {
+        statBalance.classList.add("balance-hidden");
+        this.innerHTML = '<i class="fa fa-eye-slash"></i>';
+        this.title = "Show balance";
+      }
+    });
+    
+    // Set default date for custom range inputs
+    const today = new Date().toISOString().split('T')[0];
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0];
+    
+    startDateInput.value = oneMonthAgoStr;
+    endDateInput.value = today;
+  </script>
 </body>
 </html>
