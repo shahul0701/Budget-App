@@ -767,52 +767,82 @@
     }
 
     // Add this function to initialize voucher numbering
-    async function initVoucherNumbering() {
-      try {
-        // Get the highest existing voucher number
-        const q = query(
-          collection(db, "users", currentUser.uid, "transactions"),
-          orderBy("SINO", "desc"),
-          limit(1)
-        );
-        const snap = await getDocs(q);
-        
-        if (!snap.empty) {
-          const lastTx = snap.docs[0].data();
-          if (lastTx.SINO) {
-            // Extract number from voucher format like "VOUCHER-001"
-            const match = lastTx.SINO.match(/\d+$/);
-            if (match) {
-              lastVoucherNumber = parseInt(match[0]);
+   // Replace the initVoucherNumbering function with:
+async function initVoucherNumbering() {
+  try {
+    // Get the highest existing voucher numbers for each type
+    const q = query(
+      collection(db, "users", currentUser.uid, "transactions"),
+      orderBy("VOUCHER_TYPE"),
+      orderBy("SINO", "desc")
+    );
+    const snap = await getDocs(q);
+    
+    lastVoucherNumber = {
+      Payment: 0,
+      Receipt: 0,
+      Journal: 0
+    };
+    
+    if (!snap.empty) {
+      snap.forEach(doc => {
+        const tx = doc.data();
+        if (tx.SINO && tx.VOUCHER_TYPE) {
+          const match = tx.SINO.match(/\d+$/);
+          if (match) {
+            const num = parseInt(match[0]);
+            const voucherType = tx.VOUCHER_TYPE;
+            if (num > lastVoucherNumber[voucherType]) {
+              lastVoucherNumber[voucherType] = num;
             }
           }
         }
-      } catch (error) {
-        console.error("Error initializing voucher numbering:", error);
+      });
+    }
+  } catch (error) {
+    console.error("Error initializing voucher numbering:", error);
+    // Initialize with defaults if error occurs
+    lastVoucherNumber = {
+      Payment: 0,
+      Receipt: 0,
+      Journal: 0
+    };
+  }
+}
+    // Add this function to generate voucher numbers
+    async function getNextVoucherNumber(voucherType) {
+  try {
+    // Get the highest existing voucher number for this type
+    const q = query(
+      collection(db, "users", currentUser.uid, "transactions"),
+      where("VOUCHER_TYPE", "==", voucherType),
+      orderBy("SINO", "desc"),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    
+    let lastNumber = 0;
+    
+    if (!snap.empty) {
+      const lastTx = snap.docs[0].data();
+      if (lastTx.SINO) {
+        // Extract number from voucher format like "PAYMENT-001"
+        const match = lastTx.SINO.match(/\d+$/);
+        if (match) {
+          lastNumber = parseInt(match[0]);
+        }
       }
     }
-
-    // Add this function to generate voucher numbers
-    async function getNextVoucherNumber() {
-      try {
-        // Get the highest existing voucher number
-        const q = query(
-          collection(db, "users", currentUser.uid, "transactions"),
-          orderBy("SINO", "desc"),
-          limit(1)
-        );
-        const snap = await getDocs(q);
-        
-        if (!snap.empty) {
-          const lastTx = snap.docs[0].data();
-          if (lastTx.SINO) {
-            // Extract number from voucher format like "VOUCHER-001"
-            const match = lastTx.SINO.match(/\d+$/);
-            if (match) {
-              lastVoucherNumber = parseInt(match[0]);
-            }
-          }
-        }
+    
+    // Increment and format with leading zeros
+    lastNumber++;
+    return `${voucherType.toUpperCase()}-${lastNumber.toString().padStart(3, '0')}`;
+  } catch (error) {
+    console.error("Error getting voucher number:", error);
+    // Fallback: use timestamp
+    return `${voucherType.toUpperCase()}-${Date.now().toString().slice(-6)}`;
+  }
+}
         
         // Increment and format with leading zeros
         lastVoucherNumber++;
@@ -1001,6 +1031,19 @@
       updateStats();
     }
 
+    // Add this function to format dates as yyyy-mmm-dd
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[date.getMonth()];
+  const day = date.getDate().toString().padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+}
+
     // build table
     function buildTable(){
       if (filteredTransactions.length === 0) {
@@ -1015,7 +1058,7 @@
 
       let html = "";
       pageTransactions.forEach(tx => {
-        const date = tx.DATE ? new Date(tx.DATE).toLocaleDateString() : "";
+        const date = formatDate(tx.DATE);
         const income = parseFloat(tx.INCOME) || 0;
         const expense = parseFloat(tx.EXPENSE) || 0;
         const balance = parseFloat(tx.BALANCE) || 0;
@@ -1192,9 +1235,15 @@
       formDATE.value = new Date().toISOString().split('T')[0];
       formTYPE.value = "Income";
       formVOUCHERTYPE.value = "Payment";
+
+      formVOUCHERTYPE.addEventListener("change", async function() {
+  if (!txIdInput.value) { // Only auto-generate for new transactions
+    formSINO.value = await getNextVoucherNumber(this.value);
+  }
+});
       
       // Auto-generate voucher number
-      formSINO.value = await getNextVoucherNumber();
+      formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
       
       formINCOME.value = "";
       formEXPENSE.value = "";
