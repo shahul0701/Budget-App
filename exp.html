@@ -690,7 +690,7 @@
     </div>
 
 <script type="module">
-    // Firebase Initialization & Imports
+        // Firebase Initialization & Imports
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
         getFirestore,
@@ -1322,7 +1322,7 @@ async function loadTransactions() {
             id: doc.id, 
             ...doc.data(),
             // Ensure SINO field exists and has a value
-            SINO: doc.data().SINO || `VOUCHER-${(snap.docs.indexOf(doc) + 1).toString().padStart(3, '0')}`
+            SINO: doc.data().SINO || (snap.docs.indexOf(doc) + 1).toString()
         }));
 
         // Get account from URL
@@ -1435,19 +1435,19 @@ async function loadTransactions() {
         }
     }
 
-    // Enhanced SINO generation
+    // MODIFIED SINO generation - now generates simple sequential numbers
     async function generateNextSINO() {
         try {
             const q = query(
                 collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("SINO", "desc"),
+                orderBy("createdAt", "desc"),
                 limit(1)
             );
             
             const snapshot = await getDocs(q);
             
             if (snapshot.empty) {
-                return "VOUCHER-001";
+                return "1";
             }
             
             let lastSINO = "";
@@ -1455,20 +1455,19 @@ async function loadTransactions() {
                 lastSINO = doc.data().SINO || "";
             });
             
-            // Extract number from SINO format (could be VOUCHER-001, TXN-123, etc.)
-            const matches = lastSINO.match(/(\d+)$/);
-            if (matches && matches[1]) {
-                const nextNum = parseInt(matches[1]) + 1;
-                return `VOUCHER-${nextNum.toString().padStart(3, '0')}`;
+            // Try to parse as number, fallback to simple increment
+            const lastNum = parseInt(lastSINO);
+            if (!isNaN(lastNum)) {
+                return (lastNum + 1).toString();
             }
             
             // Fallback if pattern doesn't match
-            return `VOUCHER-${(allTransactions.length + 1).toString().padStart(3, '0')}`;
+            return (allTransactions.length + 1).toString();
             
         } catch (error) {
             console.error("Error generating SINO:", error);
             // Fallback to simple increment
-            return `VOUCHER-${(allTransactions.length + 1).toString().padStart(3, '0')}`;
+            return (allTransactions.length + 1).toString();
         }
     }
 
@@ -1500,27 +1499,8 @@ async function loadTransactions() {
         formBALANCE.value = (lastBalances[bankKey] || 0).toFixed(2);
     }
 
-    // Add function to check for duplicate SINO numbers
-    async function checkForDuplicateSINO(sino, currentTxId = null) {
-        try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                where("SINO", "==", sino)
-            );
-            
-            const snapshot = await getDocs(q);
-            
-            // If we're editing, exclude the current transaction from the check
-            if (currentTxId) {
-                return snapshot.docs.some(doc => doc.id !== currentTxId);
-            }
-            
-            return !snapshot.empty;
-        } catch (error) {
-            console.error("Error checking for duplicate SINO:", error);
-            return false; // Don't block on error
-        }
-    }
+    // REMOVED: Function to check for duplicate SINO numbers
+    // We no longer need this since SINO can be any value
 
     // Add this validation function
     function validateTransactionData(transactionData) {
@@ -1578,13 +1558,7 @@ async function loadTransactions() {
                 return;
             }
 
-            // Check for duplicate SINO (voucher number)
-            const isDuplicate = await checkForDuplicateSINO(formSINO.value, txIdInput.value);
-            if (isDuplicate) {
-                Swal.fire("Error", "A transaction with this voucher number already exists", "error");
-                loadingModal.style.display = "none";
-                return;
-            }
+            // REMOVED: Duplicate SINO check - no longer needed
 
             // Bank validation
             let bankName = "";
@@ -2271,9 +2245,6 @@ async function loadTransactions() {
             loadingModal.style.display = "none";
         }
     });
-
-
-
 </script>
 </body>
 </html>
