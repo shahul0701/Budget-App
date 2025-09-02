@@ -30,12 +30,12 @@
             background-color: #f5f7fb;
             color: #333;
             line-height: 1.6;
+            padding: 20px;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 20px;
         }
         
         .header {
@@ -169,6 +169,7 @@
             overflow-x: auto;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
         }
         
         table {
@@ -214,6 +215,11 @@
         .badge-expense {
             background-color: #fde9e9;
             color: #f52545;
+        }
+        
+        .badge-transfer {
+            background-color: #e8f4fd;
+            color: #4895ef;
         }
         
         .action-buttons {
@@ -298,7 +304,7 @@
             background: white;
             border-radius: 10px;
             width: 90%;
-            max-width: 600px;
+            max-width: 700px;
             max-height: 90vh;
             overflow-y: auto;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
@@ -347,6 +353,7 @@
             padding: 15px;
             border-radius: 8px;
             border-left: 4px solid var(--info);
+            margin-bottom: 15px;
         }
         
         .balance-summary {
@@ -524,7 +531,7 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>SINO</th>
+                            <th>#</th>
                             <th>Date</th>
                             <th>Description</th>
                             <th>Account</th>
@@ -535,7 +542,7 @@
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="transactionsTableBody">
                         <tr>
                             <td>1</td>
                             <td>2023-10-15</td>
@@ -569,7 +576,7 @@
                             <td>2023-10-18</td>
                             <td>Transfer to Savings</td>
                             <td>Checking → Savings</td>
-                            <td><span class="badge" style="background: #e8f4fd; color: #4895ef;">Transfer</span></td>
+                            <td><span class="badge badge-transfer">Transfer</span></td>
                             <td style="color: green;">$0.00</td>
                             <td style="color: red;">$500.00</td>
                             <td>$1,849.25</td>
@@ -638,7 +645,7 @@
                     <input type="hidden" id="transactionId">
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="sino">SINO</label>
+                            <label for="sino">#</label>
                             <input type="text" class="form-control" id="sino" readonly>
                         </div>
                         <div class="form-group">
@@ -753,12 +760,19 @@
     <script>
         // Sample transaction data
         let transactions = [
-            { sino: 1, date: '2023-10-15', description: 'Salary Deposit', type: 'income', account: 'checking', income: 2500.00, expense: 0.00, balance: 2500.00 },
-            { sino: 2, date: '2023-10-16', description: 'Grocery Shopping', type: 'expense', account: 'cash', income: 0.00, expense: 150.75, balance: 2349.25 },
-            { sino: 3, date: '2023-10-18', description: 'Transfer to Savings', type: 'transfer', account: 'checking→savings', income: 0.00, expense: 500.00, balance: 1849.25 },
-            { sino: 4, date: '2023-10-20', description: 'Freelance Work', type: 'income', account: 'checking', income: 1000.00, expense: 0.00, balance: 2849.25 },
-            { sino: 5, date: '2023-10-22', description: 'Electricity Bill', type: 'expense', account: 'checking', income: 0.00, expense: 125.50, balance: 2723.75 }
+            { id: 1, date: '2023-10-15', description: 'Salary Deposit', type: 'income', account: 'checking', amount: 2500.00, balance: 2500.00 },
+            { id: 2, date: '2023-10-16', description: 'Grocery Shopping', type: 'expense', account: 'cash', amount: 150.75, balance: 2349.25 },
+            { id: 3, date: '2023-10-18', description: 'Transfer to Savings', type: 'transfer', account: 'checking→savings', amount: 500.00, balance: 1849.25 },
+            { id: 4, date: '2023-10-20', description: 'Freelance Work', type: 'income', account: 'checking', amount: 1000.00, balance: 2849.25 },
+            { id: 5, date: '2023-10-22', description: 'Electricity Bill', type: 'expense', account: 'checking', amount: 125.50, balance: 2723.75 }
         ];
+
+        // Bank balances
+        const bankBalances = {
+            cash: 500.00,
+            checking: 2723.75,
+            savings: 1500.00
+        };
 
         // DOM elements
         const addTransactionBtn = document.getElementById('addTransactionBtn');
@@ -780,18 +794,13 @@
         const dropZone = document.getElementById('dropZone');
         const csvFileName = document.getElementById('csvFileName');
         const uploadProgress = document.getElementById('uploadProgress');
-
-        // Bank balances
-        const bankBalances = {
-            cash: 500.00,
-            checking: 2723.75,
-            savings: 1500.00
-        };
+        const transactionsTableBody = document.getElementById('transactionsTableBody');
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             updateSINO();
             updateBalanceDisplay();
+            renderTransactions();
             
             // Event listeners
             addTransactionBtn.addEventListener('click', openAddModal);
@@ -832,13 +841,58 @@
 
         // Update SINO (next sequential number)
         function updateSINO() {
-            const nextSino = transactions.length > 0 ? Math.max(...transactions.map(t => t.sino)) + 1 : 1;
+            const nextSino = transactions.length > 0 ? Math.max(...transactions.map(t => t.id)) + 1 : 1;
             document.getElementById('sino').value = nextSino;
         }
 
         // Update balance display
         function updateBalanceDisplay() {
             document.getElementById('balance').value = `$${bankBalances[accountSelect.value] || 0}`;
+        }
+
+        // Render transactions to the table
+        function renderTransactions() {
+            transactionsTableBody.innerHTML = '';
+            
+            transactions.forEach(transaction => {
+                const row = document.createElement('tr');
+                
+                // Determine color and sign for amount
+                let amountDisplay = '';
+                if (transaction.type === 'income') {
+                    amountDisplay = `<td style="color: green;">+$${transaction.amount.toFixed(2)}</td><td style="color: red;">-</td>`;
+                } else if (transaction.type === 'expense') {
+                    amountDisplay = `<td style="color: green;">-</td><td style="color: red;">-$${transaction.amount.toFixed(2)}</td>`;
+                } else if (transaction.type === 'transfer') {
+                    amountDisplay = `<td style="color: green;">-</td><td style="color: red;">-$${transaction.amount.toFixed(2)}</td>`;
+                }
+                
+                // Determine badge class based on type
+                let badgeClass = '';
+                if (transaction.type === 'income') {
+                    badgeClass = 'badge-income';
+                } else if (transaction.type === 'expense') {
+                    badgeClass = 'badge-expense';
+                } else if (transaction.type === 'transfer') {
+                    badgeClass = 'badge-transfer';
+                }
+                
+                row.innerHTML = `
+                    <td>${transaction.id}</td>
+                    <td>${transaction.date}</td>
+                    <td>${transaction.description}</td>
+                    <td>${transaction.account}</td>
+                    <td><span class="badge ${badgeClass}">${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)}</span></td>
+                    ${amountDisplay}
+                    <td>$${transaction.balance.toFixed(2)}</td>
+                    <td class="action-buttons">
+                        <button class="btn btn-edit btn-sm" onclick="editTransaction(${transaction.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-delete btn-sm" onclick="deleteTransaction(${transaction.id})"><i class="fas fa-trash"></i></button>
+                    </td>
+                `;
+                
+                transactionsTableBody.appendChild(row);
+            });
         }
 
         // Open Add Transaction Modal
@@ -877,7 +931,7 @@
 
         // Save transaction
         function saveTransaction() {
-            const sino = parseInt(document.getElementById('sino').value);
+            const id = parseInt(document.getElementById('sino').value);
             const date = document.getElementById('date').value;
             const description = document.getElementById('description').value;
             const type = document.getElementById('type').value;
@@ -907,15 +961,14 @@
             
             // Create transaction object
             const transaction = {
-                sino: sino,
+                id: id,
                 date: date,
                 description: description,
                 type: type,
                 account: type === 'transfer' ? 
                     `${document.getElementById('fromAccount').value}→${document.getElementById('toAccount').value}` : 
                     account,
-                income: type === 'income' ? amount : 0,
-                expense: type === 'expense' || type === 'transfer' ? amount : 0,
+                amount: amount,
                 balance: 0 // Will be calculated based on previous balance
             };
             
@@ -943,12 +996,85 @@
             // Show success message
             Swal.fire('Success', 'Transaction saved successfully', 'success');
             
+            // Update UI
+            renderTransactions();
+            updateBalanceDisplay();
+            
             // Close modal
             closeModals();
             
-            // In a real app, you would update the UI here
+            // Log for debugging
             console.log('Transactions:', transactions);
             console.log('Balances:', bankBalances);
+        }
+
+        // Edit transaction
+        function editTransaction(id) {
+            const transaction = transactions.find(t => t.id === id);
+            if (!transaction) return;
+            
+            document.getElementById('modalTitle').textContent = 'Edit Transaction';
+            document.getElementById('transactionId').value = id;
+            document.getElementById('sino').value = transaction.id;
+            document.getElementById('date').value = transaction.date;
+            document.getElementById('description').value = transaction.description;
+            document.getElementById('type').value = transaction.type;
+            
+            if (transaction.type === 'transfer') {
+                const accounts = transaction.account.split('→');
+                document.getElementById('fromAccount').value = accounts[0];
+                document.getElementById('toAccount').value = accounts[1];
+                document.getElementById('account').value = accounts[0];
+                toggleTransferSection();
+            } else {
+                document.getElementById('account').value = transaction.account;
+                transferSection.style.display = 'none';
+            }
+            
+            document.getElementById('amount').value = transaction.amount;
+            updateBalanceDisplay();
+            
+            transactionModal.style.display = 'flex';
+        }
+
+        // Delete transaction
+        function deleteTransaction(id) {
+            Swal.fire({
+                title: 'Are you sure?',
+                text: "You won't be able to revert this!",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#3085d6',
+                cancelButtonColor: '#d33',
+                confirmButtonText: 'Yes, delete it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // Find transaction
+                    const transactionIndex = transactions.findIndex(t => t.id === id);
+                    if (transactionIndex === -1) return;
+                    
+                    const transaction = transactions[transactionIndex];
+                    
+                    // Reverse the transaction effect on balances
+                    if (transaction.type === 'income') {
+                        bankBalances[transaction.account] -= transaction.amount;
+                    } else if (transaction.type === 'expense') {
+                        bankBalances[transaction.account] += transaction.amount;
+                    } else if (transaction.type === 'transfer') {
+                        const accounts = transaction.account.split('→');
+                        bankBalances[accounts[0]] += transaction.amount;
+                        bankBalances[accounts[1]] -= transaction.amount;
+                    }
+                    
+                    // Remove from transactions
+                    transactions.splice(transactionIndex, 1);
+                    
+                    // Update UI
+                    renderTransactions();
+                    
+                    Swal.fire('Deleted!', 'Transaction has been deleted.', 'success');
+                }
+            });
         }
 
         // Open CSV Modal
@@ -992,18 +1118,19 @@
             // Simulate adding sample transactions from CSV
             setTimeout(() => {
                 const newTransaction = {
-                    sino: transactions.length + 1,
+                    id: transactions.length + 1,
                     date: '2023-10-25',
                     description: 'CSV Imported Transaction',
                     type: 'income',
                     account: 'checking',
-                    income: 300.00,
-                    expense: 0.00,
+                    amount: 300.00,
                     balance: bankBalances.checking + 300.00
                 };
                 
                 bankBalances.checking += 300.00;
                 transactions.push(newTransaction);
+                
+                renderTransactions();
                 
                 Swal.fire('Imported', '1 transaction imported from CSV', 'info');
             }, 1000);
