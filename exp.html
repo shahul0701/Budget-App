@@ -550,8 +550,8 @@
     
     <!-- Add Transaction Button -->
     <button id="addTransactionBtn" class="floating-button">+</button>
-    
-    <!-- Transaction Modal -->
+
+        <!-- Transaction Modal -->
     <div id="transactionModal" class="modal">
         <div class="modal-content">
             <span class="close-btn">&times;</span>
@@ -616,8 +616,8 @@
             </form>
         </div>
     </div>
-    
-    <!-- CSV Upload Modal -->
+
+        <!-- CSV Upload Modal -->
     <div id="csvUploadModal" class="modal">
         <div class="modal-content">
             <span class="close-btn" id="closeCsvModal">&times;</span>
@@ -689,7 +689,7 @@
         </div>
     </div>
 
-<script type="module">
+    <script type="module">
     // Firebase Initialization & Imports
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
@@ -891,340 +891,7 @@
         }
     });
 
-
-
-
- // Function to handle CSV file selection
-function handleCsvFileSelect(file) {
-    if (!file) return;
-
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-        Swal.fire("Error", "Please select a CSV file", "error");
-        return;
-    }
-
-    csvFileName.textContent = file.name;
-    importCsvBtn.disabled = false;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        parseCsvFile(e.target.result);
-    };
-    reader.readAsText(file);
-}
-
-// Helper function to clean and parse numbers
-function cleanNumber(value) {
-    if (typeof value === 'number') return value;
-    if (typeof value === 'string') {
-        const cleaned = value.replace(/[^\d.-]/g, ''); // remove symbols, commas
-        return parseFloat(cleaned) || 0;
-    }
-    return 0;
-}
-
-// Debug function
-function debugCSVContent(csvText) {
-    console.log('=== CSV DEBUG INFO ===');
-    const lines = csvText.split('\n');
-    console.log('Total lines:', lines.length);
-    console.log('Headers:', lines[0].split(','));
-
-    for (let i = 1; i < Math.min(4, lines.length); i++) {
-        console.log(`Row ${i}:`, lines[i].split(','));
-    }
-    console.log('======================');
-}
-
-// Parse CSV wrapper
-function parseCsvFile(csvText) {
-    try {
-        debugCSVContent(csvText);
-        const {transactions, errors} = parseCSV(csvText);
-
-        if (errors.length > 0) {
-            Swal.fire({
-                title: 'CSV Format Issues',
-                html: `Found ${errors.length} issue(s) in your CSV file:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-                icon: 'warning'
-            });
-        }
-
-        csvTransactions = transactions;
-        calculateBalancesForImportedTransactions();
-        showImportSummary();
-
-    } catch (error) {
-        console.error("Error parsing CSV:", error);
-        Swal.fire("Error", "Failed to parse CSV file. Please check the format.", "error");
-    }
-}
-
-// Balance calculation
-function calculateBalancesForImportedTransactions() {
-    if (csvTransactions.length === 0) return;
-
-    csvTransactions.sort((a, b) => {
-        const dateA = a.DATE ? new Date(a.DATE) : new Date(0);
-        const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
-        return dateA - dateB;
-    });
-
-    let startingBalance = 0;
-    if (allTransactions.length > 0) {
-        const sortedTransactions = [...allTransactions].sort((a, b) => {
-            const dateA = a.DATE ? new Date(a.DATE) : new Date(0);
-            const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
-            return dateA - dateB;
-        });
-        startingBalance = cleanNumber(sortedTransactions[sortedTransactions.length - 1].BALANCE);
-    }
-
-    let currentBalance = cleanNumber(startingBalance);
-
-    for (const transaction of csvTransactions) {
-        const income = cleanNumber(transaction.INCOME);
-        const expense = cleanNumber(transaction.EXPENSE);
-        currentBalance += income - expense;
-        transaction.BALANCE = currentBalance.toFixed(2);
-    }
-}
-
-// Import summary
-function showImportSummary() {
-    if (csvTransactions.length === 0) return;
-
-    let totalIncome = 0;
-    let totalExpense = 0;
-
-    for (const transaction of csvTransactions) {
-        totalIncome += cleanNumber(transaction.INCOME);
-        totalExpense += cleanNumber(transaction.EXPENSE);
-    }
-
-    summaryCount.textContent = csvTransactions.length;
-    summaryIncome.textContent = `$${totalIncome.toFixed(2)}`;
-    summaryExpense.textContent = `$${totalExpense.toFixed(2)}`;
-
-    importSummary.style.display = 'block';
-}
-
-// Import into Firestore
-async function importCsvTransactions() {
-    if (csvTransactions.length === 0) {
-        Swal.fire("Error", "No valid transactions to import", "error");
-        return;
-    }
-
-    progressContainer.style.display = 'block';
-    importCsvBtn.disabled = true;
-    cancelCsvBtn.disabled = true;
-
-    let importedCount = 0;
-    let errors = [];
-
-    for (let i = 0; i < csvTransactions.length; i++) {
-        const transaction = csvTransactions[i];
-        try {
-            await addDoc(collection(db, "users", currentUser.uid, "transactions"), {
-                ...transaction,
-                INCOME: cleanNumber(transaction.INCOME),
-                EXPENSE: cleanNumber(transaction.EXPENSE),
-                BALANCE: cleanNumber(transaction.BALANCE),
-                userId: currentUser.uid,
-                createdAt: new Date()
-            });
-            importedCount++;
-        } catch (error) {
-            errors.push(`Row ${i+1}: ${error.message}`);
-            console.error("Error importing transaction:", error);
-        }
-
-        const progress = ((i + 1) / csvTransactions.length) * 100;
-        progressBar.style.width = `${progress}%`;
-    }
-
-    if (errors.length === 0) {
-        Swal.fire("Success", `Successfully imported ${importedCount} transactions`, "success");
-    } else {
-        Swal.fire({
-            title: 'Import Completed with Errors',
-            html: `Imported ${importedCount} transactions successfully.<br>
-                   ${errors.length} transactions failed:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-            icon: 'warning'
-        });
-    }
-
-    await loadTransactions();
-    csvModal.style.display = "none";
-    resetCsvModal();
-}
-
-// Reset modal
-function resetCsvModal() {
-    csvFileName.textContent = "No file selected";
-    importCsvBtn.disabled = true;
-    progressContainer.style.display = 'none';
-    progressBar.style.width = '0%';
-    importSummary.style.display = 'none';
-    csvTransactions = [];
-}
-
-// Auto-detect account header
-function detectAccountHeaderFromDescription(description) {
-    if (!description) return 'Uncategorized';
-
-    const desc = description.toLowerCase();
-
-    if (desc.includes('food') || desc.includes('meal') || desc.includes('restaurant') || desc.includes('grocery')) {
-        return 'Food & Dining';
-    } else if (desc.includes('rent') || desc.includes('house') || desc.includes('apartment')) {
-        return 'Housing';
-    } else if (desc.includes('transport') || desc.includes('bus') || desc.includes('train') || desc.includes('taxi') || desc.includes('gas')) {
-        return 'Transportation';
-    } else if (desc.includes('electric') || desc.includes('water') || desc.includes('internet') || desc.includes('phone')) {
-        return 'Utilities';
-    } else if (desc.includes('medical') || desc.includes('doctor') || desc.includes('hospital')) {
-        return 'Healthcare';
-    } else if (desc.includes('salary') || desc.includes('income') || desc.includes('payment')) {
-        return 'Income';
-    } else if (desc.includes('shopping') || desc.includes('clothes') || desc.includes('store')) {
-        return 'Shopping';
-    } else if (desc.includes('entertain') || desc.includes('movie') || desc.includes('game')) {
-        return 'Entertainment';
-    }
-
-    return 'Uncategorized';
-}
-
-// === FINAL CLEAN parseCSV FUNCTION ===
-function parseCSV(csvText) {
-    const lines = csvText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-    if (lines.length < 2) {
-        return {transactions: [], errors: ["CSV file is empty or has only headers"]};
-    }
-
-    const headers = lines[0].split(",").map(h => h.trim().toUpperCase()); // normalize
-    const transactions = [];
-    const errors = [];
-
-    for (let i = 1; i < lines.length; i++) {
-        const row = lines[i].split(",").map(r => r.trim());
-        if (row.length !== headers.length) {
-            errors.push(`Row ${i+1}: Column count mismatch`);
-            continue;
-        }
-
-        let transaction = {};
-        headers.forEach((header, index) => {
-            transaction[header] = row[index] || "";
-        });
-
-        // Convert numeric fields
-        const income = cleanNumber(transaction["INCOME"]);
-        const expense = cleanNumber(transaction["EXPENSE"]);
-
-        // Normalize
-        const normalizedTransaction = {
-            SINO: transaction["SINO"] || "",
-            DATE: transaction["DATE"] || "",
-            TIME: transaction["TIME"] || "",
-            ACCOUNT_HEADER: transaction["ACCOUNT_HEADER"] || transaction["ACCOUNT HEADER"] || "",
-            MODE: transaction["MODE"] || "",
-            BANK_NAME: transaction["BANK_NAME"] || transaction["BANK NAME"] || "",
-            DESCRIPTION: transaction["DESCRIPTION"] || "",
-            INCOME: income,
-            EXPENSE: expense,
-            BALANCE: cleanNumber(transaction["BALANCE"])
-        };
-
-        // Auto-detect account header if missing
-        if (!normalizedTransaction.ACCOUNT_HEADER) {
-            if (normalizedTransaction.DESCRIPTION) {
-                normalizedTransaction.ACCOUNT_HEADER = detectAccountHeaderFromDescription(normalizedTransaction.DESCRIPTION);
-            } else if (normalizedTransaction.MODE) {
-                normalizedTransaction.ACCOUNT_HEADER = normalizedTransaction.MODE === "CASH" ? "Cash Expense" : "Bank Expense";
-            } else {
-                normalizedTransaction.ACCOUNT_HEADER = "Uncategorized";
-            }
-        }
-
-        // Validate required field
-        if (!normalizedTransaction.DATE) {
-            errors.push(`Row ${i+1}: DATE is required`);
-            continue;
-        }
-
-        if (income > 0 && expense > 0) {
-            errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE`);
-            continue;
-        }
-
-        transactions.push(normalizedTransaction);
-    }
-
-    return {transactions, errors};
-}
-
-
-
-
-
-
-
-// Helper function to parse CSV line (handles quoted values)
-function parseCSVLine(line) {
-    const values = [];
-    let current = '';
-    let inQuotes = false;
-    let quoteChar = '';
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        
-        if ((char === '"' || char === "'") && !inQuotes) {
-            inQuotes = true;
-            quoteChar = char;
-        } else if (char === quoteChar && inQuotes) {
-            inQuotes = false;
-            quoteChar = '';
-        } else if (char === ',' && !inQuotes) {
-            values.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    
-    values.push(current);
-    return values;
-}
-
-// Function to download sample CSV
-function downloadSampleCsvFile() {
-    const sampleData = [
-        ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION'],
-        ['1', '2023-10-15', '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary'],
-        ['2', '2023-10-16', '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries'],
-        ['3', '2023-10-17', '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill']
-    ];
-    
-    const csvContent = sampleData.map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'expense_tracker_sample.csv');
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-    
-
-// Load chart of accounts for dropdown
+            // Load chart of accounts for dropdown
     async function loadAccounts() {
         try {
             const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"));
@@ -1295,101 +962,102 @@ function downloadSampleCsvFile() {
     }
 
     // Enhanced loadTransactions function
- async function loadTransactions() {
-    loadingModal.style.display = "flex";
-    try {
-        console.log("Loading transactions for user:", currentUser.uid);
-        
-        // Try multiple query strategies
-        let transactions = [];
-        
+    async function loadTransactions() {
+        loadingModal.style.display = "flex";
         try {
-            // Strategy 1: Try ordering by createdAt (most reliable)
-            console.log("Trying createdAt ordering...");
-            let q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("createdAt", "desc")
-            );
-            const snap = await getDocs(q);
-            transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            console.log("Found", transactions.length, "transactions using createdAt");
-        } catch (error) {
-            if (error.code === 'failed-precondition') {
-                console.log("createdAt index missing, trying DATE field...");
-                
-                // Strategy 2: Try ordering by DATE
-                try {
-                    let q = query(
-                        collection(db, "users", currentUser.uid, "transactions"),
-                        orderBy("DATE", "desc")
-                    );
-                    const snap = await getDocs(q);
-                    transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    console.log("Found", transactions.length, "transactions using DATE");
-                } catch (error2) {
-                    if (error2.code === 'failed-precondition') {
-                        console.log("DATE index also missing, using no ordering...");
-                        
-                        // Strategy 3: No ordering (fallback)
-                        let q = query(collection(db, "users", currentUser.uid, "transactions"));
+            console.log("Loading transactions for user:", currentUser.uid);
+            
+            // Try multiple query strategies
+            let transactions = [];
+            
+            try {
+                // Strategy 1: Try ordering by createdAt (most reliable)
+                console.log("Trying createdAt ordering...");
+                let q = query(
+                    collection(db, "users", currentUser.uid, "transactions"),
+                    orderBy("createdAt", "desc")
+                );
+                const snap = await getDocs(q);
+                transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                console.log("Found", transactions.length, "transactions using createdAt");
+            } catch (error) {
+                if (error.code === 'failed-precondition') {
+                    console.log("createdAt index missing, trying DATE field...");
+                    
+                    // Strategy 2: Try ordering by DATE
+                    try {
+                        let q = query(
+                            collection(db, "users", currentUser.uid, "transactions"),
+                            orderBy("DATE", "desc")
+                        );
                         const snap = await getDocs(q);
                         transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        
-                        // Manual sorting by date
-                        transactions.sort((a, b) => {
-                            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
-                            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
-                            return dateB - dateA; // newest first
-                        });
-                        console.log("Found", transactions.length, "transactions without ordering");
-                    } else {
-                        throw error2;
+                        console.log("Found", transactions.length, "transactions using DATE");
+                    } catch (error2) {
+                        if (error2.code === 'failed-precondition') {
+                            console.log("DATE index also missing, using no ordering...");
+                            
+                            // Strategy 3: No ordering (fallback)
+                            let q = query(collection(db, "users", currentUser.uid, "transactions"));
+                            const snap = await getDocs(q);
+                            transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                            
+                            // Manual sorting by date
+                            transactions.sort((a, b) => {
+                                const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+                                const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+                                return dateB - dateA; // newest first
+                            });
+                            console.log("Found", transactions.length, "transactions without ordering");
+                        } else {
+                            throw error2;
+                        }
                     }
+                } else {
+                    throw error;
                 }
-            } else {
-                throw error;
             }
-        }
 
-        // Debug: Check if we have the createdAt field
-        if (transactions.length > 0) {
-            console.log("Sample transaction:", {
-                id: transactions[0].id,
-                SINO: transactions[0].SINO,
-                DATE: transactions[0].DATE,
-                createdAt: transactions[0].createdAt,
-                hasCreatedAt: !!transactions[0].createdAt
-            });
-        }
+            // Debug: Check if we have the createdAt field
+            if (transactions.length > 0) {
+                console.log("Sample transaction:", {
+                    id: transactions[0].id,
+                    SINO: transactions[0].SINO,
+                    DATE: transactions[0].DATE,
+                    createdAt: transactions[0].createdAt,
+                    hasCreatedAt: !!transactions[0].createdAt
+                });
+            }
 
-        // Get account from URL
-        const selectedAccount = getAccountFromURL();
+            // Get account from URL
+            const selectedAccount = getAccountFromURL();
 
-        // Filter if opened from trial balance
-        if (selectedAccount) {
-            const originalCount = transactions.length;
-            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-            console.log("Filtered from", originalCount, "to", transactions.length, "transactions for account:", selectedAccount);
-            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-        } else {
-            document.getElementById("accountTitle").textContent = "All Transactions (" + transactions.length + " transactions)";
-        }
+            // Filter if opened from trial balance
+            if (selectedAccount) {
+                const originalCount = transactions.length;
+                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+                console.log("Filtered from", originalCount, "to", transactions.length, "transactions for account:", selectedAccount);
+                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+            } else {
+                document.getElementById("accountTitle").textContent = "All Transactions (" + transactions.length + " transactions)";
+            }
 
-        allTransactions = calculateRunningBalance(transactions);
-        console.log("Final transactions after balance calculation:", allTransactions.length);
-        
-        populateFiltersOptions(allTransactions);
-        applyFilters();
-        
-    } catch (err) {
-        console.error("Error loading transactions:", err);
-        if (!handleFirestoreError(err, "load transactions")) {
-            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+            allTransactions = calculateRunningBalance(transactions);
+            console.log("Final transactions after balance calculation:", allTransactions.length);
+            
+            populateFiltersOptions(allTransactions);
+            applyFilters();
+            
+        } catch (err) {
+            console.error("Error loading transactions:", err);
+            if (!handleFirestoreError(err, "load transactions")) {
+                Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+            }
         } finally {
             loadingModal.style.display = "none";
         }
     }
-}
+    
     // Enhanced function to calculate running balance for transactions
     function calculateRunningBalance(transactions) {
         const bankBalances = {};
@@ -1599,7 +1267,7 @@ function downloadSampleCsvFile() {
         return errors;
     }
 
-    // Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
+            // Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
     async function saveTransaction() {
         loadingModal.style.display = "flex";
         
@@ -1804,7 +1472,7 @@ function downloadSampleCsvFile() {
         }
     }
 
-    // Enhanced error handling function
+ // Enhanced error handling function
     function handleFirestoreError(error, action) {
         console.error(`Error ${action}:`, error);
         
