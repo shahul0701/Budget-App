@@ -792,41 +792,74 @@
       }
     }
 
-    // Add this function to generate voucher numbers
-   // Enhanced voucher numbering by type
+   // Enhanced voucher numbering by type with separate sequences
 async function getNextVoucherNumber(voucherType) {
   try {
-    // Get the highest existing voucher number for this type
-    const q = query(
+    // Get all transactions to find the highest number for payments
+    const allTxQuery = query(
       collection(db, "users", currentUser.uid, "transactions"),
-      where("VOUCHER_TYPE", "==", voucherType),
-      orderBy("SINO", "desc"),
-      limit(1)
+      orderBy("SINO", "desc")
     );
-    const snap = await getDocs(q);
+    const allTxSnap = await getDocs(allTxQuery);
     
-    let lastNumber = 0;
+    let highestPaymentNumber = 0;
+    let highestReceiptNumber = 0;
+    let highestJournalNumber = 0;
     
-    if (!snap.empty) {
-      const lastTx = snap.docs[0].data();
-      if (lastTx.SINO) {
-        // Extract number from voucher format like "PAYMENT-001"
-        const match = lastTx.SINO.match(/\d+$/);
-        if (match) {
-          lastNumber = parseInt(match[0]);
+    // Find the highest numbers for each type
+    allTxSnap.forEach(doc => {
+      const tx = doc.data();
+      if (tx.SINO) {
+        // Check if it's a payment (numeric only)
+        if (/^\d+$/.test(tx.SINO)) {
+          const num = parseInt(tx.SINO);
+          if (num > highestPaymentNumber) highestPaymentNumber = num;
+        }
+        // Check if it's a receipt (RP- format)
+        else if (tx.SINO.startsWith('RP-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestReceiptNumber) highestReceiptNumber = num;
+        }
+        // Check if it's a journal (JR- format)
+        else if (tx.SINO.startsWith('JR-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestJournalNumber) highestJournalNumber = num;
         }
       }
+    });
+    
+    // Generate the next number based on voucher type
+    if (voucherType === "Payment") {
+      return (highestPaymentNumber + 1).toString();
+    } else if (voucherType === "Receipt") {
+      return `RP-${(highestReceiptNumber + 1).toString().padStart(3, '0')}`;
+    } else if (voucherType === "Journal") {
+      return `JR-${(highestJournalNumber + 1).toString().padStart(3, '0')}`;
     }
     
-    // Increment and format with leading zeros
-    lastNumber++;
-    const prefix = voucherType.toUpperCase().substring(0, 3);
-    return `${prefix}-${lastNumber.toString().padStart(3, '0')}`;
+    // Default fallback
+    return `${voucherType.substring(0, 2).toUpperCase()}-001`;
+    
   } catch (error) {
     console.error("Error getting voucher number:", error);
-    // Fallback: use timestamp
-    const prefix = voucherType.toUpperCase().substring(0, 3);
-    return `${prefix}-${Date.now().toString().slice(-6)}`;
+    // Fallback based on type
+    if (voucherType === "Payment") {
+      // Try to find the highest payment number from all transactions
+      const paymentNumbers = allTransactions
+        .filter(tx => tx.SINO && /^\d+$/.test(tx.SINO))
+        .map(tx => parseInt(tx.SINO))
+        .filter(num => !isNaN(num));
+      
+      const highestNumber = paymentNumbers.length > 0 ? Math.max(...paymentNumbers) : 0;
+      return (highestNumber + 1).toString();
+    } else if (voucherType === "Receipt") {
+      return "RP-001";
+    } else if (voucherType === "Journal") {
+      return "JR-001";
+    }
+    
+    // Final fallback
+    return `${voucherType.substring(0, 2).toUpperCase()}-001`;
   }
 }
 
@@ -1200,7 +1233,7 @@ async function getNextVoucherNumber(voucherType) {
       formVOUCHERTYPE.value = "Payment";
       
       // Auto-generate voucher number
-      formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
+     formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
       
       formINCOME.value = "";
       formEXPENSE.value = "";
