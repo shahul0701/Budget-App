@@ -813,20 +813,20 @@
 
     // Listen for auth state change
     onAuthStateChanged(auth, async user => {
-        if (user) {
-            currentUser = user;
-            const name = user.displayName || user.email || "User";
-            usernameElem.textContent = name;
-            initialsElem.textContent = name.charAt(0).toUpperCase();
+    if (user) {
+        currentUser = user;
+        const name = user.displayName || user.email || "User";
+        usernameElem.textContent = name;
+        initialsElem.textContent = name.charAt(0).toUpperCase();
 
-            await loadAccounts();
-            await loadTransactions();
-            await populateBankAccounts();
-        } else {
-            alert("Please login first.");
-            window.location.href = "index.html";
-        }
-    });
+        await loadAccounts();
+        await loadTransactions(); // This might be failing
+        await populateBankAccounts();
+    } else {
+        alert("Please login first.");
+        window.location.href = "index.html";
+    }
+});
 
     logoutBtn.addEventListener("click", async () => {
         await signOut(auth);
@@ -1342,34 +1342,35 @@ async function loadTransactions() {
         let transactions = [];
         
         // Try to get transactions ordered by createdAt first (most reliable)
-        try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("createdAt", "desc")
-            );
-            const snap = await getDocs(q);
-            transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        } catch (error) {
-            if (error.code === 'failed-precondition') {
-                console.log("No createdAt index, falling back to DATE field");
-                
-                // Fallback: try to order by DATE field
-                const q = query(
-                    collection(db, "users", currentUser.uid, "transactions")
-                );
-                const snap = await getDocs(q);
-                transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                
-                // Sort manually by date (newest first)
-                transactions.sort((a, b) => {
-                    const dateA = parseTransactionDate(a) || new Date(0);
-                    const dateB = parseTransactionDate(b) || new Date(0);
-                    return dateB - dateA; // Newest first
-                });
-            } else {
-                throw error;
-            }
-        }
+       // Try to get transactions ordered by createdAt first
+try {
+    const q = query(
+        collection(db, "users", currentUser.uid, "transactions"),
+        orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+} catch (error) {
+    if (error.code === 'failed-precondition') {
+        console.log("No createdAt index, falling back to DATE field");
+        
+        // Fallback: try to order by DATE field
+        const q = query(
+            collection(db, "users", currentUser.uid, "transactions")
+        );
+        const snap = await getDocs(q);
+        transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Sort manually by date (newest first)
+        transactions.sort((a, b) => {
+            const dateA = parseTransactionDate(a) || new Date(0);
+            const dateB = parseTransactionDate(b) || new Date(0);
+            return dateB - dateA; // Newest first
+        });
+    } else {
+        throw error;
+    }
+}
 
         // Get account from URL
         const selectedAccount = getAccountFromURL();
@@ -1848,24 +1849,24 @@ async function loadTransactions() {
             [...banks].sort().map(b => `<option>${escapeHtml(b)}</option>`).join("");
     }
 
-    // Helper function for date comparison
-   // Enhanced date parser
-// Enhanced date parser
 function parseTransactionDate(transaction) {
-    if (!transaction.DATE) return null;
+    console.log("Parsing date for transaction:", transaction);
+    if (!transaction.DATE) {
+        console.log("No DATE field found");
+        return null;
+    }
     
     try {
         let dateStr = transaction.DATE;
+        console.log("Raw DATE value:", dateStr, typeof dateStr);
         
-        // If it's a Firestore Timestamp object
-        if (dateStr && typeof dateStr.toDate === 'function') {
-            return dateStr.toDate();
-        }
+        // Rest of your parsing logic...
         
-        // If it's already a Date object
-        if (dateStr instanceof Date) {
-            return dateStr;
-        }
+    } catch (e) {
+        console.warn("Error parsing date:", transaction.DATE, e);
+        return null;
+    }
+}
         
         // Handle string dates
         if (typeof dateStr === 'string') {
