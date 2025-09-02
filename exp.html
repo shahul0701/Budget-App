@@ -1295,75 +1295,101 @@ function downloadSampleCsvFile() {
     }
 
     // Enhanced loadTransactions function
-  async function loadTransactions() {
+ async function loadTransactions() {
     loadingModal.style.display = "flex";
     try {
-        let q;
+        console.log("Loading transactions for user:", currentUser.uid);
+        
+        // Try multiple query strategies
+        let transactions = [];
+        
         try {
-            // First try ordering by createdAt (timestamp)
-            q = query(
+            // Strategy 1: Try ordering by createdAt (most reliable)
+            console.log("Trying createdAt ordering...");
+            let q = query(
                 collection(db, "users", currentUser.uid, "transactions"),
                 orderBy("createdAt", "desc")
             );
+            const snap = await getDocs(q);
+            transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            console.log("Found", transactions.length, "transactions using createdAt");
         } catch (error) {
             if (error.code === 'failed-precondition') {
-                console.log("Index missing for createdAt, trying DATE field...");
-                // Fallback to date-only ordering
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc")
-                );
+                console.log("createdAt index missing, trying DATE field...");
+                
+                // Strategy 2: Try ordering by DATE
+                try {
+                    let q = query(
+                        collection(db, "users", currentUser.uid, "transactions"),
+                        orderBy("DATE", "desc")
+                    );
+                    const snap = await getDocs(q);
+                    transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    console.log("Found", transactions.length, "transactions using DATE");
+                } catch (error2) {
+                    if (error2.code === 'failed-precondition') {
+                        console.log("DATE index also missing, using no ordering...");
+                        
+                        // Strategy 3: No ordering (fallback)
+                        let q = query(collection(db, "users", currentUser.uid, "transactions"));
+                        const snap = await getDocs(q);
+                        transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        
+                        // Manual sorting by date
+                        transactions.sort((a, b) => {
+                            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+                            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+                            return dateB - dateA; // newest first
+                        });
+                        console.log("Found", transactions.length, "transactions without ordering");
+                    } else {
+                        throw error2;
+                    }
+                }
             } else {
                 throw error;
             }
         }
 
-        const snap = await getDocs(q);
-        let transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        console.log("Raw transactions loaded:", transactions.length);
-            // Get account from URL
-            const selectedAccount = getAccountFromURL();
-
-            // Filter if opened from trial balance
-            if (selectedAccount) {
-                transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-                document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-            } else {
-                document.getElementById("accountTitle").textContent = "All Transactions";
-            }
-
-            allTransactions = calculateRunningBalance(transactions);
-            populateFiltersOptions(allTransactions);
-            applyFilters();
-            
-        } catch (err) {
-            console.error("Error loading transactions:", err);
-            if (!handleFirestoreError(err, "load transactions")) {
-                Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
-            }
-        } finally {
-            loadingModal.style.display = "none";
-        }
-    }} catch (err) {
-        console.error("Error loading transactions:", err);
-        // Check if it's an index error
-        if (err.code === 'failed-precondition') {
-            Swal.fire({
-                title: "Index Required",
-                text: "Please create the required Firestore index. Check the browser console for the link.",
-                icon: "warning"
+        // Debug: Check if we have the createdAt field
+        if (transactions.length > 0) {
+            console.log("Sample transaction:", {
+                id: transactions[0].id,
+                SINO: transactions[0].SINO,
+                DATE: transactions[0].DATE,
+                createdAt: transactions[0].createdAt,
+                hasCreatedAt: !!transactions[0].createdAt
             });
-            // This will show the direct link to create the missing index
-            console.error("Missing index error. Follow this link to create it:", err.message);
+        }
+
+        // Get account from URL
+        const selectedAccount = getAccountFromURL();
+
+        // Filter if opened from trial balance
+        if (selectedAccount) {
+            const originalCount = transactions.length;
+            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+            console.log("Filtered from", originalCount, "to", transactions.length, "transactions for account:", selectedAccount);
+            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
         } else {
-            Swal.fire("Error", "Error loading transactions: " + err.message, "error");
+            document.getElementById("accountTitle").textContent = "All Transactions (" + transactions.length + " transactions)";
+        }
+
+        allTransactions = calculateRunningBalance(transactions);
+        console.log("Final transactions after balance calculation:", allTransactions.length);
+        
+        populateFiltersOptions(allTransactions);
+        applyFilters();
+        
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        if (!handleFirestoreError(err, "load transactions")) {
+            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
         }
     } finally {
         loadingModal.style.display = "none";
     }
 }
-
     // Enhanced function to calculate running balance for transactions
     function calculateRunningBalance(transactions) {
         const bankBalances = {};
