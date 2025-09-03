@@ -346,79 +346,7 @@ updateBreakdown(transactions,"EXPENSE",expenseBreakdownElem);
 updateChart(transactions);
 }
 
-// ===== Improved Breakdown with COA Integration =====
-async function updateBreakdown(transactions, type, container) {
-    try {
-        // Load COA data for proper categorization
-        const coaData = await loadCOAData();
-        const byCat = {};
-        
-        transactions
-            .filter(tx => parseFloat(tx[type] || 0) > 0)
-            .forEach(tx => {
-                // Use ACCOUNT_HEADER if available, otherwise try to map from COA
-                let category = tx.ACCOUNT_HEADER || "Uncategorized";
-                
-                // If no account header, try to determine from description
-                if (category === "Uncategorized" && tx.DESCRIPTION) {
-                    category = categorizeFromDescription(tx.DESCRIPTION, coaData, type);
-                }
-                
-                byCat[category] = (byCat[category] || 0) + parseFloat(tx[type] || 0);
-            });
-        
-        if (Object.keys(byCat).length === 0) {
-            container.innerHTML = '<p class="empty-state"><i class="fa fa-info-circle"></i> No data</p>';
-        } else {
-            container.innerHTML = Object.entries(byCat)
-                .sort((a, b) => b[1] - a[1]) // Sort by amount descending
-                .map(([category, amount]) => `
-                    <div class="transaction-item">
-                        <div class="transaction-category">${escapeHtml(category)}</div>
-                        <div class="transaction-amount">₹${amount.toFixed(2)}</div>
-                    </div>
-                `).join("");
-        }
-    } catch (error) {
-        console.error("Error updating breakdown:", error);
-        container.innerHTML = '<p class="empty-state"><i class="fa fa-exclamation-triangle"></i> Error loading data</p>';
-    }
-}
 
-// Helper function to load COA data
-async function loadCOAData() {
-    try {
-        const coaRef = collection(db, "users", currentUser.uid, "chartOfAccounts");
-        const snap = await getDocs(coaRef);
-        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    } catch (error) {
-        console.error("Error loading COA data:", error);
-        return [];
-    }
-}
-
-// Helper function to categorize from description
-function categorizeFromDescription(description, coaData, type) {
-    const desc = description.toLowerCase();
-    
-    // Simple keyword matching - you can expand this
-    const keywords = {
-        'salary': 'Salary Income',
-        'rent': 'Rental Income', 
-        'food': 'Food Expenses',
-        'transport': 'Transportation Expenses',
-        'electricity': 'Utility Expenses',
-        'shopping': 'Shopping Expenses'
-    };
-    
-    for (const [keyword, category] of Object.entries(keywords)) {
-        if (desc.includes(keyword)) {
-            return category;
-        }
-    }
-    
-    return type === "INCOME" ? "Other Income" : "Other Expenses";
-}
 
             
 function resetReport(){
