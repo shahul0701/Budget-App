@@ -331,7 +331,6 @@
         let currentUser = null;
         let allTransactions = [];
         let filteredTransactions = [];
-        let coaAccounts = [];
 
         // ===== Auth =====
         onAuthStateChanged(auth, user => {
@@ -422,11 +421,7 @@
         async function loadBalanceSheet() {
             loadingModal.style.display = "flex";
             try {
-                // Load Chart of Accounts first - FIXED PATH
-                const coaSnap = await getDocs(collection(db, "users", currentUser.uid, "chartOfAccounts"));
-                coaAccounts = coaSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-                // Load transactions - FIXED PATH
+                // Load transactions only - FIXED PATH
                 const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "asc"));
                 const snap = await getDocs(q);
                 allTransactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -447,48 +442,50 @@
             let liabilities = {};
             let equity = {};
 
-            // Initialize with accounts from Chart of Accounts
-            coaAccounts.forEach(acc => {
-                if (acc.type === "Asset") {
-                    assets[acc.name] = 0;
-                } else if (acc.type === "Liability") {
-                    liabilities[acc.name] = 0;
-                } else if (acc.type === "Equity") {
-                    equity[acc.name] = 0;
-                }
-            });
-
-            // Process filtered transactions
+            // Process filtered transactions to categorize them
             filteredTransactions.forEach(tx => {
-                // Find matching account from CoA
-                const acc = coaAccounts.find(a => a.id === tx.accountId || a.name === tx.ACCOUNT_HEADER);
+                const accountName = tx.ACCOUNT_HEADER || tx.account || "Unknown Account";
+                const amount = parseFloat(tx.INCOME || tx.EXPENSE || tx.amount || 0);
+                const isCredit = tx.TYPE === "CREDIT" || tx.type === "CREDIT" || (tx.INCOME && tx.INCOME > 0);
                 
-                if (acc) {
-                    const amount = parseFloat(tx.INCOME || tx.EXPENSE || tx.amount || 0);
-                    const isCredit = tx.TYPE === "CREDIT" || tx.type === "CREDIT" || tx.INCOME > 0;
-                    
-                    if (acc.type === "Asset") {
-                        // Assets increase with debits, decrease with credits
-                        assets[acc.name] = (assets[acc.name] || 0) + (isCredit ? -amount : amount);
-                    } else if (acc.type === "Liability") {
-                        // Liabilities increase with credits, decrease with debits
-                        liabilities[acc.name] = (liabilities[acc.name] || 0) + (isCredit ? amount : -amount);
-                    } else if (acc.type === "Equity") {
-                        // Equity increases with credits, decreases with debits
-                        equity[acc.name] = (equity[acc.name] || 0) + (isCredit ? amount : -amount);
-                    }
+                // Determine account type based on transaction data
+                // This is a simplified approach - you might need to adjust based on your data structure
+                let accountType = "Asset"; // Default to asset
+                
+                // Try to infer account type from account name or transaction type
+                if (accountName.toLowerCase().includes("loan") || 
+                    accountName.toLowerCase().includes("debt") ||
+                    accountName.toLowerCase().includes("payable") ||
+                    accountName.toLowerCase().includes("liability")) {
+                    accountType = "Liability";
+                } else if (accountName.toLowerCase().includes("equity") || 
+                          accountName.toLowerCase().includes("capital") ||
+                          accountName.toLowerCase().includes("retained")) {
+                    accountType = "Equity";
+                }
+                
+                // Categorize based on inferred type
+                if (accountType === "Asset") {
+                    // Assets increase with debits, decrease with credits
+                    assets[accountName] = (assets[accountName] || 0) + (isCredit ? -amount : amount);
+                } else if (accountType === "Liability") {
+                    // Liabilities increase with credits, decrease with debits
+                    liabilities[accountName] = (liabilities[accountName] || 0) + (isCredit ? amount : -amount);
+                } else if (accountType === "Equity") {
+                    // Equity increases with credits, decreases with debits
+                    equity[accountName] = (equity[accountName] || 0) + (isCredit ? amount : -amount);
                 }
             });
 
             // Remove accounts with zero balance
             Object.keys(assets).forEach(key => {
-                if (assets[key] === 0) delete assets[key];
+                if (Math.abs(assets[key]) < 0.01) delete assets[key];
             });
             Object.keys(liabilities).forEach(key => {
-                if (liabilities[key] === 0) delete liabilities[key];
+                if (Math.abs(liabilities[key]) < 0.01) delete liabilities[key];
             });
             Object.keys(equity).forEach(key => {
-                if (equity[key] === 0) delete equity[key];
+                if (Math.abs(equity[key]) < 0.01) delete equity[key];
             });
 
             const totalAssets = Object.values(assets).reduce((a, b) => a + b, 0);
