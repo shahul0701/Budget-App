@@ -205,36 +205,129 @@ function formatDate(date){return`${date.getFullYear()}-${String(date.getMonth()+
 function formatDisplay(date){return date.toLocaleDateString("en-IN",{year:"numeric",month:"long",day:"numeric"});}
 
 // ===== Date Range =====
-function getDateRange(){
-const today=new Date();
-let startDate,endDate;
-switch(reportPeriod.value){
-case"month":startDate=new Date(today.getFullYear(),today.getMonth(),1);endDate=new Date(today.getFullYear(),today.getMonth()+1,0);break;
-case"lastMonth":startDate=new Date(today.getFullYear(),today.getMonth()-1,1);endDate=new Date(today.getFullYear(),today.getMonth(),0);break;
-case"quarter":const q=Math.floor(today.getMonth()/3);startDate=new Date(today.getFullYear(),q*3,1);endDate=new Date(today.getFullYear(),(q+1)*3,0);break;
-case"year":startDate=new Date(today.getFullYear(),0,1);endDate=new Date(today.getFullYear(),11,31);break;
-case"custom":startDate=new Date(startDateInput.value);endDate=new Date(endDateInput.value);break;}
-startDate.setHours(0,0,0,0);endDate.setHours(23,59,59,999);
-return{startDate,endDate};
+// ===== Improved Date Range =====
+function getDateRange() {
+    const today = new Date();
+    let startDate, endDate;
+    
+    switch(reportPeriod.value) {
+        case "month":
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            break;
+        case "lastMonth":
+            startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            endDate = new Date(today.getFullYear(), today.getMonth(), 0);
+            break;
+        case "quarter":
+            const quarter = Math.floor(today.getMonth() / 3);
+            startDate = new Date(today.getFullYear(), quarter * 3, 1);
+            endDate = new Date(today.getFullYear(), (quarter + 1) * 3, 0);
+            break;
+        case "year":
+            startDate = new Date(today.getFullYear(), 0, 1);
+            endDate = new Date(today.getFullYear(), 11, 31);
+            break;
+        case "custom":
+            startDate = new Date(startDateInput.value);
+            endDate = new Date(endDateInput.value);
+            break;
+        default:
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    }
+    
+    // Ensure proper time handling
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+    
+    return { startDate, endDate };
 }
 
-// ===== Load Transactions =====
-async function loadTransactions(startDate,endDate){
-loadingModal.style.display="flex";
-try{
-const q=query(collection(db,"users",currentUser.uid,"transactions"),orderBy("DATE","desc"));
-const snap=await getDocs(q);
-allTransactions=snap.docs.map(d=>({id:d.id,...d.data()})).filter(tx=>{const d=new Date(tx.DATE);return d>=startDate && d<=endDate;});
-return allTransactions;
-}catch(err){console.error(err);alert("Error: "+err.message);return[];}finally{loadingModal.style.display="none";}
+// ===== Improved Load Transactions =====
+async function loadTransactions(startDate, endDate) {
+    loadingModal.style.display = "flex";
+    try {
+        // Convert to Firestore timestamp format for querying
+        const startTimestamp = new Date(startDate);
+        const endTimestamp = new Date(endDate);
+        
+        // Query with date range filtering
+        const transactionsRef = collection(db, "users", currentUser.uid, "transactions");
+        const q = query(
+            transactionsRef, 
+            orderBy("DATE", "desc")
+        );
+        
+        const snap = await getDocs(q);
+        
+        // Filter client-side (for now - consider server-side filtering)
+        allTransactions = snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(tx => {
+                if (!tx.DATE) return false;
+                
+                // Handle different date formats
+                let transactionDate;
+                if (typeof tx.DATE === 'string') {
+                    // Handle string dates (YYYY-MM-DD format)
+                    transactionDate = new Date(tx.DATE);
+                } else if (tx.DATE && typeof tx.DATE.toDate === 'function') {
+                    // Handle Firestore Timestamp objects
+                    transactionDate = tx.DATE.toDate();
+                } else if (tx.DATE && typeof tx.DATE === 'object') {
+                    // Handle other date objects
+                    transactionDate = new Date(tx.DATE);
+                } else {
+                    return false;
+                }
+                
+                return transactionDate >= startDate && transactionDate <= endDate;
+            });
+        
+        return allTransactions;
+    } catch (err) {
+        console.error("Error loading transactions:", err);
+        Swal.fire("Error", "Failed to load transactions: " + err.message, "error");
+        return [];
+    } finally {
+        loadingModal.style.display = "none";
+    }
 }
 
+// Add this function to debug your transactions
+function debugTransactions(transactions) {
+    console.log("Total transactions loaded:", transactions.length);
+    
+    if (transactions.length > 0) {
+        console.log("Sample transaction:", transactions[0]);
+        console.log("Transaction date type:", typeof transactions[0].DATE);
+        console.log("Transaction date value:", transactions[0].DATE);
+        
+        // Check income/expense values
+        const hasIncome = transactions.filter(tx => parseFloat(tx.INCOME || 0) > 0);
+        const hasExpense = transactions.filter(tx => parseFloat(tx.EXPENSE || 0) > 0);
+        
+        console.log("Transactions with income:", hasIncome.length);
+        console.log("Transactions with expense:", hasExpense.length);
+    }
+}
+            
 // ===== Generate Report =====
-async function generateReport(){
-const {startDate,endDate}=getDateRange();
-reportPeriodDisplay.textContent=`Report: ${formatDisplay(startDate)} to ${formatDisplay(endDate)}`;
-const transactions=await loadTransactions(startDate,endDate);
-if(transactions.length===0){resetReport();return;}
+async function generateReport() {
+    const {startDate, endDate} = getDateRange();
+    reportPeriodDisplay.textContent = `Report: ${formatDisplay(startDate)} to ${formatDisplay(endDate)}`;
+    
+    const transactions = await loadTransactions(startDate, endDate);
+    
+    // DEBUG: Check what data you're getting
+    debugTransactions(transactions);
+    
+    if (transactions.length === 0) {
+        resetReport();
+        Swal.fire("Info", "No transactions found in the selected date range.", "info");
+        return;
+    }
 
 const totalIncome=transactions.filter(tx=>parseFloat(tx.INCOME)>0).reduce((s,tx)=>s+parseFloat(tx.INCOME),0);
 const totalExpenses=transactions.filter(tx=>parseFloat(tx.EXPENSE)>0).reduce((s,tx)=>s+parseFloat(tx.EXPENSE),0);
@@ -253,6 +346,81 @@ updateBreakdown(transactions,"EXPENSE",expenseBreakdownElem);
 updateChart(transactions);
 }
 
+// ===== Improved Breakdown with COA Integration =====
+async function updateBreakdown(transactions, type, container) {
+    try {
+        // Load COA data for proper categorization
+        const coaData = await loadCOAData();
+        const byCat = {};
+        
+        transactions
+            .filter(tx => parseFloat(tx[type] || 0) > 0)
+            .forEach(tx => {
+                // Use ACCOUNT_HEADER if available, otherwise try to map from COA
+                let category = tx.ACCOUNT_HEADER || "Uncategorized";
+                
+                // If no account header, try to determine from description
+                if (category === "Uncategorized" && tx.DESCRIPTION) {
+                    category = categorizeFromDescription(tx.DESCRIPTION, coaData, type);
+                }
+                
+                byCat[category] = (byCat[category] || 0) + parseFloat(tx[type] || 0);
+            });
+        
+        if (Object.keys(byCat).length === 0) {
+            container.innerHTML = '<p class="empty-state"><i class="fa fa-info-circle"></i> No data</p>';
+        } else {
+            container.innerHTML = Object.entries(byCat)
+                .sort((a, b) => b[1] - a[1]) // Sort by amount descending
+                .map(([category, amount]) => `
+                    <div class="transaction-item">
+                        <div class="transaction-category">${escapeHtml(category)}</div>
+                        <div class="transaction-amount">₹${amount.toFixed(2)}</div>
+                    </div>
+                `).join("");
+        }
+    } catch (error) {
+        console.error("Error updating breakdown:", error);
+        container.innerHTML = '<p class="empty-state"><i class="fa fa-exclamation-triangle"></i> Error loading data</p>';
+    }
+}
+
+// Helper function to load COA data
+async function loadCOAData() {
+    try {
+        const coaRef = collection(db, "users", currentUser.uid, "chartOfAccounts");
+        const snap = await getDocs(coaRef);
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+        console.error("Error loading COA data:", error);
+        return [];
+    }
+}
+
+// Helper function to categorize from description
+function categorizeFromDescription(description, coaData, type) {
+    const desc = description.toLowerCase();
+    
+    // Simple keyword matching - you can expand this
+    const keywords = {
+        'salary': 'Salary Income',
+        'rent': 'Rental Income', 
+        'food': 'Food Expenses',
+        'transport': 'Transportation Expenses',
+        'electricity': 'Utility Expenses',
+        'shopping': 'Shopping Expenses'
+    };
+    
+    for (const [keyword, category] of Object.entries(keywords)) {
+        if (desc.includes(keyword)) {
+            return category;
+        }
+    }
+    
+    return type === "INCOME" ? "Other Income" : "Other Expenses";
+}
+
+            
 function resetReport(){
 totalIncomeElem.textContent="₹0.00";totalExpensesElem.textContent="₹0.00";netProfitElem.textContent="₹0.00";incomeBreakdownElem.innerHTML="";expenseBreakdownElem.innerHTML="";
 if(profitLossChart){profitLossChart.destroy();}
