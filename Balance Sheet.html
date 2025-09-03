@@ -206,6 +206,33 @@
             background: #f8d7da;
             color: #721c24;
         }
+        .filter-section {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        .filter-section label {
+            margin-right: 15px;
+        }
+        .filter-section select, .filter-section input {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .filter-section button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .custom-date-inputs {
+            display: none;
+            margin-left: 15px;
+        }
     </style>
 </head>
 <body>
@@ -220,6 +247,23 @@
 
     <div class="container">
         <h1><i class="fas fa-balance-scale"></i> Balance Sheet</h1>
+
+        <div class="filter-section">
+            <label>
+                Filter By Date:
+                <select id="dateFilter">
+                    <option value="all">All Dates</option>
+                    <option value="year">This Year</option>
+                    <option value="month">This Month</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+            </label>
+            <span id="customDateInputs" class="custom-date-inputs">
+                <label>Start: <input type="date" id="startDate" /></label>
+                <label style="margin-left:10px;">End: <input type="date" id="endDate" /></label>
+            </span>
+            <button id="applyFilterBtn">Apply Filter</button>
+        </div>
 
         <div class="view-toggle">
             <button id="professionalView" class="active">Professional View</button>
@@ -278,9 +322,15 @@
         const exportPDFBtn = document.getElementById("exportPDF");
         const loadingModal = document.getElementById("loadingModal");
         const balanceCheckElem = document.getElementById("balanceCheck");
+        const dateFilter = document.getElementById("dateFilter");
+        const startDate = document.getElementById("startDate");
+        const endDate = document.getElementById("endDate");
+        const customDateInputs = document.getElementById("customDateInputs");
+        const applyFilterBtn = document.getElementById("applyFilterBtn");
 
         let currentUser = null;
-        let transactions = [];
+        let allTransactions = [];
+        let filteredTransactions = [];
         let coaAccounts = [];
 
         // ===== Auth =====
@@ -315,6 +365,60 @@
             renderBalanceSheet("company");
         });
 
+        // ===== Filter functionality =====
+        dateFilter.addEventListener("change", () => {
+            if (dateFilter.value === "custom") {
+                customDateInputs.style.display = "inline-block";
+            } else {
+                customDateInputs.style.display = "none";
+            }
+        });
+
+        applyFilterBtn.addEventListener("click", () => {
+            filterTransactions();
+        });
+
+        function filterTransactions() {
+            const filter = dateFilter.value;
+            const now = new Date();
+
+            const isInRange = (dateStr, start, end) => {
+                if (!dateStr) return false;
+                const d = new Date(dateStr);
+                return d >= start && d <= end;
+            };
+
+            switch (filter) {
+                case "year":
+                    filteredTransactions = allTransactions.filter(tx => {
+                        const d = new Date(tx.DATE);
+                        return d.getFullYear() === now.getFullYear();
+                    });
+                    break;
+                case "month":
+                    filteredTransactions = allTransactions.filter(tx => {
+                        const d = new Date(tx.DATE);
+                        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+                    });
+                    break;
+                case "custom": {
+                    const s = new Date(startDate.value);
+                    const e = new Date(endDate.value);
+                    if (isNaN(s) || isNaN(e)) {
+                        filteredTransactions = allTransactions;
+                        break;
+                    }
+                    e.setHours(23, 59, 59, 999); // include whole end day
+                    filteredTransactions = allTransactions.filter(tx => isInRange(tx.DATE, s, e));
+                    break;
+                }
+                default:
+                    filteredTransactions = allTransactions;
+            }
+
+            renderBalanceSheet(professionalViewBtn.classList.contains("active") ? "professional" : "company");
+        }
+
         async function loadBalanceSheet() {
             loadingModal.style.display = "flex";
             try {
@@ -325,7 +429,8 @@
                 // Load transactions - FIXED PATH
                 const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "asc"));
                 const snap = await getDocs(q);
-                transactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                allTransactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                filteredTransactions = allTransactions;
 
                 renderBalanceSheet("professional");
             } catch (err) {
@@ -353,8 +458,8 @@
                 }
             });
 
-            // Process transactions
-            transactions.forEach(tx => {
+            // Process filtered transactions
+            filteredTransactions.forEach(tx => {
                 // Find matching account from CoA
                 const acc = coaAccounts.find(a => a.id === tx.accountId || a.name === tx.ACCOUNT_HEADER);
                 
