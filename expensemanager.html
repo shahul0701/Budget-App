@@ -512,6 +512,9 @@
     const db = getFirestore(app);
     const auth = getAuth(app);
 
+      // state - add this line to track if we've loaded saved state
+  let hasLoadedSavedState = false;
+
     // DOM refs
     const usernameElem = document.getElementById("username");
     const initialsElem = document.getElementById("userInitials");
@@ -749,38 +752,41 @@
     });
 
    // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
-async function loadTransactions(){
-  try {
-    transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
-        // USE THE SAME QUERY AS FIRST APP
-    const q = query(
-      collection(db, "users", currentUser.uid, "transactions"), 
-      orderBy("createdAt", "desc") // Use the same ordering
-    );
-    
-    const snap = await getDocs(q);
-    const txs = snap.docs.map(d => ({ 
-      id: d.id, 
-      ...d.data(),
-      // Ensure compatibility with both apps
-      NOTES: d.data().NOTES || d.data().DESCRIPTION || "",
-      BANK_NAME: d.data().BANK_NAME || d.data().MODE || ""
-    }));
-    
-    allTransactions = txs;
-    filteredTransactions = allTransactions.slice();
-    currentPage = 1;
+ async function loadTransactions(){
+    try {
+      transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
+      
+      const q = query(
+        collection(db, "users", currentUser.uid, "transactions"), 
+        orderBy("createdAt", "desc")
+      );
+      
+      const snap = await getDocs(q);
+      const txs = snap.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data(),
+        NOTES: d.data().NOTES || d.data().DESCRIPTION || "",
+        BANK_NAME: d.data().BANK_NAME || d.data().MODE || ""
+      }));
+      
+      allTransactions = txs;
+      filteredTransactions = allTransactions.slice();
+      
+      // Only reset to page 1 if we haven't loaded a saved state
+      if (!hasLoadedSavedState) {
+        currentPage = 1;
+      }
     buildTable();
     updateStats();
     updateBankBalances();
     
-    // Initialize voucher numbering
-    await initVoucherNumbering();
-  } catch (err) {
-    console.error("loadTransactions", err);
-    transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+  // Initialize voucher numbering
+      await initVoucherNumbering();
+    } catch (err) {
+      console.error("loadTransactions", err);
+      transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+    }
   }
-}
 
     // Add this function to initialize voucher numbering
     async function initVoucherNumbering() {
@@ -1154,14 +1160,15 @@ html += `
       buildPagination();
     }
 
-    function buildPagination() {
-      const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
-      if (totalPages <= 1) {
-        paginationControls.innerHTML = "";
-        return;
-      }
+  // In your buildPagination function, add saveAppState() call:
+  function buildPagination() {
+    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+    if (totalPages <= 1) {
+      paginationControls.innerHTML = "";
+      return;
+    }
 
-      let html = `<nav><ul class="pagination pagination-sm">`;
+    let html = `<nav><ul class="pagination pagination-sm">`;
 
       const startPage = Math.max(1, currentPage - 2);
       const endPage = Math.min(totalPages, startPage + 4);
@@ -1188,18 +1195,19 @@ html += `
 
       paginationControls.innerHTML = html;
 
-      paginationControls.querySelectorAll(".page-link").forEach(link => {
-        link.addEventListener("click", e => {
-          e.preventDefault();
-          const page = parseInt(e.target.getAttribute("data-page"));
-          if (page && page !== currentPage && page > 0 && page <= totalPages) {
-            currentPage = page;
-            buildTable();
-            saveAppState();
-          }
-        });
+       paginationControls.querySelectorAll(".page-link").forEach(link => {
+      link.addEventListener("click", e => {
+        e.preventDefault();
+        const page = parseInt(e.target.getAttribute("data-page"));
+        if (page && page !== currentPage && page > 0 && page <= totalPages) {
+          currentPage = page;
+          buildTable();
+          saveAppState(); // Save the new page
+        }
       });
-    }
+    });
+  }
+
 
     function updateStats(){
       const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
@@ -1572,26 +1580,30 @@ saveTransactionBtn.addEventListener("click", async () => {
   localStorage.setItem('budgetAppState', JSON.stringify(state));
 }
 
-    function loadAppState() {
-  const savedState = localStorage.getItem('budgetAppState');
-  if (savedState) {
-    const state = JSON.parse(savedState);
-    currentPage = state.currentPage || 1;
-    dateFilter.value = state.dateFilter || "all";
-    typeFilter.value = state.typeFilter || "all";
-    bankFilter.value = state.bankFilter || "all";
-    searchDesc.value = state.searchDesc || "";
-    startDateInput.value = state.startDate || "";
-    endDateInput.value = state.endDate || "";
-    balanceVisible = state.balanceVisible || false;
-    
-    // Update UI based on saved state
-    if (dateFilter.value === "custom") {
-      customRangeControls.style.display = "flex";
+   // In your loadAppState function, update to:
+  function loadAppState() {
+    const savedState = localStorage.getItem('budgetAppState');
+    if (savedState) {
+      const state = JSON.parse(savedState);
+      currentPage = state.currentPage || 1;
+      dateFilter.value = state.dateFilter || "all";
+      typeFilter.value = state.typeFilter || "all";
+      bankFilter.value = state.bankFilter || "all";
+      searchDesc.value = state.searchDesc || "";
+      startDateInput.value = state.startDate || "";
+      endDateInput.value = state.endDate || "";
+      balanceVisible = state.balanceVisible || true;
+      
+      // Update UI based on saved state
+      if (dateFilter.value === "custom") {
+        customRangeControls.style.display = "flex";
+      }
+      updateBalanceVisibility();
+      
+      // Mark that we've loaded saved state
+      hasLoadedSavedState = true;
     }
-    updateBalanceVisibility();
   }
-}
     // Initialize with balance hidden
     updateBalanceVisibility();
 
