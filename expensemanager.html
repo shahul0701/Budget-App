@@ -744,27 +744,39 @@
       applyFilters();
     });
 
-    // load transactions
-    async function loadTransactions(){
-      try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
-        const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
-        const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        allTransactions = txs;
-        filteredTransactions = allTransactions.slice();
-        currentPage = 1;
-        buildTable();
-        updateStats();
-        updateBankBalances();
-        
-        // Initialize voucher numbering
-        await initVoucherNumbering();
-      } catch (err) {
-        console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
-      }
-    }
+   // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
+async function loadTransactions(){
+  try {
+    transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        // USE THE SAME QUERY AS FIRST APP
+    const q = query(
+      collection(db, "users", currentUser.uid, "transactions"), 
+      orderBy("createdAt", "desc") // Use the same ordering
+    );
+    
+    const snap = await getDocs(q);
+    const txs = snap.docs.map(d => ({ 
+      id: d.id, 
+      ...d.data(),
+      // Ensure compatibility with both apps
+      NOTES: d.data().NOTES || d.data().DESCRIPTION || "",
+      BANK_NAME: d.data().BANK_NAME || d.data().MODE || ""
+    }));
+    
+    allTransactions = txs;
+    filteredTransactions = allTransactions.slice();
+    currentPage = 1;
+    buildTable();
+    updateStats();
+    updateBankBalances();
+    
+    // Initialize voucher numbering
+    await initVoucherNumbering();
+  } catch (err) {
+    console.error("loadTransactions", err);
+    transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+  }
+}
 
     // Add this function to initialize voucher numbering
     async function initVoucherNumbering() {
@@ -1064,18 +1076,19 @@ async function getNextVoucherNumber(voucherType) {
         const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
         const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
         
-        html += `
-          <tr>
-            <td>${escapeHtml(date)}</td>
-            <td>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</td>
-            <td><span class="badge ${tx.TYPE === 'Income' ? 'badge-income' : 'badge-expense'}">${escapeHtml(tx.TYPE)}</span></td>
-            <td>${escapeHtml(tx.SINO || "")}</td>
-            <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
-            <td style="text-align:right;">${incomeDisplay}</td>
-            <td style="text-align:right;">${expenseDisplay}</td>
-            <td style="text-align:right;" class="${balanceVisible ? '' : 'balance-hidden'}">${balanceDisplay}</td>
-            <td>
-        `;
+        // In buildTable() function, update the row generation to:
+html += `
+  <tr>
+    <td>${escapeHtml(date)}</td>
+    <td>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</td>
+    <td><span class="badge ${tx.TYPE === 'Income' ? 'badge-income' : 'badge-expense'}">${escapeHtml(tx.TYPE)}</span></td>
+    <td>${escapeHtml(tx.SINO || "")}</td>
+    <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
+    <td style="text-align:right;">${incomeDisplay}</td>
+    <td style="text-align:right;">${expenseDisplay}</td>
+    <td style="text-align:right;" class="${balanceVisible ? '' : 'balance-hidden'}">${balanceDisplay}</td>
+    <td>
+`;
         
         // Attachment handling
         if (tx.ATTACHMENT) {
@@ -1420,61 +1433,61 @@ formVOUCHERTYPE.addEventListener("change", async function() {
     });
 
     // Save transaction
-    saveTransactionBtn.addEventListener("click", async () => {
-      // Prevent duplicate submissions
-      if (isSubmitting) return;
-      isSubmitting = true;
+saveTransactionBtn.addEventListener("click", async () => {
+  // Prevent duplicate submissions
+  if (isSubmitting) return;
+  isSubmitting = true;
       
-      // Show loading state
-      saveTransactionBtn.disabled = true;
-      saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+  // Show loading state
+  saveTransactionBtn.disabled = true;
+  saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+  
+  // Validate form
+  if (!formDATE.value) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
+    resetSaveButton();
+    return;
+  }
       
-      // Validate form
-      if (!formDATE.value) {
-        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
-        resetSaveButton();
-        return;
-      }
-      
-      const txData = {
-        DATE: formDATE.value,
-        SINO: formSINO.value,
-        ACCOUNT_HEADER: formACCOUNTHEADER.value,
-        VOUCHER_TYPE: formVOUCHERTYPE.value,
-        TYPE: formTYPE.value,
-        BANK_NAME: formBANKNAME.value,
-        INCOME: parseFloat(formINCOME.value) || 0,
-        EXPENSE: parseFloat(formEXPENSE.value) || 0,
-        BALANCE: parseFloat(formBALANCE.value) || 0,
-        NOTES: formNOTES.value,
-        DESCRIPTION: formNOTES.value, // For backward compatibility
-        ATTACHMENT: formATTACH.value,
-        MODE: formBANKNAME.value, // For backward compatibility
-        UPDATED_AT: new Date().toISOString()
-      };
-      
-      try {
-        if (txIdInput.value) {
-          // Update existing transaction
-          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
-          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
-        } else {
-          // Add new transaction
-          txData.CREATED_AT = new Date().toISOString();
-          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
-        }
-        
-        transactionModal.hide();
-        await loadTransactions();
-      } catch (err) {
-        console.error("saveTransaction", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
-      } finally {
-        resetSaveButton();
-      }
-    });
-
+       // USE THE SAME DATA STRUCTURE AS THE FIRST APP
+  const txData = {
+    DATE: formDATE.value,
+    SINO: formSINO.value,
+    ACCOUNT_HEADER: formACCOUNTHEADER.value, // Match field name
+    MODE: formBANKNAME.value, // Use MODE field instead of BANK_NAME
+    BANK_NAME: formBANKNAME.value, // Keep both for compatibility
+    TYPE: formTYPE.value,
+    INCOME: parseFloat(formINCOME.value) || 0,
+    EXPENSE: parseFloat(formEXPENSE.value) || 0,
+    BALANCE: parseFloat(formBALANCE.value) || 0,
+    DESCRIPTION: formNOTES.value, // Use DESCRIPTION field instead of NOTES
+    NOTES: formNOTES.value, // Keep both for compatibility
+    ATTACHMENT: formATTACH.value,
+    createdAt: new Date(), // Add timestamp for first app compatibility
+    userId: currentUser.uid // Add user ID for first app compatibility
+  };
+  
+  try {
+    if (txIdInput.value) {
+      // Update existing transaction
+      await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
+      Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
+    } else {
+      // Add new transaction - USE THE SAME PATH AS FIRST APP
+      txData.createdAt = new Date();
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+      Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
+    }
+    
+    transactionModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    console.error("saveTransaction", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
+  } finally {
+    resetSaveButton();
+  }
+});
     // View attachment
     function viewAttachment(attachmentUrl) {
       if (!attachmentUrl) return;
