@@ -724,6 +724,8 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+    let hasLoadedSavedState = false;
+
 // DOM references
 const usernameElem = document.getElementById("username");
 const initialsElem = document.getElementById("userInitials");
@@ -796,21 +798,61 @@ const rowsPerPage = 10;
 let lastBalances = {};
 let csvTransactions = [];
 
-// Listen for auth state change
-onAuthStateChanged(auth, async user => {
-    if (user) {
-        currentUser = user;
-        const name = user.displayName || user.email || "User";
-        usernameElem.textContent = name;
-        initialsElem.textContent = name.charAt(0).toUpperCase();
 
-        await loadAccounts();
-        await loadTransactions();
-        await populateBankAccounts();
-    } else {
-        alert("Please login first.");
-        window.location.href = "index.html";
-    }
+
+// Add this function to save app state
+function saveAppState() {
+  const state = {
+    currentPage: currentPage,
+    dateFilter: dateFilter.value,
+    incomeExpenseFilter: incomeExpenseFilter.value,
+    descFilter: descFilter.value,
+    modeFilter: modeFilter.value,
+    bankFilter: bankFilter.value,
+    startDate: startDateInput.value,
+    endDate: endDateInput.value
+  };
+  localStorage.setItem('budgetAppState', JSON.stringify(state));
+}
+
+// Modify your loadAppState function (or create it if it doesn't exist):
+function loadAppState() {
+  const savedState = localStorage.getItem('budgetAppState');
+  if (savedState) {
+    const state = JSON.parse(savedState);
+    currentPage = state.currentPage || 1;
+    dateFilter.value = state.dateFilter || "all";
+    incomeExpenseFilter.value = state.incomeExpenseFilter || "all";
+    descFilter.value = state.descFilter || "";
+    modeFilter.value = state.modeFilter || "all";
+    bankFilter.value = state.bankFilter || "all";
+    startDateInput.value = state.startDate || "";
+    endDateInput.value = state.endDate || "";
+    
+    // Mark that we've loaded saved state
+    hasLoadedSavedState = true;
+  }
+}
+
+    
+// Call loadAppState early in your initialization
+onAuthStateChanged(auth, async user => {
+  if (user) {
+    currentUser = user;
+    const name = user.displayName || user.email || "User";
+    usernameElem.textContent = name;
+    initialsElem.textContent = name.charAt(0).toUpperCase();
+
+    // Load saved state before loading transactions
+    loadAppState();
+    
+    await loadAccounts();
+    await loadTransactions();
+    await populateBankAccounts();
+  } else {
+    alert("Please login first.");
+    window.location.href = "index.html";
+  }
 });
 
 logoutBtn.addEventListener("click", async () => {
@@ -1286,58 +1328,64 @@ async function populateBankAccounts() {
 
 // Enhanced loadTransactions function
 async function loadTransactions() {
-    loadingModal.style.display = "flex";
+  loadingModal.style.display = "flex";
+  try {
+    let q;
     try {
-        let q;
-        try {
-            // Try to order by both date and time if possible
-            q = query(
-                collection(db, "users", currentUser.uid, "transactions"),
-                orderBy("createdAt", "desc") // Use timestamp for consistent ordering
-            );
-        } catch (error) {
-            if (error.code === 'failed-precondition') {
-                // Fallback to date-only ordering
-                q = query(
-                    collection(db, "users", currentUser.uid, "transactions"),
-                    orderBy("DATE", "desc")
-                );
-            } else {
-                throw error;
-            }
-        }
+      // Try to order by both date and time if possible
+      q = query(
+        collection(db, "users", currentUser.uid, "transactions"),
+        orderBy("createdAt", "desc") // Use timestamp for consistent ordering
+      );
+    } catch (error) {
+      if (error.code === 'failed-precondition') {
+        // Fallback to date-only ordering
+        q = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          orderBy("DATE", "desc")
+        );
+      } else {
+        throw error;
+      }
+    }
 
         const snap = await getDocs(q);
-        let transactions = snap.docs.map(doc => ({ 
-            id: doc.id, 
-            ...doc.data(),
-            // Ensure SINO field exists and has a value
-            SINO: doc.data().SINO || (snap.docs.indexOf(doc) + 1).toString()
-        }));
-
-        // Get account from URL
-        const selectedAccount = getAccountFromURL();
-
-        // Filter if opened from trial balance
-        if (selectedAccount) {
-            transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
-            document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
-        } else {
-            document.getElementById("accountTitle").textContent = "All Transactions";
-        }
-
-        allTransactions = calculateRunningBalance(transactions);
-        populateFiltersOptions(allTransactions);
-        applyFilters();
+    let transactions = snap.docs.map(doc => ({ 
+      id: doc.id, 
+      ...doc.data(),
+      // Ensure SINO field exists and has a value
+      SINO: doc.data().SINO || (snap.docs.indexOf(doc) + 1).toString()
+    }));
         
-    } catch (err) {
-        console.error("Error loading transactions:", err);
-        if (!handleFirestoreError(err, "load transactions")) {
-            Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
-        }
-    } finally {
-        loadingModal.style.display = "none";
+    // Get account from URL
+    const selectedAccount = getAccountFromURL();
+
+    // Filter if opened from trial balance
+    if (selectedAccount) {
+      transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
+      document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
+    } else {
+      document.getElementById("accountTitle").textContent = "All Transactions";
     }
+
+    allTransactions = calculateRunningBalance(transactions);
+    populateFiltersOptions(allTransactions);
+    
+    // Only reset to page 1 if we haven't loaded a saved state
+    if (!hasLoadedSavedState) {
+      currentPage = 1;
+    }
+    
+    applyFilters();
+    
+  } catch (err) {
+    console.error("Error loading transactions:", err);
+    if (!handleFirestoreError(err, "load transactions")) {
+      Swal.fire("Error", "Error loading transactions. Please check console for details.", "error");
+    }
+  } finally {
+    loadingModal.style.display = "none";
+  }
 }
 
 // Enhanced function to calculate running balance for transactions
@@ -1791,8 +1839,8 @@ function parseTransactionDate(transaction) {
 
 // Filter transactions according to selected criteria
 function applyFilters() {
-    filteredTransactions = allTransactions.slice();
-    const now = new Date();
+  filteredTransactions = allTransactions.slice();
+  const now = new Date();
 
     // Helper to check if date is within range safely
     const isInRange = (transaction, start, end) => {
@@ -1849,8 +1897,14 @@ function applyFilters() {
     if (bankFilter.value !== "all")
         filteredTransactions = filteredTransactions.filter(t => t.BANK_NAME === bankFilter.value);
 
+    if (!hasLoadedSavedState) {
     currentPage = 1;
-    buildTable();
+  }
+  
+  buildTable();
+
+     // Save the new state after applying filters
+  saveAppState();
 }
 
 // Function to determine file type and generate appropriate HTML
@@ -1985,18 +2039,20 @@ function updatePagination() {
 }
 
 prevPageBtn.addEventListener("click", () => {
-    if (currentPage > 1) {
-        currentPage--;
-        buildTable();
-    }
+  if (currentPage > 1) {
+    currentPage--;
+    buildTable();
+    saveAppState(); // Save the new page
+  }
 });
 
 nextPageBtn.addEventListener("click", () => {
-    const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
-    if (currentPage < totalPages) {
-        currentPage++;
-        buildTable();
-    }
+  const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+  if (currentPage < totalPages) {
+    currentPage++;
+    buildTable();
+    saveAppState(); // Save the new page
+  }
 });
 
 // Attach event listeners to Edit/Delete buttons
