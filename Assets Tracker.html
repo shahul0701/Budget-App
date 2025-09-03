@@ -553,6 +553,32 @@
             height: 30px;
             cursor: pointer;
         }
+        
+        /* Journal Entry Action Buttons */
+        .journal-actions {
+            display: flex;
+            gap: 5px;
+            justify-content: center;
+        }
+        
+        /* Asset Association Styles */
+        .asset-association {
+            background-color: rgba(67, 97, 238, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
+        .asset-association p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .no-association {
+            color: var(--gray);
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -1004,6 +1030,14 @@
             </div>
             
             <form id="journal-form">
+                <div class="form-group">
+                    <label class="form-label">Related Asset (Optional)</label>
+                    <select class="form-input" id="journal-asset">
+                        <option value="">Select Asset (if applicable)</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Date</label>
@@ -1088,6 +1122,60 @@
                 <div class="form-group">
                     <button type="submit" class="btn btn-primary">Save Journal Entry</button>
                     <button type="button" class="btn" id="cancel-journal">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Journal Entry Modal -->
+    <div id="edit-journal-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Edit Journal Entry</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="edit-journal-form">
+                <input type="hidden" id="edit-journal-id">
+                <input type="hidden" id="edit-journal-asset-id">
+                
+                <div class="form-group">
+                    <label class="form-label">Related Asset</label>
+                    <select class="form-input" id="edit-journal-asset" disabled>
+                        <option value="">No asset associated</option>
+                    </select>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Date</label>
+                        <input type="date" class="form-input" id="edit-journal-date" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Reference Number</label>
+                        <input type="text" class="form-input" id="edit-journal-reference">
+                    </div>
+                </div>
+                
+                <div id="edit-journal-lines">
+                    <!-- Journal lines will be populated here -->
+                </div>
+                
+                <div class="form-group">
+                    <button type="button" class="btn btn-sm btn-primary" id="add-edit-journal-line">
+                        <i class="fas fa-plus"></i> Add Another Line
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Narration</label>
+                    <textarea class="form-input" id="edit-journal-narration" rows="3"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Update Journal Entry</button>
+                    <button type="button" class="btn" id="cancel-edit-journal">Cancel</button>
                 </div>
             </form>
         </div>
@@ -1311,6 +1399,7 @@
         const addAssetModal = document.getElementById('add-asset-modal');
         const editAssetModal = document.getElementById('edit-asset-modal');
         const addJournalModal = document.getElementById('add-journal-modal');
+        const editJournalModal = document.getElementById('edit-journal-modal');
         const addAccountModal = document.getElementById('add-account-modal');
         const editAccountModal = document.getElementById('edit-account-modal');
         const uploadDocumentModal = document.getElementById('upload-document-modal');
@@ -1319,6 +1408,7 @@
         const assetForm = document.getElementById('asset-form');
         const editAssetForm = document.getElementById('edit-asset-form');
         const journalForm = document.getElementById('journal-form');
+        const editJournalForm = document.getElementById('edit-journal-form');
         const accountForm = document.getElementById('account-form');
         const editAccountForm = document.getElementById('edit-account-form');
         const documentForm = document.getElementById('document-form');
@@ -1339,6 +1429,7 @@
         let currentAssetId = null;
         let financialChart = null;
         let journalLineCount = 2;
+        let editJournalLineCount = 0;
 
         // Auth state observer
         auth.onAuthStateChanged(user => {
@@ -1461,6 +1552,8 @@
         addJournalBtn.addEventListener('click', () => {
             // Load accounts for journal entry
             loadAccountsForJournal();
+            // Load assets for journal entry
+            loadAssetsForJournal();
             addJournalModal.style.display = 'flex';
         });
 
@@ -1496,6 +1589,10 @@
 
         document.getElementById('cancel-journal').addEventListener('click', () => {
             addJournalModal.style.display = 'none';
+        });
+
+        document.getElementById('cancel-edit-journal').addEventListener('click', () => {
+            editJournalModal.style.display = 'none';
         });
 
         document.getElementById('cancel-account').addEventListener('click', () => {
@@ -1587,6 +1684,52 @@
             
             // Load accounts for the new line
             loadAccountsForSelect(newLine.querySelector('.journal-account'));
+            
+            // Add event listener to remove button
+            newLine.querySelector('.remove-line').addEventListener('click', function() {
+                if (document.querySelectorAll('.journal-line').length > 2) {
+                    this.parentElement.remove();
+                } else {
+                    showNotification('You need at least two journal lines', 'error');
+                }
+            });
+        });
+
+        // Add edit journal line
+        document.getElementById('add-edit-journal-line').addEventListener('click', () => {
+            editJournalLineCount++;
+            const newLine = document.createElement('div');
+            newLine.className = 'journal-line';
+            newLine.dataset.line = editJournalLineCount;
+            newLine.innerHTML = `
+                <div style="flex: 2;">
+                    <label class="form-label">Account</label>
+                    <select class="form-input edit-journal-account" required>
+                        <option value="">Select Account</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label class="form-label">Debit</label>
+                    <input type="number" step="0.01" placeholder="0.00" class="edit-journal-debit">
+                </div>
+                <div style="flex: 1;">
+                    <label class="form-label">Credit</label>
+                    <input type="number" step="0.01" placeholder="0.00" class="edit-journal-credit">
+                </div>
+                <div style="flex: 2;">
+                    <label class="form-label">Description</label>
+                    <input type="text" placeholder="Description" class="edit-journal-desc">
+                </div>
+                <div style="flex: 1;">
+                    <label class="form-label">Tax</label>
+                    <input type="number" step="0.01" placeholder="0.00" class="edit-journal-tax">
+                </div>
+                <button type="button" class="remove-line" style="margin-top: 24px;">×</button>
+            `;
+            document.getElementById('edit-journal-lines').appendChild(newLine);
+            
+            // Load accounts for the new line
+            loadAccountsForSelect(newLine.querySelector('.edit-journal-account'));
             
             // Add event listener to remove button
             newLine.querySelector('.remove-line').addEventListener('click', function() {
@@ -1762,10 +1905,13 @@
         journalForm.addEventListener('submit', e => {
             e.preventDefault();
             
-            if (!currentUser || !currentAssetId) {
-                showNotification('Please select an asset first', 'error');
+            if (!currentUser) {
+                showNotification('Please sign in to add journal entries', 'error');
                 return;
             }
+            
+            // Get the selected asset
+            const assetId = document.getElementById('journal-asset').value;
             
             // Collect all journal lines
             const journalLines = [];
@@ -1800,13 +1946,25 @@
                 narration: document.getElementById('journal-narration').value,
                 totalDebit: totalDebit,
                 totalCredit: totalCredit,
+                assetId: assetId || null,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
             // Save to Firestore
-            db.collection('users').doc(currentUser.uid).collection('assets')
-                .doc(currentAssetId).collection('journalEntries')
-                .add(journalData)
+            let savePromise;
+            
+            if (assetId) {
+                // Save to the asset's journal entries
+                savePromise = db.collection('users').doc(currentUser.uid).collection('assets')
+                    .doc(assetId).collection('journalEntries')
+                    .add(journalData);
+            } else {
+                // Save to general journal entries
+                savePromise = db.collection('users').doc(currentUser.uid).collection('journalEntries')
+                    .add(journalData);
+            }
+            
+            savePromise
                 .then(() => {
                     showNotification('Journal entry added successfully!', 'success');
                     addJournalModal.style.display = 'none';
@@ -1819,12 +1977,91 @@
                     }
                     journalLineCount = 2;
                     
-                    // Reload journal entries
-                    loadJournalEntries(currentAssetId);
+                    // Reload journal entries if we're on an asset detail page
+                    if (currentAssetId) {
+                        loadJournalEntries(currentAssetId);
+                    }
                     loadDashboardData();
                 })
                 .catch(error => {
                     showNotification('Error adding journal entry: ' + error.message, 'error');
+                });
+        });
+
+        editJournalForm.addEventListener('submit', e => {
+            e.preventDefault();
+            
+            if (!currentUser) {
+                showNotification('Please sign in to edit journal entries', 'error');
+                return;
+            }
+            
+            const journalId = document.getElementById('edit-journal-id').value;
+            const assetId = document.getElementById('edit-journal-asset-id').value;
+            
+            // Collect all journal lines
+            const journalLines = [];
+            let totalDebit = 0;
+            let totalCredit = 0;
+            
+            document.querySelectorAll('#edit-journal-lines .journal-line').forEach(line => {
+                const account = line.querySelector('.edit-journal-account').value;
+                const debit = parseFloat(line.querySelector('.edit-journal-debit').value) || 0;
+                const credit = parseFloat(line.querySelector('.edit-journal-credit').value) || 0;
+                const desc = line.querySelector('.edit-journal-desc').value;
+                const tax = parseFloat(line.querySelector('.edit-journal-tax').value) || 0;
+                
+                journalLines.push({
+                    account, debit, credit, desc, tax
+                });
+                
+                totalDebit += debit;
+                totalCredit += credit;
+            });
+            
+            // Validate that debits equal credits
+            if (totalDebit !== totalCredit) {
+                showNotification('Debits must equal credits. Current difference: ' + (totalDebit - totalCredit), 'error');
+                return;
+            }
+            
+            const journalData = {
+                date: document.getElementById('edit-journal-date').value,
+                reference: document.getElementById('edit-journal-reference').value,
+                lines: journalLines,
+                narration: document.getElementById('edit-journal-narration').value,
+                totalDebit: totalDebit,
+                totalCredit: totalCredit,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            // Update in Firestore
+            let updatePromise;
+            
+            if (assetId) {
+                // Update the asset's journal entry
+                updatePromise = db.collection('users').doc(currentUser.uid).collection('assets')
+                    .doc(assetId).collection('journalEntries')
+                    .doc(journalId).update(journalData);
+            } else {
+                // Update the general journal entry
+                updatePromise = db.collection('users').doc(currentUser.uid).collection('journalEntries')
+                    .doc(journalId).update(journalData);
+            }
+            
+            updatePromise
+                .then(() => {
+                    showNotification('Journal entry updated successfully!', 'success');
+                    editJournalModal.style.display = 'none';
+                    
+                    // Reload journal entries if we're on an asset detail page
+                    if (currentAssetId) {
+                        loadJournalEntries(currentAssetId);
+                    }
+                    loadDashboardData();
+                })
+                .catch(error => {
+                    showNotification('Error updating journal entry: ' + error.message, 'error');
                 });
         });
 
@@ -1849,6 +2086,7 @@
                 description: document.getElementById('document-description').value,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
+   
             
             // Upload file to Firebase Storage
             const storageRef = storage.ref();
@@ -2047,6 +2285,19 @@
                         `;
                         assetsTable.querySelector('tbody').appendChild(row);
                     });
+
+                    <!-- In your journal entry table header -->
+<th>Actions</th>
+
+<!-- In your journal entry table rows -->
+<td class="action-buttons">
+    <button class="btn btn-sm btn-primary edit-journal" data-id="${journalId}">
+        <i class="fas fa-edit"></i>
+    </button>
+    <button class="btn btn-sm btn-danger delete-journal" data-id="${journalId}">
+        <i class="fas fa-trash"></i>
+    </button>
+</td>
                     
                     // Add event listeners to action buttons
                     document.querySelectorAll('.view-asset').forEach(btn => {
