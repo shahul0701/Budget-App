@@ -1421,110 +1421,90 @@ async function loadTransactions() {
 }
 
 // Enhanced function to calculate running balance for transactions
-function calculateRunningBalances() {
-  const bankTransactionMap = {};
+function calculateRunningBalance(transactions) {
+    const bankBalances = {};
+    const bankTransactionMap = {};
     
     // Group transactions by bank
-    allTransactions.forEach(tx => {
-    let bankKey = tx.BANK_NAME || tx.MODE || "Cash";
-    if (!bankTransactionMap[bankKey]) bankTransactionMap[bankKey] = [];
-    bankTransactionMap[bankKey].push(tx);
-  });
-
-     // Calculate running balance per bank sorted by date ascending
-  Object.keys(bankTransactionMap).forEach(bankKey => {
-    bankTransactionMap[bankKey].sort((a, b) => {
-      const dateA = new Date(a.DATE);
-      const dateB = new Date(b.DATE);
-      return dateA - dateB;
+    transactions.forEach(transaction => {
+        let bankKey = "Cash";
+        if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
+            bankKey = transaction.BANK_NAME;
+        } else if (transaction.MODE === "Transfer" && transaction.BANK_NAME) {
+            bankKey = transaction.BANK_NAME;
+        }
+        
+        if (!bankTransactionMap[bankKey]) {
+            bankTransactionMap[bankKey] = [];
+        }
+        bankTransactionMap[bankKey].push(transaction);
     });
-
-    let balance = 0;
-    bankTransactionMap[bankKey].forEach(tx => {
-      const income = parseFloat(tx.INCOME) || 0;
-      const expense = parseFloat(tx.EXPENSE) || 0;
-      balance += income - expense;
-      tx.BALANCE = balance; // Update each transaction's BALANCE
+    
+    // Calculate balance for each bank
+    Object.keys(bankTransactionMap).forEach(bankKey => {
+        // Sort by date and time (oldest first)
+        const sortedTransactions = bankTransactionMap[bankKey].sort((a, b) => {
+            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+            return dateA - dateB;
+        });
+        
+        let balance = 0;
+        sortedTransactions.forEach(transaction => {
+            const income = parseFloat(transaction.INCOME) || 0;
+            const expense = parseFloat(transaction.EXPENSE) || 0;
+            balance += income - expense;
+            transaction.BALANCE = parseFloat(balance.toFixed(2));
+        });
+        
+        bankBalances[bankKey] = balance;
     });
-
-    lastBalances[bankKey] = balance; // Store last balance per bank
-  });
+    
+    // Update the last balances for new transactions
+    lastBalances = bankBalances;
+    
+    // Return all transactions sorted by date (newest first for display)
+    return transactions.sort((a, b) => {
+        const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
+        const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
+        return dateB - dateA;
+    });
 }
 
-// Call this function after loading transactions and before filtering/building table
-async function processTransactionsWithRunningBalance() {
-  calculateRunningBalances();
-  updateBalanceVisibility(); 
-    await loadCOAData();
-await loadTransactions();
-await processTransactionsWithRunningBalance();
-applyFilters();
-
+// Enhanced updateBalance function
+function updateBalance() {
+    const income = parseFloat(formINCOME.value) || 0;
+    const expense = parseFloat(formEXPENSE.value) || 0;
+    const netChange = income - expense;
+    
+    // Determine which bank this transaction belongs to
+    let bankKey = "Cash"; // Default for cash
+    
+    if (formMODE.value === "Bank" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
+        bankKey = formBANKNAME.value;
+    }
+    
+    // Get the current balance for this bank
+    const currentBankBalance = lastBalances[bankKey] || 0;
+    
+    // For new transactions, calculate based on the bank's last balance
+    if (!txIdInput.value) {
+        formBALANCE.value = (currentBankBalance + netChange).toFixed(2);
+    } else {
+        // For editing existing transactions, we need to recalculate
+        const tx = txMap[txIdInput.value];
+        if (tx) {
+            const oldIncome = parseFloat(tx.INCOME) || 0;
+            const oldExpense = parseFloat(tx.EXPENSE) || 0;
+            const oldNetChange = oldIncome - oldExpense;
+            const balanceChange = netChange - oldNetChange;
+            formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
+        }
+    }
 }
 
-// Update bank balances display to use lastBalances object
-function updateBankBalances() {
-  bankBalancesContainer.innerHTML = "";
-
-  // Include Cash if present either in lastBalances or transactions
-  const hasCash = lastBalances.hasOwnProperty("Cash") || allTransactions.some(tx => (tx.BANK_NAME === "Cash" || tx.MODE === "Cash"));
-  if (hasCash) {
-    const cashBalance = lastBalances["Cash"] || 0;
-    const cashItem = document.createElement("div");
-    cashItem.className = "bank-balance-item";
-    cashItem.innerHTML = `
-      <div class="bank-balance-name">Cash</div>
-      <div class="bank-balance-value ${cashBalance >= 0 ? 'positive-balance' : 'negative-balance'}">
-        ${balanceVisible ? `$${cashBalance.toFixed(2)}` : '••••'}
-      </div>
-      <button class="balance-toggle" title="Toggle balance visibility">
-        <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
-      </button>
-    `;
-    bankBalancesContainer.appendChild(cashItem);
-
-    cashItem.querySelector('.balance-toggle').addEventListener('click', () => {
-      balanceVisible = !balanceVisible;
-      updateBalanceVisibility();
-    });
-  }
-
-  // Add other bank balances from lastBalances
-  Object.entries(lastBalances).forEach(([bankName, balance]) => {
-    if (bankName === "Cash") return; // Already added
-
-    const bankItem = document.createElement("div");
-    bankItem.className = "bank-balance-item";
-    bankItem.innerHTML = `
-      <div class="bank-balance-name">${escapeHtml(bankName)}</div>
-      <div class="bank-balance-value ${balance >= 0 ? 'positive-balance' : 'negative-balance'}">
-        ${balanceVisible ? `$${balance.toFixed(2)}` : '••••'}
-      </div>
-      <button class="balance-toggle" title="Toggle balance visibility">
-        <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
-      </button>
-    `;
-    bankBalancesContainer.appendChild(bankItem);
-
-    bankItem.querySelector('.balance-toggle').addEventListener('click', () => {
-      balanceVisible = !balanceVisible;
-      updateBalanceVisibility();
-    });
-  });
-}
-
-// Update overall balance visibility and UI, invoking updateBankBalances as well
-function updateBalanceVisibility() {
-  const totalIncome = allTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
-  const totalExpense = allTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
-  const totalBalance = totalIncome - totalExpense;
-
-  statBalance.textContent = balanceVisible ? `$${totalBalance.toFixed(2)}` : '••••';
-  statBalance.classList.toggle('balance-hidden', !balanceVisible);
-  balanceToggle.innerHTML = `<i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
-
-  updateBankBalances();
-}
 // MODIFIED SINO generation - now generates simple sequential numbers
 async function generateNextSINO() {
     try {
