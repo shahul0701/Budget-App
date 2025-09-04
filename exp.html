@@ -36,6 +36,107 @@
         border-radius:5px; cursor:pointer; margin-top:10px; }
       #applyFiltersBtn:hover { background:#0056b3; }
 
+      /* Bank Balance Section Styles */
+      .bank-balances-section {
+          background: #f8f9fa;
+          border-radius: 8px;
+          padding: 15px;
+          margin: 20px 0;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      }
+
+      .bank-balances-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 15px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid #dee2e6;
+      }
+
+      .bank-balances-header h3 {
+          margin: 0;
+          color: #2c3e50;
+          font-size: 18px;
+      }
+
+      .balance-toggle {
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: #6c757d;
+          font-size: 16px;
+      }
+
+      .balance-toggle:hover {
+          color: #007bff;
+      }
+
+      .bank-balances-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+          gap: 15px;
+      }
+
+      .bank-balance-card {
+          background: white;
+          border-radius: 8px;
+          padding: 15px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+          border-left: 4px solid #007bff;
+      }
+
+      .bank-name {
+          font-weight: 600;
+          color: #2c3e50;
+          margin-bottom: 8px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+      }
+
+      .bank-balance {
+          font-size: 20px;
+          font-weight: 700;
+          margin: 5px 0;
+      }
+
+      .balance-hidden {
+          filter: blur(5px);
+          user-select: none;
+      }
+
+      .positive-balance {
+          color: #28a745;
+      }
+
+      .negative-balance {
+          color: #dc3545;
+      }
+
+      .bank-transaction-count {
+          font-size: 12px;
+          color: #6c757d;
+          margin-top: 5px;
+      }
+
+      .total-balance-card {
+          background: linear-gradient(135deg, #007bff, #0056b3);
+          color: white;
+          border-left: 4px solid #0056b3;
+      }
+
+      .total-balance-card .bank-name,
+      .total-balance-card .bank-transaction-count {
+          color: rgba(255, 255, 255, 0.9);
+      }
+
+      @media (max-width: 768px) {
+          .bank-balances-grid {
+              grid-template-columns: 1fr;
+          }
+      }
+
       table { width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px; }
       th, td { border:1px solid #ccc; padding:8px 10px; text-align:left; }
       th { background:#007bff; color:#fff; }
@@ -528,6 +629,19 @@
         </div>
     </div>
 
+    <!-- Bank Balances Section -->
+    <div class="bank-balances-section">
+        <div class="bank-balances-header">
+            <h3><i class="fas fa-university"></i> Bank Balances</h3>
+            <button id="balanceToggle" class="balance-toggle" title="Toggle balance visibility">
+                <i class="fas fa-eye-slash"></i>
+            </button>
+        </div>
+        <div class="bank-balances-grid" id="bankBalancesContainer">
+            <!-- Bank balances will be populated here dynamically -->
+        </div>
+    </div>
+
     <div class="table-responsive">
         <table>
             <thead>
@@ -795,6 +909,7 @@
     const rowsPerPage = 10;
     let lastBalances = {};
     let csvTransactions = [];
+    let balanceVisible = false;
 
     // Listen for auth state change
     onAuthStateChanged(auth, async user => {
@@ -891,8 +1006,108 @@
         }
     });
 
+    // Event listener for balance toggle
+    document.getElementById('balanceToggle').addEventListener('click', toggleBalanceVisibility);
 
+    // Bank balance calculation and display
+    function calculateBankBalances() {
+        const bankBalances = {};
+        const bankTransactionCounts = {};
+        
+        allTransactions.forEach(transaction => {
+            const bankName = transaction.BANK_NAME || 'Cash';
+            const income = parseFloat(transaction.INCOME) || 0;
+            const expense = parseFloat(transaction.EXPENSE) || 0;
+            const netChange = income - expense;
+            
+            if (!bankBalances[bankName]) {
+                bankBalances[bankName] = 0;
+                bankTransactionCounts[bankName] = 0;
+            }
+            
+            bankBalances[bankName] += netChange;
+            bankTransactionCounts[bankName]++;
+        });
+        
+        return { bankBalances, bankTransactionCounts };
+    }
 
+    // Update bank balance display
+    function updateBankBalances() {
+        const { bankBalances, bankTransactionCounts } = calculateBankBalances();
+        const container = document.getElementById('bankBalancesContainer');
+        
+        if (!container) return;
+        
+        let html = '';
+        let totalBalance = 0;
+        
+        // Add individual bank balances
+        Object.keys(bankBalances).sort().forEach(bankName => {
+            const balance = bankBalances[bankName];
+            const count = bankTransactionCounts[bankName];
+            totalBalance += balance;
+            
+            const balanceDisplay = balanceVisible ? 
+                `$${balance.toFixed(2)}` : 
+                '••••••';
+                
+            const balanceClass = balance >= 0 ? 'positive-balance' : 'negative-balance';
+            
+            html += `
+                <div class="bank-balance-card">
+                    <div class="bank-name">
+                        <span>${escapeHtml(bankName)}</span>
+                        <i class="fas ${bankName === 'Cash' ? 'fa-money-bill-wave' : 'fa-university'}"></i>
+                    </div>
+                    <div class="bank-balance ${balanceClass} ${balanceVisible ? '' : 'balance-hidden'}">
+                        ${balanceDisplay}
+                    </div>
+                    <div class="bank-transaction-count">
+                        ${count} transaction${count !== 1 ? 's' : ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        // Add total balance card
+        const totalDisplay = balanceVisible ? 
+            `$${totalBalance.toFixed(2)}` : 
+            '••••••';
+            
+        const totalClass = totalBalance >= 0 ? 'positive-balance' : 'negative-balance';
+        
+        html += `
+            <div class="bank-balance-card total-balance-card">
+                <div class="bank-name">
+                    <span>Total Balance</span>
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div class="bank-balance ${totalClass} ${balanceVisible ? '' : 'balance-hidden'}">
+                    ${totalDisplay}
+                </div>
+                <div class="bank-transaction-count">
+                    ${allTransactions.length} total transactions
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+    }
+
+    // Toggle balance visibility
+    function toggleBalanceVisibility() {
+        balanceVisible = !balanceVisible;
+        updateBankBalances();
+        
+        // Update toggle button icon
+        const toggleBtn = document.getElementById('balanceToggle');
+        if (toggleBtn) {
+            toggleBtn.innerHTML = balanceVisible ? 
+                '<i class="fas fa-eye-slash"></i>' : 
+                '<i class="fas fa-eye"></i>';
+        }
+    }
 
  // Function to handle CSV file selection
 function handleCsvFileSelect(file) {
@@ -1166,12 +1381,6 @@ function parseCSV(csvText) {
     return {transactions, errors};
 }
 
-
-
-
-
-
-
 // Helper function to parse CSV line (handles quoted values)
 function parseCSVLine(line) {
     const values = [];
@@ -1340,6 +1549,9 @@ async function loadTransactions() {
         populateFiltersOptions(allTransactions);
         applyFilters();
         
+        // Update bank balances after loading transactions
+        updateBankBalances();
+        
     } catch (err) {
         console.error("Error loading transactions:", err);
         if (!handleFirestoreError(err, "load transactions")) {
@@ -1355,18 +1567,31 @@ async function loadTransactions() {
         const bankBalances = {};
         const bankTransactionMap = {};
         
+        // Initialize with all known banks from COA
+        const knownBanks = ['Cash']; // Start with Cash
+        
+        // Add any banks from existing transactions
+        transactions.forEach(transaction => {
+            if (transaction.BANK_NAME && !knownBanks.includes(transaction.BANK_NAME)) {
+                knownBanks.push(transaction.BANK_NAME);
+            }
+        });
+        
+        // Initialize all banks with 0 balance
+        knownBanks.forEach(bank => {
+            bankTransactionMap[bank] = [];
+            bankBalances[bank] = 0;
+        });
+        
         // Group transactions by bank
         transactions.forEach(transaction => {
-            let bankKey = "Cash";
-            if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
-                bankKey = transaction.BANK_NAME;
-            } else if (transaction.MODE === "Transfer" && transaction.BANK_NAME) {
-                bankKey = transaction.BANK_NAME;
-            }
+            let bankKey = transaction.BANK_NAME || 'Cash';
             
             if (!bankTransactionMap[bankKey]) {
                 bankTransactionMap[bankKey] = [];
+                bankBalances[bankKey] = 0;
             }
+            
             bankTransactionMap[bankKey].push(transaction);
         });
         
