@@ -1031,34 +1031,40 @@ function parseCsvFile(csvText) {
     }
 }
 
-// Balance calculation
+// ✅ Calculate balances for CSV import (per bank)
 function calculateBalancesForImportedTransactions() {
-    if (csvTransactions.length === 0) return;
+  if (csvTransactions.length === 0) return;
 
-    csvTransactions.sort((a, b) => {
-        const dateA = a.DATE ? new Date(a.DATE) : new Date(0);
-        const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
-        return dateA - dateB;
+  // Group by bank (or Cash)
+  const bankTransactionMap = {};
+  csvTransactions.forEach(tx => {
+    let bankKey = "Cash";
+    if ((tx.MODE === "Bank" || tx.MODE === "Transfer") && tx.BANK_NAME) {
+      bankKey = tx.BANK_NAME;
+    }
+    if (!bankTransactionMap[bankKey]) bankTransactionMap[bankKey] = [];
+    bankTransactionMap[bankKey].push(tx);
+  });
+
+  // Sort + calculate per bank
+  Object.keys(bankTransactionMap).forEach(bankKey => {
+    // Find last known balance for this bank
+    const prevBalance = lastBalances[bankKey] || 0;
+
+    const sorted = bankTransactionMap[bankKey].sort((a, b) => {
+      const dA = new Date(a.DATE + " " + (a.TIME || "00:00"));
+      const dB = new Date(b.DATE + " " + (b.TIME || "00:00"));
+      return dA - dB;
     });
 
-    let startingBalance = 0;
-    if (allTransactions.length > 0) {
-        const sortedTransactions = [...allTransactions].sort((a, b) => {
-            const dateA = a.DATE ? new Date(a.DATE) : new Date(0);
-            const dateB = b.DATE ? new Date(b.DATE) : new Date(0);
-            return dateA - dateB;
-        });
-        startingBalance = cleanNumber(sortedTransactions[sortedTransactions.length - 1].BALANCE);
-    }
-
-    let currentBalance = cleanNumber(startingBalance);
-
-    for (const transaction of csvTransactions) {
-        const income = cleanNumber(transaction.INCOME);
-        const expense = cleanNumber(transaction.EXPENSE);
-        currentBalance += income - expense;
-        transaction.BALANCE = currentBalance.toFixed(2);
-    }
+    let balance = prevBalance;
+    sorted.forEach(tx => {
+      const income = cleanNumber(tx.INCOME);
+      const expense = cleanNumber(tx.EXPENSE);
+      balance += income - expense;
+      tx.BALANCE = balance.toFixed(2);
+    });
+  });
 }
 
 // Import summary
