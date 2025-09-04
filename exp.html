@@ -1358,20 +1358,18 @@ async function populateBankAccounts() {
     }
 }
 
-// Enhanced loadTransactions function
+// ==================== ENHANCED loadTransactions ====================
 async function loadTransactions() {
   loadingModal.style.display = "flex";
   try {
     let q;
     try {
-      // Try to order by both date and time if possible
       q = query(
         collection(db, "users", currentUser.uid, "transactions"),
         orderBy("createdAt", "desc") // Use timestamp for consistent ordering
       );
     } catch (error) {
       if (error.code === 'failed-precondition') {
-        // Fallback to date-only ordering
         q = query(
           collection(db, "users", currentUser.uid, "transactions"),
           orderBy("DATE", "desc")
@@ -1381,18 +1379,14 @@ async function loadTransactions() {
       }
     }
 
-        const snap = await getDocs(q);
-    let transactions = snap.docs.map(doc => ({ 
-      id: doc.id, 
+    const snap = await getDocs(q);
+    let transactions = snap.docs.map((doc, idx) => ({
+      id: doc.id,
       ...doc.data(),
-      // Ensure SINO field exists and has a value
-      SINO: doc.data().SINO || (snap.docs.indexOf(doc) + 1).toString()
+      SINO: doc.data().SINO || (idx + 1).toString()
     }));
-        
-    // Get account from URL
-    const selectedAccount = getAccountFromURL();
 
-    // Filter if opened from trial balance
+    const selectedAccount = getAccountFromURL();
     if (selectedAccount) {
       transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
       document.getElementById("accountTitle").textContent = selectedAccount + " Transactions";
@@ -1400,16 +1394,20 @@ async function loadTransactions() {
       document.getElementById("accountTitle").textContent = "All Transactions";
     }
 
+    // ✅ Calculate balances
     allTransactions = calculateRunningBalance(transactions);
+
+    // ✅ Update bank balances UI
+    updateBankBalancesUI(lastBalances);
+
     populateFiltersOptions(allTransactions);
-    
-    // Only reset to page 1 if we haven't loaded a saved state
+
     if (!hasLoadedSavedState) {
       currentPage = 1;
     }
-    
+
     applyFilters();
-    
+
   } catch (err) {
     console.error("Error loading transactions:", err);
     if (!handleFirestoreError(err, "load transactions")) {
@@ -1420,91 +1418,93 @@ async function loadTransactions() {
   }
 }
 
-// Enhanced function to calculate running balance for transactions
+// ==================== ENHANCED calculateRunningBalance ====================
 function calculateRunningBalance(transactions) {
-    const bankBalances = {};
-    const bankTransactionMap = {};
-    
-    // Group transactions by bank
-    transactions.forEach(transaction => {
-        let bankKey = "Cash";
-        if (transaction.MODE === "Bank" && transaction.BANK_NAME) {
-            bankKey = transaction.BANK_NAME;
-        } else if (transaction.MODE === "Transfer" && transaction.BANK_NAME) {
-            bankKey = transaction.BANK_NAME;
-        }
-        
-        if (!bankTransactionMap[bankKey]) {
-            bankTransactionMap[bankKey] = [];
-        }
-        bankTransactionMap[bankKey].push(transaction);
+  const bankBalances = {};
+  const bankTransactionMap = {};
+
+  transactions.forEach(tx => {
+    let bankKey = "Cash";
+    if ((tx.MODE === "Bank" || tx.MODE === "Transfer") && tx.BANK_NAME) {
+      bankKey = tx.BANK_NAME;
+    }
+    if (!bankTransactionMap[bankKey]) bankTransactionMap[bankKey] = [];
+    bankTransactionMap[bankKey].push(tx);
+  });
+
+  Object.keys(bankTransactionMap).forEach(bankKey => {
+    const sorted = bankTransactionMap[bankKey].sort((a, b) => {
+      const dA = new Date(a.DATE + " " + (a.TIME || "00:00"));
+      const dB = new Date(b.DATE + " " + (b.TIME || "00:00"));
+      return dA - dB;
     });
-    
-    // Calculate balance for each bank
-    Object.keys(bankTransactionMap).forEach(bankKey => {
-        // Sort by date and time (oldest first)
-        const sortedTransactions = bankTransactionMap[bankKey].sort((a, b) => {
-            const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
-            const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
-            return dateA - dateB;
-        });
-        
-        let balance = 0;
-        sortedTransactions.forEach(transaction => {
-            const income = parseFloat(transaction.INCOME) || 0;
-            const expense = parseFloat(transaction.EXPENSE) || 0;
-            balance += income - expense;
-            transaction.BALANCE = parseFloat(balance.toFixed(2));
-        });
-        
-        bankBalances[bankKey] = balance;
+
+    let balance = 0;
+    sorted.forEach(tx => {
+      const income = parseFloat(tx.INCOME) || 0;
+      const expense = parseFloat(tx.EXPENSE) || 0;
+      balance += income - expense;
+      tx.BALANCE = parseFloat(balance.toFixed(2));
     });
-    
-    // Update the last balances for new transactions
-    lastBalances = bankBalances;
-    
-    // Return all transactions sorted by date (newest first for display)
-    return transactions.sort((a, b) => {
-        const dateA = new Date(a.DATE + ' ' + (a.TIME || '00:00'));
-        const dateB = new Date(b.DATE + ' ' + (b.TIME || '00:00'));
-        return dateB - dateA;
+
+    bankBalances[bankKey] = balance;
+  });
+
+  // ✅ Save latest balances
+  lastBalances = bankBalances;
+
+  // ✅ Return sorted for display (newest first)
+  return transactions.sort((a, b) => {
+    const dA = new Date(a.DATE + " " + (a.TIME || "00:00"));
+    const dB = new Date(b.DATE + " " + (b.TIME || "00:00"));
+    return dB - dA;
+  });
+}
+// ==================== NEW updateBankBalancesUI ====================
+function updateBankBalancesUI(bankBalances) {
+  const total = Object.values(bankBalances).reduce((a, b) => a + b, 0);
+  document.getElementById("statBalance").textContent = total.toFixed(2);
+
+  const container = document.getElementById("bankBalancesContainer");
+  if (container) {
+    container.innerHTML = "";
+    Object.entries(bankBalances).forEach(([bank, bal]) => {
+      const div = document.createElement("div");
+      div.className = "bank-balance-item";
+      div.innerHTML = `<strong>${escapeHtml(bank)}:</strong> ${bal.toFixed(2)}`;
+      container.appendChild(div);
     });
+  }
 }
 
-// Enhanced updateBalance function
+// ==================== ENHANCED updateBalance ====================
 function updateBalance() {
-    const income = parseFloat(formINCOME.value) || 0;
-    const expense = parseFloat(formEXPENSE.value) || 0;
-    const netChange = income - expense;
-    
-    // Determine which bank this transaction belongs to
-    let bankKey = "Cash"; // Default for cash
-    
-    if (formMODE.value === "Bank" && formBANKNAME.value) {
-        bankKey = formBANKNAME.value;
-    } else if (formMODE.value === "Transfer" && formBANKNAME.value) {
-        bankKey = formBANKNAME.value;
-    }
-    
-    // Get the current balance for this bank
-    const currentBankBalance = lastBalances[bankKey] || 0;
-    
-    // For new transactions, calculate based on the bank's last balance
-    if (!txIdInput.value) {
-        formBALANCE.value = (currentBankBalance + netChange).toFixed(2);
-    } else {
-        // For editing existing transactions, we need to recalculate
-        const tx = txMap[txIdInput.value];
-        if (tx) {
-            const oldIncome = parseFloat(tx.INCOME) || 0;
-            const oldExpense = parseFloat(tx.EXPENSE) || 0;
-            const oldNetChange = oldIncome - oldExpense;
-            const balanceChange = netChange - oldNetChange;
-            formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
-        }
-    }
-}
+  const income = parseFloat(formINCOME.value) || 0;
+  const expense = parseFloat(formEXPENSE.value) || 0;
+  const netChange = income - expense;
 
+  let bankKey = "Cash";
+  if ((formMODE.value === "Bank" || formMODE.value === "Transfer") && formBANKNAME.value) {
+    bankKey = formBANKNAME.value;
+  }
+
+  const currentBankBalance = lastBalances[bankKey] || 0;
+
+  if (!txIdInput.value) {
+    // New transaction
+    formBALANCE.value = (currentBankBalance + netChange).toFixed(2);
+  } else {
+    // Editing transaction
+    const tx = txMap[txIdInput.value];
+    if (tx) {
+      const oldIncome = parseFloat(tx.INCOME) || 0;
+      const oldExpense = parseFloat(tx.EXPENSE) || 0;
+      const oldNet = oldIncome - oldExpense;
+      const balanceChange = netChange - oldNet;
+      formBALANCE.value = (parseFloat(tx.BALANCE) + balanceChange).toFixed(2);
+    }
+  }
+}
 // MODIFIED SINO generation - now generates simple sequential numbers
 async function generateNextSINO() {
     try {
