@@ -1604,137 +1604,93 @@ function validateTransactionData(transactionData) {
     }
     
     // Transfer validation
-    if (transactionData.MODE === "Transfer" && income !== expense) {
-        errors.push("For transfers, income and expense amounts must be equal");
-    }
+     if (transactionData.MODE === "Transfer" && transactionData.EXPENSE > 0) {
+            transactionData.INCOME = transactionData.EXPENSE;
+        }
+
     
     return errors;
 }
 
-// Update the saveTransaction function to ensure proper handling of the ATTACHMENT field
-async function saveTransaction() {
-    loadingModal.style.display = "flex";
-    
+// Save transaction (add or update)
+async function saveTransaction(e) {
+    e.preventDefault();
+    if (!currentUser) {
+        Swal.fire("Error", "You must be logged in to save transactions.", "error");
+        return;
+    }
+
     try {
-        // Validate required fields
-        if (!formSINO.value || !formDATE.value || !formHEADER.value || !formMODE.value) {
-            Swal.fire("Error", "Please fill in all required fields", "error");
-            loadingModal.style.display = "none";
-            return;
-        }
+        loadingModal.style.display = "flex";
 
-        // Validate transaction type
-        if ((!formINCOME.value || parseFloat(formINCOME.value) === 0) && 
-            (!formEXPENSE.value || parseFloat(formEXPENSE.value) === 0)) {
-            Swal.fire("Error", "Please enter either income or expense amount", "error");
-            loadingModal.style.display = "none";
-            return;
-        }
-
-        // Bank validation
-        let bankName = "";
-        if (formMODE.value === "Bank" || formMODE.value === "Transfer") {
-            if (!formBANKNAME.value) {
-                Swal.fire("Error", "Please select a bank for bank/transfer transactions", "error");
-                loadingModal.style.display = "none";
-                return;
-            }
-            bankName = formBANKNAME.value;
-            
-            // Check if bank has sufficient balance for expense
-            const income = parseFloat(formINCOME.value) || 0;
-            const expense = parseFloat(formEXPENSE.value) || 0;
-            
-            if (expense > 0) {
-                const currentBankBalance = lastBalances[bankName] || 0;
-                if (currentBankBalance < expense && !txIdInput.value) {
-                    Swal.fire("Error", `Insufficient balance in ${bankName}. Available: ${currentBankBalance.toFixed(2)}`, "error");
-                    loadingModal.style.display = "none";
-                    return;
-                }
-            }
-        }
-
-        // Add this to your saveTransaction validation section
-        if (formMODE.value === "Transfer") {
-            if (!toBankSelect.value) {
-                Swal.fire("Error", "Please select a destination bank for transfer", "error");
-                loadingModal.style.display = "none";
-                return;
-            }
-            
-            if (formBANKNAME.value === toBankSelect.value) {
-                Swal.fire("Error", "Cannot transfer to the same bank", "error");
-                loadingModal.style.display = "none";
-                return;
-            }
-            
-            // For transfers, validate sufficient balance in source bank
-            const expense = parseFloat(formEXPENSE.value) || 0;
-            const sourceBankBalance = lastBalances[formBANKNAME.value] || 0;
-            
-            if (expense > 0 && sourceBankBalance < expense && !txIdInput.value) {
-                Swal.fire("Error", `Insufficient balance in ${formBANKNAME.value} for transfer. Available: ${sourceBankBalance.toFixed(2)}`, "error");
-                loadingModal.style.display = "none";
-                return;
-            }
-            
-            // For transfers, set income = expense
-            if (expense > 0) {
-                formINCOME.value = expense;
-                transactionData.INCOME = expense;
-            }
-        }
-
-        // Create the base transaction data
+        // Base transaction data
         const transactionData = {
             SINO: formSINO.value,
             DATE: formDATE.value,
             TIME: formTIME.value,
             ACCOUNT_HEADER: formHEADER.value,
             MODE: formMODE.value,
-            BANK_NAME: bankName,
+            BANK_NAME: formMODE.value === "Transfer" ? formBANK.value : (formBANK.value || "Cash"),
             INCOME: parseFloat(formINCOME.value) || 0,
             EXPENSE: parseFloat(formEXPENSE.value) || 0,
             DESCRIPTION: formDESC.value,
-            BALANCE: parseFloat(formBALANCE.value) || 0,
-            createdAt: new Date(), // Add timestamp for ordering
-            userId: currentUser.uid // Add user ID for security
+            createdAt: new Date(),
+            userId: currentUser.uid
         };
 
-        // Handle file upload if a file is selected
+        // Handle transfers: set income = expense
+        if (transactionData.MODE === "Transfer" && transactionData.EXPENSE > 0) {
+            transactionData.INCOME = transactionData.EXPENSE;
+        }
+
+        // ✅ Balance calculation (per bank)
+        let finalBalance = 0;
+        if (transactionData.MODE === "Transfer") {
+            const transferAmount = transactionData.EXPENSE || transactionData.INCOME;
+
+            // Deduct from source bank
+            if (transactionData.BANK_NAME) {
+                const prevSourceBalance = lastBalances[transactionData.BANK_NAME] || 0;
+                lastBalances[transactionData.BANK_NAME] = prevSourceBalance - transferAmount;
+            }
+
+            // Add to destination bank
+            if (toBankSelect.value) {
+                const prevDestBalance = lastBalances[toBankSelect.value] || 0;
+                lastBalances[toBankSelect.value] = prevDestBalance + transferAmount;
+                finalBalance = lastBalances[toBankSelect.value]; // store destination balance
+            }
+        } else {
+            // Income/Expense
+            const prevBalance = lastBalances[transactionData.BANK_NAME || "Cash"] || 0;
+            finalBalance = prevBalance + transactionData.INCOME - transactionData.EXPENSE;
+            lastBalances[transactionData.BANK_NAME || "Cash"] = finalBalance;
+        }
+
+        transactionData.BALANCE = parseFloat(finalBalance.toFixed(2));
+        formBALANCE.value = transactionData.BALANCE;
+
+        // ✅ Handle file upload
         const file = formATTACHFILE.files[0];
         if (file) {
-            // Allowed file types (all docs & images, no video)
             const allowedTypes = [
-                "application/pdf",
-                "application/msword",
+                "application/pdf", "application/msword",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "application/vnd.ms-excel",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "image/jpeg",
-                "image/png",
-                "image/gif",
-                "image/webp",
+                "image/jpeg", "image/png", "image/gif", "image/webp",
                 "text/plain"
             ];
-
-            // Check file type
             if (!allowedTypes.includes(file.type)) {
-                Swal.fire("Error", "Only images and documents (PDF, DOC, XLS, TXT) are allowed. No videos.", "error");
+                Swal.fire("Error", "Only images and documents (PDF, DOC, XLS, TXT) are allowed.", "error");
                 loadingModal.style.display = "none";
                 return;
             }
 
             try {
-                console.log("Starting file upload...");
-                console.log("File:", file);
-                console.log("Upload preset:", "my_app_uploads");
-                console.log("Cloud name:", "dpwdsyvz8");
-
                 const formData = new FormData();
                 formData.append("file", file);
-                formData.append("upload_preset", "my_app_uploads"); // Fixed preset name
+                formData.append("upload_preset", "my_app_uploads");
                 formData.append("cloud_name", "dpwdsyvz8");
 
                 const res = await fetch("https://api.cloudinary.com/v1_1/dpwdsyvz8/upload", {
@@ -1742,31 +1698,24 @@ async function saveTransaction() {
                     body: formData
                 });
 
-                if (!res.ok) {
-                    throw new Error(`Cloudinary upload failed: ${res.status} ${res.statusText}`);
-                }
+                if (!res.ok) throw new Error(`Cloudinary upload failed: ${res.statusText}`);
 
                 const data = await res.json();
                 transactionData.ATTACHMENT = data.secure_url || "";
                 formATTACH.value = transactionData.ATTACHMENT;
-                
-                console.log("Upload successful:", data.secure_url);
-
             } catch (error) {
-                console.error("Cloudinary upload error:", error);
+                console.error("Upload error:", error);
                 Swal.fire("Error", "Failed to upload file: " + error.message, "error");
                 loadingModal.style.display = "none";
                 return;
             }
         } else if (txIdInput.value) {
-            // Editing: keep old attachment if no new file
             transactionData.ATTACHMENT = formATTACH.value || "";
         } else {
-            // New tx, no file
             transactionData.ATTACHMENT = "";
         }
 
-        // Then in saveTransaction(), add this validation:
+        // ✅ Validate transaction
         const validationErrors = validateTransactionData(transactionData);
         if (validationErrors.length > 0) {
             Swal.fire("Validation Error", validationErrors.join("<br>"), "error");
@@ -1774,7 +1723,7 @@ async function saveTransaction() {
             return;
         }
 
-        // Prepare data for Firestore - remove any undefined values
+        // Prepare Firestore data
         const firestoreData = {};
         Object.keys(transactionData).forEach(key => {
             if (transactionData[key] !== undefined && transactionData[key] !== null) {
@@ -1782,12 +1731,11 @@ async function saveTransaction() {
             }
         });
 
+        // Save or update Firestore
         if (txIdInput.value) {
-            // For updates, handle the case where we want to remove attachment
             if (!firestoreData.ATTACHMENT && formATTACH.value === "") {
-                firestoreData.ATTACHMENT = ""; // Explicitly set to empty string to remove it
+                firestoreData.ATTACHMENT = "";
             }
-            
             await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), firestoreData);
             Swal.fire("Success", "Transaction updated successfully!", "success");
         } else {
@@ -1795,9 +1743,11 @@ async function saveTransaction() {
             Swal.fire("Success", "Transaction added successfully!", "success");
         }
 
+        // Reload transactions + update balances
         await loadTransactions();
+        updateBankBalancesUI();
         modal.style.display = "none";
-        
+
     } catch (error) {
         console.error("Error saving transaction:", error);
         if (!handleFirestoreError(error, "save transaction")) {
