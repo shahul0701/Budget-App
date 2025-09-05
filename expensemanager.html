@@ -608,18 +608,15 @@
                 </select>
               </div>
               <div class="col-md-3">
-                <label class="form-label">Category</label>
-                <select id="formCATEGORY" class="form-select">
-                  <option value="">Select Category</option>
-                  <option value="Food">Food</option>
-                  <option value="Transport">Transport</option>
-                  <option value="Entertainment">Entertainment</option>
-                  <option value="Utilities">Utilities</option>
-                  <option value="Rent">Rent</option>
-                  <option value="Salary">Salary</option>
-                  <option value="Freelance">Freelance</option>
-                  <option value="Investment">Investment</option>
-                  <option value="Other">Other</option>
+                <label class="form-label">Currency</label>
+                <select id="formCURRENCY" class="form-select">
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="INR">INR (₹)</option>
+                  <option value="JPY">JPY (¥)</option>
+                  <option value="CAD">CAD (C$)</option>
+                  <option value="AUD">AUD (A$)</option>
                 </select>
               </div>
             </div>
@@ -638,23 +635,15 @@
                 <input id="formBALANCE" type="number" step="0.01" class="form-control" />
               </div>
               <div class="col-md-3">
-                <label class="form-label">Currency</label>
-                <select id="formCURRENCY" class="form-select">
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
-                  <option value="INR">INR (₹)</option>
-                  <option value="JPY">JPY (¥)</option>
-                  <option value="CAD">CAD (C$)</option>
-                  <option value="AUD">AUD (A$)</option>
-                </select>
+                <label class="form-label">Notes</label>
+                <input id="formNOTES" type="text" class="form-control" placeholder="Enter notes" />
               </div>
             </div>
 
             <div class="row g-2 mt-2">
               <div class="col-md-8">
-                <label class="form-label">Notes</label>
-                <textarea id="formNOTES" class="form-control" rows="2"></textarea>
+                <label class="form-label">Description</label>
+                <textarea id="formDESCRIPTION" class="form-control" rows="2" placeholder="Enter description"></textarea>
               </div>
               <div class="col-md-4">
                 <label class="form-label">Attachment</label>
@@ -754,11 +743,11 @@
     const advancedFilters = document.getElementById("advancedFilters");
     const includeTimeCheckbox = document.getElementById("includeTime");
     const formTIME = document.getElementById("formTIME");
-    const formCATEGORY = document.getElementById("formCATEGORY");
     const formCURRENCY = document.getElementById("formCURRENCY");
     const minAmount = document.getElementById("minAmount");
     const maxAmount = document.getElementById("maxAmount");
     const sortBy = document.getElementById("sortBy");
+    const formDESCRIPTION = document.getElementById("formDESCRIPTION");
 
     // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
@@ -1080,7 +1069,7 @@
         if (!snap.empty) {
           const lastTx = snap.docs[0].data();
           if (lastTx.SINO) {
-            // Extract number from voucher format like "VOUCHER-001"
+            // Extract number from voucher format
             const match = lastTx.SINO.match(/\d+$/);
             if (match) {
               lastVoucherNumber = parseInt(match[0]);
@@ -1095,7 +1084,7 @@
     // Enhanced voucher numbering by type with separate sequences
     async function getNextVoucherNumber(voucherType) {
       try {
-        // Get all transactions to find the highest number for payments
+        // Get all transactions to find the highest number for each type
         const allTxQuery = query(
           collection(db, "users", currentUser.uid, "transactions"),
           orderBy("SINO", "desc")
@@ -1377,7 +1366,7 @@
               label: 'Expenses',
               data: expenseData,
               backgroundColor: 'rgba(220, 53, 69, 0.7)',
-              borderColor: 'rgba(220, 53, 69, 1)',
+                            borderColor: 'rgba(220, 53, 69, 1)',
               borderWidth: 1
             }
           ]
@@ -1390,6 +1379,11 @@
               beginAtZero: true,
               grid: {
                 color: 'rgba(0, 0, 0, 0.1)'
+              },
+              ticks: {
+                callback: function(value) {
+                  return '$' + value;
+                }
               }
             },
             x: {
@@ -1405,10 +1399,48 @@
             title: {
               display: true,
               text: 'Monthly Income vs Expenses'
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': $' + context.raw.toFixed(2);
+                }
+              }
             }
           }
         }
       });
+    }
+
+    // Calculate and update running balance for all transactions
+    function calculateRunningBalance() {
+      // Sort transactions by date
+      const sortedTransactions = [...allTransactions].sort((a, b) => {
+        return new Date(a.DATE) - new Date(b.DATE);
+      });
+      
+      let runningBalance = 0;
+      
+      // Calculate running balance for each transaction
+      sortedTransactions.forEach(tx => {
+        const income = parseFloat(tx.INCOME) || 0;
+        const expense = parseFloat(tx.EXPENSE) || 0;
+        runningBalance += (income - expense);
+        
+        // Update the transaction with the running balance
+        tx.BALANCE = runningBalance;
+      });
+      
+      // Update the latest balance in the UI
+      const latestBalance = sortedTransactions.length > 0 ? 
+        sortedTransactions[sortedTransactions.length - 1].BALANCE : 0;
+      
+      statBalance.textContent = balanceVisible ? `$${latestBalance.toFixed(2)}` : '••••';
+      
+      // Update bank balances
+      updateBankBalances();
+      
+      return sortedTransactions;
     }
 
     // filters
@@ -1559,6 +1591,7 @@
             <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
             <td style="text-align:right;">${incomeDisplay}</td>
             <td style="text-align:right;">${expenseDisplay}</td>
+            <td style="text-align:right;">${balanceDisplay}</td>
             <td>
               ${
                 tx.ATTACHMENT
@@ -1635,7 +1668,7 @@
         `;
 
         for (let i = startPage; i <= endPage; i++) {
-          html += `
+                    html += `
             <li class="page-item ${i === currentPage ? 'active' : ''}">
               <a class="page-link" href="#" data-page="${i}">${i}</a>
             </li>
@@ -1651,18 +1684,17 @@
         paginationControls.innerHTML = html;
 
         paginationControls.querySelectorAll(".page-link").forEach(link => {
-        link.addEventListener("click", e => {
-          e.preventDefault();
-          const page = parseInt(e.target.getAttribute("data-page"));
-          if (page && page !== currentPage && page > 0 && page <= totalPages) {
-            currentPage = page;
-            buildTable();
-            saveAppState(); // Save the new page
-          }
+          link.addEventListener("click", e => {
+            e.preventDefault();
+            const page = parseInt(e.target.getAttribute("data-page"));
+            if (page && page !== currentPage && page > 0 && page <= totalPages) {
+              currentPage = page;
+              buildTable();
+              saveAppState(); // Save the new page
+            }
+          });
         });
-      });
     }
-
 
     function updateStats(){
       const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
@@ -1717,13 +1749,14 @@
       includeTimeCheckbox.checked = false;
       formCURRENCY.value = "USD";
       
-      // Auto-generate voucher number
+      // Auto-generate voucher number based on voucher type
       formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
       
       formINCOME.value = "";
       formEXPENSE.value = "";
       formBALANCE.value = "";
       formNOTES.value = "";
+      formDESCRIPTION.value = "";
       formATTACH.value = "";
       attachmentPreview.style.display = "none";
       attachmentInfo.textContent = "";
@@ -1764,9 +1797,8 @@
       formINCOME.value = tx.INCOME || "";
       formEXPENSE.value = tx.EXPENSE || "";
       formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || tx.DESCRIPTION || "";
-      formATTACH.value = tx.ATTACHMENT || "";
-      formCATEGORY.value = tx.CATEGORY || "";
+      formNOTES.value = tx.NOTES || "";
+      formDESCRIPTION.value = tx.DESCRIPTION || "";
       formCURRENCY.value = tx.CURRENCY || "USD";
       
       // Handle time if exists
@@ -1811,9 +1843,8 @@
       formINCOME.value = tx.INCOME || "";
       formEXPENSE.value = tx.EXPENSE || "";
       formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || tx.DESCRIPTION || "";
-      formATTACH.value = tx.ATTACHMENT || "";
-      formCATEGORY.value = tx.CATEGORY || "";
+      formNOTES.value = tx.NOTES || "";
+      formDESCRIPTION.value = tx.DESCRIPTION || "";
       formCURRENCY.value = tx.CURRENCY || "USD";
       
       // Handle time if exists
@@ -1948,6 +1979,12 @@
         resetSaveButton();
         return;
       }
+
+      if (!formSINO.value) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Voucher number is required' });
+        resetSaveButton();
+        return;
+      }
           
       // USE THE SAME DATA STRUCTURE AS THE FIRST APP
       const txData = {
@@ -1956,14 +1993,14 @@
         ACCOUNT_HEADER: formACCOUNTHEADER.value, // Match field name
         MODE: formBANKNAME.value, // Use MODE field instead of BANK_NAME
         BANK_NAME: formBANKNAME.value, // Keep both for compatibility
+        VOUCHER_TYPE: formVOUCHERTYPE.value,
         TYPE: formTYPE.value,
         INCOME: parseFloat(formINCOME.value) || 0,
         EXPENSE: parseFloat(formEXPENSE.value) || 0,
         BALANCE: parseFloat(formBALANCE.value) || 0,
-        DESCRIPTION: formNOTES.value, // Use DESCRIPTION field instead of NOTES
+        DESCRIPTION: formDESCRIPTION.value, // Use DESCRIPTION field
         NOTES: formNOTES.value, // Keep both for compatibility
         ATTACHMENT: formATTACH.value,
-        CATEGORY: formCATEGORY.value,
         CURRENCY: formCURRENCY.value,
         createdAt: new Date(), // Add timestamp for first app compatibility
         userId: currentUser.uid // Add user ID for first app compatibility
@@ -2055,7 +2092,7 @@
           reject(new Error('Upload failed'));
         });
         
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOAD_NAME}/auto/upload`);
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
         xhr.send(formData);
       });
     }
@@ -2089,7 +2126,7 @@
         return;
       }
       
-      const headers = ['Date', 'Account Header', 'Description', 'Type', 'Voucher #', 'Bank Name', 'Income', 'Expense', 'Balance', 'Category'];
+      const headers = ['Date', 'Account Header', 'Description', 'Type', 'Voucher #', 'Bank Name', 'Income', 'Expense', 'Balance', 'Currency'];
       
       let csvContent = headers.join(',') + '\n';
       
@@ -2104,7 +2141,7 @@
           tx.INCOME || 0,
           tx.EXPENSE || 0,
           tx.BALANCE || 0,
-          tx.CATEGORY || ''
+          tx.CURRENCY || ''
         ];
         csvContent += row.join(',') + '\n';
       });
