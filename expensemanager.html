@@ -530,12 +530,13 @@
                 <th style="width:120px;">Bank Name</th>
                 <th style="width:120px; text-align:right;">Income</th>
                 <th style="width:120px; text-align:right;">Expense</th>
+                <th style="width:120px; text-align:right;">Balance</th>
                 <th style="width:120px;">Attachment</th>
                 <th style="width:130px;">Actions</th>
               </tr>
             </thead>
             <tbody id="transactionsTableBody">
-              <tr><td colspan="10" class="text-center text-muted py-4">No transactions loaded.</td></tr>
+              <tr><td colspan="11" class="text-center text-muted py-4">No transactions loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -632,7 +633,7 @@
               </div>
               <div class="col-md-3">
                 <label class="form-label">Balance (manual)</label>
-                <input id="formBALANCE" type="number" step="0.01" class="form-control" />
+                <input id="formBALANCE" type="number" step="0.01" class="form-control" disabled />
               </div>
               <div class="col-md-3">
                 <label class="form-label">Notes</label>
@@ -820,9 +821,9 @@
     let coaAccounts = [];
     let coaBanks = [];
 
-    // Cloudinary config
-    const CLOUDINARY_CLOUD_NAME = "dpwdsyvz8"; // Replace with your actual Cloudinary cloud name
-    const CLOUDINARY_UPLOAD_PRESET = "my_app_uploads"; // Replace with your actual upload preset
+    // Cloudinary config - REPLACE WITH YOUR ACTUAL CLOUDINARY CONFIG
+    const CLOUDINARY_CLOUD_NAME = "your_cloud_name_here";
+    const CLOUDINARY_UPLOAD_PRESET = "your_upload_preset_here";
 
     function escapeHtml(text) {
       if (!text) return "";
@@ -1018,7 +1019,7 @@
     // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
     async function loadTransactions(){
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center py-4 small-muted">Loading...</td></tr>`;
         
         const q = query(
           collection(db, "users", currentUser.uid, "transactions"), 
@@ -1034,6 +1035,10 @@
         }));
         
         allTransactions = txs;
+        
+        // Calculate running balance for all transactions
+        calculateRunningBalance();
+        
         filteredTransactions = allTransactions.slice();
         
         // Only reset to page 1 if we haven't loaded a saved state
@@ -1051,7 +1056,7 @@
         await initVoucherNumbering();
       } catch (err) {
         console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
     }
 
@@ -1366,7 +1371,7 @@
               label: 'Expenses',
               data: expenseData,
               backgroundColor: 'rgba(220, 53, 69, 0.7)',
-                            borderColor: 'rgba(220, 53, 69, 1)',
+              borderColor: 'rgba(220, 53, 69, 1)',
               borderWidth: 1
             }
           ]
@@ -1452,7 +1457,6 @@
         if (!dateStr) return false;
         const d = new Date(dateStr);
         return d >= start && d <= end;
-        saveAppState();
       }
 
       // Date filter
@@ -1554,12 +1558,13 @@
       currentPage = 1;
       buildTable();
       updateStats();
+      saveAppState();
     }
 
     // build table
     function buildTable(){
       if (filteredTransactions.length === 0) {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
         paginationControls.innerHTML = "";
         return;
       }
@@ -1580,7 +1585,6 @@
         const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
         const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
         
-        // In buildTable() function, update the row generation to:
         html += `
           <tr>
             <td>${escapeHtml(date)}</td>
@@ -1648,7 +1652,6 @@
       buildPagination();
     }
 
-    // In your buildPagination function, add saveAppState() call:
     function buildPagination() {
       const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
       if (totalPages <= 1) {
@@ -1668,7 +1671,7 @@
         `;
 
         for (let i = startPage; i <= endPage; i++) {
-                    html += `
+          html += `
             <li class="page-item ${i === currentPage ? 'active' : ''}">
               <a class="page-link" href="#" data-page="${i}">${i}</a>
             </li>
@@ -1765,6 +1768,7 @@
       // Enable all fields when opening modal
       Array.from(form.elements).forEach(el => el.disabled = false);
       formTIME.disabled = true; // Time is disabled by default
+      formBALANCE.disabled = true; // Balance should be calculated automatically
       saveTransactionBtn.style.display = "block";
       saveTransactionBtn.disabled = false;
       saveTransactionBtn.innerHTML = 'Save Transaction';
@@ -1873,6 +1877,7 @@
       // Enable all fields for edit mode
       Array.from(form.elements).forEach(el => el.disabled = false);
       formTIME.disabled = !includeTimeCheckbox.checked; // Respect time checkbox
+      formBALANCE.disabled = true; // Balance should be calculated automatically
       saveTransactionBtn.style.display = "block";
       saveTransactionBtn.disabled = false;
       saveTransactionBtn.innerHTML = 'Save Transaction';
@@ -2092,7 +2097,7 @@
           reject(new Error('Upload failed'));
         });
         
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOAD_NAME}/auto/upload`);
         xhr.send(formData);
       });
     }
@@ -2115,7 +2120,7 @@
       if (savedTheme) {
         currentTheme = savedTheme;
         document.documentElement.setAttribute('data-theme', currentTheme);
-        themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+        themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun'></i>';
       }
     }
     
