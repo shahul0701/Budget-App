@@ -409,6 +409,7 @@
         <h2><i class="fa fa-money-bill-wave"></i> Transaction Manager</h2>
         <div class="header-actions">
           <button id="newTxBtn" class="btn btn-light btn-sm text-primary"><i class="fa fa-plus me-1"></i> New Transaction</button>
+          <button id="quickAddBtn" class="btn btn-light btn-sm text-primary ms-2"><i class="fa fa-bolt me-1"></i> Quick Add</button>
           <button id="themeToggle" class="theme-toggle">
             <i class="fa fa-moon"></i>
           </button>
@@ -666,6 +667,38 @@
     </div>
   </div>
 
+  <!-- Quick Add Modal -->
+  <div class="modal fade" id="quickAddModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Quick Add Transaction</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Enter transaction in natural language:</label>
+            <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Received 1000 payment from client in AXIS"></textarea>
+          </div>
+          <div class="card bg-light">
+            <div class="card-body py-2">
+              <small class="text-muted">
+                <strong>Format examples:</strong><br>
+                • Add [amount] to [account]<br>
+                • Spent [amount] on [category] from [bank]<br>
+                • Received [amount] for [description] in [bank]
+              </small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button id="processQuickAddBtn" class="btn btn-primary">Process</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Attachment modal -->
   <div class="modal fade" id="attachmentModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -731,6 +764,7 @@
     const initialsElem = document.getElementById("userInitials");
     const logoutBtn = document.getElementById("logoutBtn");
     const newTxBtn = document.getElementById("newTxBtn");
+    const quickAddBtn = document.getElementById("quickAddBtn");
     const floatingAdd = document.getElementById("floatingAdd");
     const balanceToggle = document.getElementById("balanceToggle");
     const backBtn = document.getElementById("backBtn");
@@ -748,6 +782,8 @@
     const maxAmount = document.getElementById("maxAmount");
     const sortBy = document.getElementById("sortBy");
     const formDESCRIPTION = document.getElementById("formDESCRIPTION");
+    const quickAddInput = document.getElementById("quickAddInput");
+    const processQuickAddBtn = document.getElementById("processQuickAddBtn");
 
     // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
@@ -768,6 +804,8 @@
     // Modal refs
     const transactionModalEl = document.getElementById("transactionModal");
     const transactionModal = new bootstrap.Modal(transactionModalEl);
+    const quickAddModalEl = document.getElementById("quickAddModal");
+    const quickAddModal = new bootstrap.Modal(quickAddModalEl);
     const form = document.getElementById("transactionForm");
     const txIdInput = document.getElementById("txId");
     const formDATE = document.getElementById("formDATE");
@@ -876,6 +914,14 @@
       }
     });
 
+    // Quick Add button
+    quickAddBtn.addEventListener("click", () => {
+      quickAddInput.value = "";
+      quickAddModal.show();
+    });
+
+    processQuickAddBtn.addEventListener("click", processQuickAdd);
+
     // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
       try {
@@ -904,11 +950,11 @@
         
         // If no accounts found, set default accounts
         if (coaAccounts.length === 0) {
-          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM"];
+          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
         }
         
         if (coaBanks.length === 0) {
-          coaBanks = ["AXIS", "BOM"];
+          coaBanks = ["AXIS", "BOM", "Cash"];
         }
         
         // Populate the dropdowns
@@ -917,8 +963,8 @@
       } catch (error) {
         console.warn('Error loading COA data:', error.message);
         // Use default accounts if COA is not available
-        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM"];
-        coaBanks = ["AXIS", "BOM"];
+        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
+        coaBanks = ["AXIS", "BOM", "Cash"];
         populateCOADropdowns();
       }
     }
@@ -2095,6 +2141,111 @@
         xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
         xhr.send(formData);
       });
+    }
+
+    // Process Quick Add functionality
+    async function processQuickAdd() {
+      const text = quickAddInput.value.trim().toLowerCase();
+      if (!text) {
+        Swal.fire({ icon: 'warning', title: 'Input required', text: 'Please enter a transaction description' });
+        return;
+      }
+
+      // Parse the natural language input
+      let amount = 0;
+      let type = "";
+      let accountHeader = "";
+      let bankName = "";
+      let description = text;
+
+      // Try to extract amount
+      const amountMatch = text.match(/(\d+)(\.\d+)?/);
+      if (amountMatch) {
+        amount = parseFloat(amountMatch[0]);
+      }
+
+      // Determine transaction type and extract details
+      if (text.includes('add') || text.includes('receive') || text.includes('income') || 
+          text.includes('deposit') || text.includes('credit')) {
+        type = "Income";
+      } else if (text.includes('spent') || text.includes('spend') || text.includes('pay') || 
+                 text.includes('expense') || text.includes('debit') || text.includes('withdraw')) {
+        type = "Expense";
+      }
+
+      // Try to extract bank name
+      for (const bank of coaBanks) {
+        if (text.includes(bank.toLowerCase())) {
+          bankName = bank;
+          break;
+        }
+      }
+
+      // Try to extract account header from COA
+      for (const account of coaAccounts) {
+        if (text.includes(account.toLowerCase())) {
+          accountHeader = account;
+          break;
+        }
+      }
+
+      // If no specific account header found, use a default based on context
+      if (!accountHeader) {
+        if (text.includes('petrol') || text.includes('fuel') || text.includes('gas')) {
+          accountHeader = "Fuel";
+        } else if (text.includes('food') || text.includes('meal') || text.includes('restaurant')) {
+          accountHeader = "Meals & Entertainment";
+        } else if (text.includes('rent') || text.includes('house') || text.includes('apartment')) {
+          accountHeader = "Rent";
+        } else if (text.includes('shopping') || text.includes('store') || text.includes('buy')) {
+          accountHeader = "Shopping";
+        } else if (bankName) {
+          accountHeader = bankName;
+        } else {
+          accountHeader = "Miscellaneous";
+        }
+      }
+
+      // If no bank found but we have cash mentioned
+      if (!bankName && text.includes('cash')) {
+        bankName = "Cash";
+      }
+
+      // Auto-generate voucher number
+      const voucherType = type === "Income" ? "Receipt" : "Payment";
+      
+      // Prepare transaction data
+      const txData = {
+        DATE: new Date().toISOString().split('T')[0],
+        SINO: "", // Will be set after getting next voucher number
+        ACCOUNT_HEADER: accountHeader,
+        BANK_NAME: bankName,
+        MODE: bankName,
+        VOUCHER_TYPE: voucherType,
+        TYPE: type,
+        INCOME: type === "Income" ? amount : 0,
+        EXPENSE: type === "Expense" ? amount : 0,
+        BALANCE: 0,
+        DESCRIPTION: text.charAt(0).toUpperCase() + text.slice(1),
+        NOTES: "Quick add transaction",
+        CURRENCY: "USD",
+        createdAt: new Date(),
+        userId: currentUser.uid
+      };
+
+      // Get next voucher number and save transaction
+      try {
+        const voucherNumber = await getNextVoucherNumber(voucherType);
+        txData.SINO = voucherNumber;
+        
+        await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+        Swal.fire({ icon: 'success', title: 'Success', text: 'Transaction added successfully' });
+        quickAddModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        console.error("Quick add error", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add transaction' });
+      }
     }
 
     // Theme functions
