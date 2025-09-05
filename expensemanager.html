@@ -189,6 +189,24 @@
       color:white; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 30px rgba(70,34,173,0.2); z-index:1200;
       cursor:pointer;
     }
+    
+    /* Quick add button */
+    .quick-add-btn {
+      position: fixed;
+      left: 30px;
+      bottom: 30px;
+      width: 62px;
+      height: 62px;
+      border-radius: 50%;
+      background: linear-gradient(180deg, var(--info), #0a58ca);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 30px rgba(10, 88, 202, 0.2);
+      z-index: 1200;
+      cursor: pointer;
+    }
 
     /* responsive */
     @media (max-width: 980px) {
@@ -546,6 +564,11 @@
     </div>
   </div>
 
+  <!-- Quick add button -->
+  <div class="quick-add-btn" id="quickAddBtn" title="Quick Add Transaction">
+    <i class="fa fa-bolt fa-lg"></i>
+  </div>
+
   <!-- Modals -->
   <!-- Add/Edit Transaction Modal -->
   <div class="modal fade" id="transactionModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
@@ -732,6 +755,7 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const newTxBtn = document.getElementById("newTxBtn");
     const floatingAdd = document.getElementById("floatingAdd");
+    const quickAddBtn = document.getElementById("quickAddBtn");
     const balanceToggle = document.getElementById("balanceToggle");
     const backBtn = document.getElementById("backBtn");
     const homeBtn = document.getElementById("homeBtn");
@@ -875,6 +899,151 @@
         formTIME.value = "";
       }
     });
+
+    // Quick add button handler
+    quickAddBtn.addEventListener("click", () => {
+      openQuickAddModal();
+    });
+
+    // Function to open quick add modal
+    function openQuickAddModal() {
+      Swal.fire({
+        title: 'Quick Add Transaction',
+        input: 'text',
+        inputPlaceholder: 'e.g., "add 500 to cash" or "spent 200 on petrol from sbi"',
+        showCancelButton: true,
+        confirmButtonText: 'Add',
+        cancelButtonText: 'Cancel',
+        inputValidator: (value) => {
+          if (!value) {
+            return 'You need to enter a transaction!';
+          }
+        }
+      }).then((result) => {
+        if (result.isConfirmed) {
+          processQuickAddInput(result.value);
+        }
+      });
+    }
+
+    // Function to process natural language input
+    function processQuickAddInput(input) {
+      const lowerInput = input.toLowerCase();
+      let amount = 0;
+      let type = "Expense"; // Default to expense
+      let accountHeader = "";
+      let bankName = "";
+      let description = input;
+      
+      // Extract amount
+      const amountMatch = input.match(/\d+(\.\d{1,2})?/);
+      if (amountMatch) {
+        amount = parseFloat(amountMatch[0]);
+      }
+      
+      // Determine transaction type
+      if (lowerInput.includes('add') || lowerInput.includes('income') || 
+          lowerInput.includes('receive') || lowerInput.includes('deposit')) {
+        type = "Income";
+      }
+      
+      // Extract bank/account name
+      const bankKeywords = ['from', 'to', 'in', 'using', 'via', 'with'];
+      for (const keyword of bankKeywords) {
+        if (lowerInput.includes(keyword)) {
+          const parts = lowerInput.split(keyword);
+          if (parts.length > 1) {
+            const potentialBank = parts[1].trim();
+            
+            // Check if this matches any known banks
+            for (const bank of coaBanks) {
+              if (potentialBank.includes(bank.toLowerCase())) {
+                bankName = bank;
+                break;
+              }
+            }
+            
+            // Check if this matches any account headers
+            if (!bankName) {
+              for (const account of coaAccounts) {
+                if (potentialBank.includes(account.toLowerCase())) {
+                  accountHeader = account;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // If no bank found, try to find any bank name in the entire input
+      if (!bankName) {
+        for (const bank of coaBanks) {
+          if (lowerInput.includes(bank.toLowerCase())) {
+            bankName = bank;
+            break;
+          }
+        }
+      }
+      
+      // If no account header found, try to find any account in the entire input
+      if (!accountHeader) {
+        for (const account of coaAccounts) {
+          if (lowerInput.includes(account.toLowerCase())) {
+            accountHeader = account;
+            break;
+          }
+        }
+      }
+      
+      // Default to "Cash" if no bank specified
+      if (!bankName) {
+        bankName = "Cash";
+      }
+      
+      // Create the transaction
+      createQuickTransaction(amount, type, accountHeader, bankName, description);
+    }
+
+    // Function to create transaction from quick add
+    async function createQuickTransaction(amount, type, accountHeader, bankName, description) {
+      try {
+        const txData = {
+          DATE: new Date().toISOString().split('T')[0],
+          SINO: await getNextVoucherNumber("Payment"),
+          ACCOUNT_HEADER: accountHeader,
+          BANK_NAME: bankName,
+          MODE: bankName,
+          VOUCHER_TYPE: type === "Income" ? "Receipt" : "Payment",
+          TYPE: type,
+          INCOME: type === "Income" ? amount : 0,
+          EXPENSE: type === "Expense" ? amount : 0,
+          BALANCE: 0,
+          DESCRIPTION: description,
+          NOTES: description,
+          CURRENCY: "USD",
+          createdAt: new Date(),
+          userId: currentUser.uid
+        };
+        
+        await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+        
+        Swal.fire({
+          icon: 'success',
+          title: 'Transaction Added',
+          text: 'Your transaction was added successfully!'
+        });
+        
+        await loadTransactions();
+      } catch (error) {
+        console.error("Error creating quick transaction:", error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to add transaction. Please try again.'
+        });
+      }
+    }
 
     // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
@@ -2202,7 +2371,7 @@
         if (state.theme) {
           currentTheme = state.theme;
           document.documentElement.setAttribute('data-theme', currentTheme);
-          themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+          themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun'></i>';
         }
         
         // Update UI based on saved state
