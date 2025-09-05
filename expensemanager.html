@@ -651,7 +651,7 @@
                 <input id="formATTACHFILE" type="file" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,image/*" />
                 <input id="formATTACH" type="hidden" />
                 <div class="upload-progress" id="uploadProgress">
-                  <div class="upload-progress-bar" id="uploadProgressBar"></div>
+                  <div class="uploadProgressBar"></div>
                 </div>
                 <img id="attachmentPreview" class="attachment-preview" alt="Preview" />
                 <div id="attachmentInfo" class="small-muted mt-1"></div>
@@ -678,7 +678,7 @@
         <div class="modal-body">
           <div class="mb-3">
             <label class="form-label">Enter transaction in natural language:</label>
-            <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Received 1000 payment from client in AXIS"></textarea>
+            <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Transfer 1000 from SBI to AXIS"></textarea>
           </div>
           <div class="card bg-light">
             <div class="card-body py-2">
@@ -686,7 +686,7 @@
                 <strong>Format examples:</strong><br>
                 • Add [amount] to [account]<br>
                 • Spent [amount] on [category] from [bank]<br>
-                • Received [amount] for [description] in [bank]
+                • Transfer [amount] from [source] to [destination]
               </small>
             </div>
           </div>
@@ -758,6 +758,7 @@
 
     // state - add this line to track if we've loaded saved state
     let hasLoadedSavedState = false;
+    let dataLoaded = false;
 
     // DOM refs
     const usernameElem = document.getElementById("username");
@@ -824,7 +825,7 @@
     const attachmentInfo = document.getElementById("attachmentInfo");
     const saveTransactionBtn = document.getElementById("saveTransactionBtn");
     const uploadProgress = document.getElementById("uploadProgress");
-    const uploadProgressBar = document.getElementById("uploadProgressBar");
+    const uploadProgressBar = document.querySelector(".uploadProgressBar");
 
     const attachmentModalEl = document.getElementById("attachmentModal");
     const attachmentModal = new bootstrap.Modal(attachmentModalEl);
@@ -950,7 +951,7 @@
         
         // If no accounts found, set default accounts
         if (coaAccounts.length === 0) {
-          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
+          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous", "Transfer"];
         }
         
         if (coaBanks.length === 0) {
@@ -963,7 +964,7 @@
       } catch (error) {
         console.warn('Error loading COA data:', error.message);
         // Use default accounts if COA is not available
-        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
+        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous", "Transfer"];
         coaBanks = ["AXIS", "BOM", "Cash"];
         populateCOADropdowns();
       }
@@ -1011,7 +1012,13 @@
         
         // Load COA data first, then transactions
         await loadCOAData();
-        await loadTransactions();
+        
+        // Only load transactions if they haven't been loaded yet
+        if (!dataLoaded) {
+          await loadTransactions();
+          dataLoaded = true;
+        }
+        
         loadAppState();
         applyFilters();
       } else {
@@ -2111,7 +2118,7 @@
 
     // Upload to Cloudinary with progress tracking
     async function uploadToCloudinary(file, onProgress) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve, reject) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
@@ -2157,11 +2164,81 @@
       let accountHeader = "";
       let bankName = "";
       let description = text;
+      let isTransfer = false;
+      let transferFrom = "";
+      let transferTo = "";
 
       // Try to extract amount
       const amountMatch = text.match(/(\d+)(\.\d+)?/);
       if (amountMatch) {
         amount = parseFloat(amountMatch[0]);
+      }
+
+      // Check if it's a transfer
+      if (text.includes('transfer') || text.includes('from') || text.includes('to')) {
+        isTransfer = true;
+        const transferMatch = text.match(/transfer\s+(\d+)\s+from\s+(\w+)\s+to\s+(\w+)/i);
+        if (transferMatch) {
+          amount = parseFloat(transferMatch[1]);
+          transferFrom = transferMatch[2];
+          transferTo = transferMatch[3];
+          
+          // Create two transactions for transfer
+          try {
+            // First transaction - expense from source account
+            const expenseVoucher = await getNextVoucherNumber("Payment");
+            const expenseData = {
+              DATE: new Date().toISOString().split('T')[0],
+              SINO: expenseVoucher,
+              ACCOUNT_HEADER: "Transfer",
+              BANK_NAME: transferFrom,
+              MODE: transferFrom,
+              VOUCHER_TYPE: "Payment",
+              TYPE: "Expense",
+              INCOME: 0,
+              EXPENSE: amount,
+              BALANCE: 0,
+              DESCRIPTION: `Transfer to ${transferTo}`,
+              NOTES: "Quick add transfer",
+              CURRENCY: "USD",
+              createdAt: new Date(),
+              userId: currentUser.uid
+            };
+            
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), expenseData);
+            
+            // Second transaction - income to destination account
+            const incomeVoucher = await getNextVoucherNumber("Receipt");
+            const incomeData = {
+              DATE: new Date().toISOString().split('T')[0],
+              SINO: incomeVoucher,
+              ACCOUNT_HEADER: "Transfer",
+              BANK_NAME: transferTo,
+              MODE: transferTo,
+              VOUCHER_TYPE: "Receipt",
+              TYPE: "Income",
+              INCOME: amount,
+              EXPENSE: 0,
+              BALANCE: 0,
+              DESCRIPTION: `Transfer from ${transferFrom}`,
+              NOTES: "Quick add transfer",
+              CURRENCY: "USD",
+              createdAt: new Date(),
+              userId: currentUser.uid
+            };
+            
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), incomeData);
+            
+            Swal.fire({ icon: 'success', title: 'Success', text: 'Transfer completed successfully' });
+            quickAddModal.hide();
+            await loadTransactions();
+            return;
+          } catch (err) {
+            console.error("Transfer error", err);
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to process transfer' });
+            return;
+          }
+        }
       }
 
       // Determine transaction type and extract details
