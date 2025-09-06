@@ -158,6 +158,13 @@
       padding: 4px 8px;
       border-radius: 4px;
     }
+    .badge-transfer { 
+      background-color: rgba(13, 202, 240, 0.15);
+      color: var(--info);
+      font-weight:700;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
 
     /* action buttons */
     .action-btn { width:38px; height:38px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; color:white; border:none; }
@@ -378,6 +385,17 @@
       align-items: center;
       gap: 5px;
     }
+    
+    /* Loading modal */
+    #loadingModal .modal-content {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+    }
+    #loadingModal .modal-body {
+      text-align: center;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -491,6 +509,7 @@
             <option value="all">All Types</option>
             <option value="income">Income</option>
             <option value="expense">Expense</option>
+            <option value="transfer">Transfer</option>
           </select>
 
           <!-- Bank Filter -->
@@ -531,12 +550,13 @@
                 <th style="width:120px;">Bank Name</th>
                 <th style="width:120px; text-align:right;">Income</th>
                 <th style="width:120px; text-align:right;">Expense</th>
+                <th style="width:120px;">Balance</th>
                 <th style="width:120px;">Attachment</th>
                 <th style="width:130px;">Actions</th>
               </tr>
             </thead>
             <tbody id="transactionsTableBody">
-              <tr><td colspan="10" class="text-center text-muted py-4">No transactions loaded.</td></tr>
+              <tr><td colspan="11" class="text-center text-muted py-4">No transactions loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -592,6 +612,7 @@
                   <option value="Payment">Payment</option>
                   <option value="Receipt">Receipt</option>
                   <option value="Journal">Journal</option>
+                  <option value="Transfer">Transfer</option>
                 </select>
               </div>
               <div class="col-md-3">
@@ -599,6 +620,7 @@
                 <select id="formTYPE" class="form-select">
                   <option value="Income">Income</option>
                   <option value="Expense">Expense</option>
+                  <option value="Transfer">Transfer</option>
                 </select>
               </div>
               <div class="col-md-3">
@@ -651,7 +673,7 @@
                 <input id="formATTACHFILE" type="file" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,image/*" />
                 <input id="formATTACH" type="hidden" />
                 <div class="upload-progress" id="uploadProgress">
-                  <div class="uploadProgressBar"></div>
+                  <div class="upload-progress-bar" id="uploadProgressBar"></div>
                 </div>
                 <img id="attachmentPreview" class="attachment-preview" alt="Preview" />
                 <div id="attachmentInfo" class="small-muted mt-1"></div>
@@ -678,7 +700,7 @@
         <div class="modal-body">
           <div class="mb-3">
             <label class="form-label">Enter transaction in natural language:</label>
-            <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Transfer 1000 from SBI to AXIS"></textarea>
+            <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Received 1000 payment from client in AXIS&#10;• Transfer 500 from SBI to HDFC"></textarea>
           </div>
           <div class="card bg-light">
             <div class="card-body py-2">
@@ -686,7 +708,9 @@
                 <strong>Format examples:</strong><br>
                 • Add [amount] to [account]<br>
                 • Spent [amount] on [category] from [bank]<br>
-                • Transfer [amount] from [source] to [destination]
+                • Received [amount] for [description] in [bank]<br>
+                • Transfer [amount] from [bank1] to [bank2]<br>
+                • You can include dates like "yesterday", "last friday", "15th jan"
               </small>
             </div>
           </div>
@@ -727,6 +751,20 @@
     </div>
   </div>
 
+  <!-- Loading Modal -->
+  <div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-body text-center">
+          <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p id="loadingMessage">Processing transaction...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- floating add button -->
   <div class="floating-add" id="floatingAdd"><i class="fa fa-plus fa-lg"></i></div>
 
@@ -758,7 +796,6 @@
 
     // state - add this line to track if we've loaded saved state
     let hasLoadedSavedState = false;
-    let dataLoaded = false;
 
     // DOM refs
     const usernameElem = document.getElementById("username");
@@ -785,6 +822,9 @@
     const formDESCRIPTION = document.getElementById("formDESCRIPTION");
     const quickAddInput = document.getElementById("quickAddInput");
     const processQuickAddBtn = document.getElementById("processQuickAddBtn");
+    const loadingModalEl = document.getElementById("loadingModal");
+    const loadingModal = new bootstrap.Modal(loadingModalEl);
+    const loadingMessage = document.getElementById("loadingMessage");
 
     // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
@@ -825,7 +865,7 @@
     const attachmentInfo = document.getElementById("attachmentInfo");
     const saveTransactionBtn = document.getElementById("saveTransactionBtn");
     const uploadProgress = document.getElementById("uploadProgress");
-    const uploadProgressBar = document.querySelector(".uploadProgressBar");
+    const uploadProgressBar = document.getElementById("uploadProgressBar");
 
     const attachmentModalEl = document.getElementById("attachmentModal");
     const attachmentModal = new bootstrap.Modal(attachmentModalEl);
@@ -951,7 +991,7 @@
         
         // If no accounts found, set default accounts
         if (coaAccounts.length === 0) {
-          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous", "Transfer"];
+          coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
         }
         
         if (coaBanks.length === 0) {
@@ -964,7 +1004,7 @@
       } catch (error) {
         console.warn('Error loading COA data:', error.message);
         // Use default accounts if COA is not available
-        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous", "Transfer"];
+        coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
         coaBanks = ["AXIS", "BOM", "Cash"];
         populateCOADropdowns();
       }
@@ -1012,13 +1052,7 @@
         
         // Load COA data first, then transactions
         await loadCOAData();
-        
-        // Only load transactions if they haven't been loaded yet
-        if (!dataLoaded) {
-          await loadTransactions();
-          dataLoaded = true;
-        }
-        
+        await loadTransactions();
         loadAppState();
         applyFilters();
       } else {
@@ -1071,7 +1105,7 @@
     // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
     async function loadTransactions(){
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center py-4 small-muted">Loading...</td></tr>`;
         
         const q = query(
           collection(db, "users", currentUser.uid, "transactions"), 
@@ -1104,7 +1138,7 @@
         await initVoucherNumbering();
       } catch (err) {
         console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
     }
 
@@ -1147,6 +1181,7 @@
         let highestPaymentNumber = 0;
         let highestReceiptNumber = 0;
         let highestJournalNumber = 0;
+        let highestTransferNumber = 0;
         
         // Find the highest numbers for each type
         allTxSnap.forEach(doc => {
@@ -1167,6 +1202,11 @@
               const num = parseInt(tx.SINO.substring(3));
               if (num > highestJournalNumber) highestJournalNumber = num;
             }
+            // Check if it's a transfer (TR- format)
+            else if (tx.SINO.startsWith('TR-')) {
+              const num = parseInt(tx.SINO.substring(3));
+              if (num > highestTransferNumber) highestTransferNumber = num;
+            }
           }
         });
         
@@ -1177,6 +1217,8 @@
           return `RP-${(highestReceiptNumber + 1).toString().padStart(3, '0')}`;
         } else if (voucherType === "Journal") {
           return `JR-${(highestJournalNumber + 1).toString().padStart(3, '0')}`;
+        } else if (voucherType === "Transfer") {
+          return `TR-${(highestTransferNumber + 1).toString().padStart(3, '0')}`;
         }
         
         // Default fallback
@@ -1198,6 +1240,8 @@
           return "RP-001";
         } else if (voucherType === "Journal") {
           return "JR-001";
+        } else if (voucherType === "Transfer") {
+          return "TR-001";
         }
         
         // Final fallback
@@ -1343,6 +1387,7 @@
       // Count transactions by type
       const incomeCount = allTransactions.filter(tx => tx.TYPE === 'Income').length;
       const expenseCount = allTransactions.filter(tx => tx.TYPE === 'Expense').length;
+      const transferCount = allTransactions.filter(tx => tx.TYPE === 'Transfer').length;
       
       quickStatsContainer.innerHTML = `
         <div class="quick-stat">
@@ -1359,7 +1404,7 @@
         </div>
         <div class="quick-stat">
           <i class="fa fa-list text-primary"></i>
-          <span>Income/Expense: <strong>${incomeCount}/${expenseCount}</strong></span>
+          <span>Transactions: <strong>${incomeCount}/${expenseCount}/${transferCount}</strong></span>
         </div>
       `;
     }
@@ -1378,13 +1423,15 @@
           const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
           
           if (!monthlyData[monthYear]) {
-            monthlyData[monthYear] = { income: 0, expense: 0 };
+            monthlyData[monthYear] = { income: 0, expense: 0, transfer: 0 };
           }
           
           if (tx.TYPE === 'Income') {
             monthlyData[monthYear].income += (parseFloat(tx.INCOME) || 0);
           } else if (tx.TYPE === 'Expense') {
             monthlyData[monthYear].expense += (parseFloat(tx.EXPENSE) || 0);
+          } else if (tx.TYPE === 'Transfer') {
+            monthlyData[monthYear].transfer += (parseFloat(tx.INCOME) || 0) + (parseFloat(tx.EXPENSE) || 0);
           }
         }
       });
@@ -1394,6 +1441,7 @@
       
       const incomeData = sortedMonths.map(month => monthlyData[month].income);
       const expenseData = sortedMonths.map(month => monthlyData[month].expense);
+      const transferData = sortedMonths.map(month => monthlyData[month].transfer);
       
       // Format month labels for display
       const monthLabels = sortedMonths.map(month => {
@@ -1419,7 +1467,14 @@
               label: 'Expenses',
               data: expenseData,
               backgroundColor: 'rgba(220, 53, 69, 0.7)',
-                            borderColor: 'rgba(220, 53, 69, 1)',
+              borderColor: 'rgba(220, 53, 69, 1)',
+              borderWidth: 1
+            },
+            {
+              label: 'Transfers',
+              data: transferData,
+              backgroundColor: 'rgba(13, 202, 240, 0.7)',
+              borderColor: 'rgba(13, 202, 240, 1)',
               borderWidth: 1
             }
           ]
@@ -1451,7 +1506,7 @@
             },
             title: {
               display: true,
-              text: 'Monthly Income vs Expenses'
+              text: 'Monthly Income vs Expenses vs Transfers'
             },
             tooltip: {
               callbacks: {
@@ -1612,7 +1667,7 @@
     // build table
     function buildTable(){
       if (filteredTransactions.length === 0) {
-        transactionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
         paginationControls.innerHTML = "";
         return;
       }
@@ -1633,13 +1688,18 @@
         const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
         const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
         
-        // In buildTable() function, update the row generation to:
+        // Determine badge class based on type
+        let badgeClass = '';
+        if (tx.TYPE === 'Income') badgeClass = 'badge-income';
+        else if (tx.TYPE === 'Expense') badgeClass = 'badge-expense';
+        else if (tx.TYPE === 'Transfer') badgeClass = 'badge-transfer';
+        
         html += `
           <tr>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(tx.ACCOUNT_HEADER || "-")}</td>
             <td>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</td>
-            <td><span class="badge ${tx.TYPE === 'Income' ? 'badge-income' : 'badge-expense'}">${escapeHtml(tx.TYPE)}</span></td>
+            <td><span class="badge ${badgeClass}">${escapeHtml(tx.TYPE)}</span></td>
             <td>${escapeHtml(tx.SINO || "")}</td>
             <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
             <td style="text-align:right;">${incomeDisplay}</td>
@@ -1778,6 +1838,9 @@
         } else if (typeSelect.value === "Expense") {
           incomeInput.disabled = true;
           incomeInput.value = "";
+          expenseInput.disabled = false;
+        } else if (typeSelect.value === "Transfer") {
+          incomeInput.disabled = false;
           expenseInput.disabled = false;
         } else {
           incomeInput.disabled = false;
@@ -1942,11 +2005,17 @@
       if (!txToDelete) return;
       
       try {
+        loadingMessage.textContent = "Deleting transaction...";
+        loadingModal.show();
+        
         await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
+        
+        loadingModal.hide();
         Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
         await loadTransactions();
         confirmDeleteModal.hide();
       } catch (err) {
+        loadingModal.hide();
         console.error("deleteTransaction", err);
         Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
       }
@@ -2065,6 +2134,9 @@
       }
       
       try {
+        loadingMessage.textContent = "Saving transaction...";
+        loadingModal.show();
+        
         if (txIdInput.value) {
           // Update existing transaction
           await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
@@ -2076,9 +2148,11 @@
           Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
         }
         
+        loadingModal.hide();
         transactionModal.hide();
         await loadTransactions();
       } catch (err) {
+        loadingModal.hide();
         console.error("saveTransaction", err);
         Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
       } finally {
@@ -2118,7 +2192,7 @@
 
     // Upload to Cloudinary with progress tracking
     async function uploadToCloudinary(file, onProgress) {
-      return new Promise((resolve, reject) {
+      return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
@@ -2152,177 +2226,232 @@
 
     // Process Quick Add functionality
     async function processQuickAdd() {
-      const text = quickAddInput.value.trim().toLowerCase();
+      const text = quickAddInput.value.trim();
       if (!text) {
         Swal.fire({ icon: 'warning', title: 'Input required', text: 'Please enter a transaction description' });
         return;
       }
 
-      // Parse the natural language input
+      try {
+        loadingMessage.textContent = "Processing your request...";
+        loadingModal.show();
+        
+        // Parse the natural language input
+        const parsedData = parseQuickAddInput(text);
+        
+        if (!parsedData.amount) {
+          loadingModal.hide();
+          Swal.fire({ icon: 'warning', title: 'Invalid Input', text: 'Could not detect an amount in your input' });
+          return;
+        }
+
+        // Prepare transaction data
+        const txData = {
+          DATE: parsedData.date || new Date().toISOString().split('T')[0],
+          SINO: "", // Will be set after getting next voucher number
+          ACCOUNT_HEADER: parsedData.accountHeader,
+          BANK_NAME: parsedData.bankName,
+          MODE: parsedData.bankName,
+          VOUCHER_TYPE: parsedData.voucherType,
+          TYPE: parsedData.type,
+          INCOME: parsedData.type === "Income" ? parsedData.amount : 0,
+          EXPENSE: parsedData.type === "Expense" ? parsedData.amount : 0,
+          BALANCE: 0,
+          DESCRIPTION: parsedData.description,
+          NOTES: "Quick add transaction",
+          CURRENCY: "USD",
+          createdAt: new Date(),
+          userId: currentUser.uid
+        };
+
+        // Handle transfers - create two transactions
+        if (parsedData.type === "Transfer") {
+          // First transaction - from account
+          const fromTx = {
+            ...txData,
+            SINO: await getNextVoucherNumber("Transfer"),
+            ACCOUNT_HEADER: parsedData.fromBank,
+            BANK_NAME: parsedData.fromBank,
+            MODE: parsedData.fromBank,
+            EXPENSE: parsedData.amount,
+            INCOME: 0,
+            DESCRIPTION: `Transfer to ${parsedData.toBank}`
+          };
+          
+          // Second transaction - to account
+          const toTx = {
+            ...txData,
+            SINO: await getNextVoucherNumber("Transfer"),
+            ACCOUNT_HEADER: parsedData.toBank,
+            BANK_NAME: parsedData.toBank,
+            MODE: parsedData.toBank,
+            INCOME: parsedData.amount,
+            EXPENSE: 0,
+            DESCRIPTION: `Transfer from ${parsedData.fromBank}`
+          };
+          
+          // Save both transactions
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), fromTx);
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), toTx);
+          
+          loadingModal.hide();
+          Swal.fire({ icon: 'success', title: 'Success', text: 'Transfer completed successfully' });
+        } else {
+          // Regular transaction
+          const voucherNumber = await getNextVoucherNumber(parsedData.voucherType);
+          txData.SINO = voucherNumber;
+          
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+          loadingModal.hide();
+          Swal.fire({ icon: 'success', title: 'Success', text: 'Transaction added successfully' });
+        }
+        
+        quickAddModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("Quick add error", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add transaction' });
+      }
+    }
+
+    // Enhanced parser for natural language input
+    function parseQuickAddInput(text) {
+      const lowerText = text.toLowerCase();
       let amount = 0;
       let type = "";
       let accountHeader = "";
       let bankName = "";
       let description = text;
-      let isTransfer = false;
-      let transferFrom = "";
-      let transferTo = "";
-
+      let date = null;
+      let fromBank = "";
+      let toBank = "";
+      
       // Try to extract amount
       const amountMatch = text.match(/(\d+)(\.\d+)?/);
       if (amountMatch) {
         amount = parseFloat(amountMatch[0]);
       }
-
-      // Check if it's a transfer
-      if (text.includes('transfer') || text.includes('from') || text.includes('to')) {
-        isTransfer = true;
-        const transferMatch = text.match(/transfer\s+(\d+)\s+from\s+(\w+)\s+to\s+(\w+)/i);
-        if (transferMatch) {
-          amount = parseFloat(transferMatch[1]);
-          transferFrom = transferMatch[2];
-          transferTo = transferMatch[3];
-          
-          // Create two transactions for transfer
-          try {
-            // First transaction - expense from source account
-            const expenseVoucher = await getNextVoucherNumber("Payment");
-            const expenseData = {
-              DATE: new Date().toISOString().split('T')[0],
-              SINO: expenseVoucher,
-              ACCOUNT_HEADER: "Transfer",
-              BANK_NAME: transferFrom,
-              MODE: transferFrom,
-              VOUCHER_TYPE: "Payment",
-              TYPE: "Expense",
-              INCOME: 0,
-              EXPENSE: amount,
-              BALANCE: 0,
-              DESCRIPTION: `Transfer to ${transferTo}`,
-              NOTES: "Quick add transfer",
-              CURRENCY: "USD",
-              createdAt: new Date(),
-              userId: currentUser.uid
-            };
-            
-            await addDoc(collection(db, "users", currentUser.uid, "transactions"), expenseData);
-            
-            // Second transaction - income to destination account
-            const incomeVoucher = await getNextVoucherNumber("Receipt");
-            const incomeData = {
-              DATE: new Date().toISOString().split('T')[0],
-              SINO: incomeVoucher,
-              ACCOUNT_HEADER: "Transfer",
-              BANK_NAME: transferTo,
-              MODE: transferTo,
-              VOUCHER_TYPE: "Receipt",
-              TYPE: "Income",
-              INCOME: amount,
-              EXPENSE: 0,
-              BALANCE: 0,
-              DESCRIPTION: `Transfer from ${transferFrom}`,
-              NOTES: "Quick add transfer",
-              CURRENCY: "USD",
-              createdAt: new Date(),
-              userId: currentUser.uid
-            };
-            
-            await addDoc(collection(db, "users", currentUser.uid, "transactions"), incomeData);
-            
-            Swal.fire({ icon: 'success', title: 'Success', text: 'Transfer completed successfully' });
-            quickAddModal.hide();
-            await loadTransactions();
-            return;
-          } catch (err) {
-            console.error("Transfer error", err);
-            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to process transfer' });
-            return;
+      
+      // Try to extract date
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      if (lowerText.includes('today')) {
+        date = today.toISOString().split('T')[0];
+      } else if (lowerText.includes('yesterday')) {
+        date = yesterday.toISOString().split('T')[0];
+      } else {
+        // Try to parse relative dates like "last friday", "2 days ago"
+        const relativeDateMatch = lowerText.match(/(\d+) days? ago/);
+        if (relativeDateMatch) {
+          const daysAgo = parseInt(relativeDateMatch[1]);
+          const pastDate = new Date(today);
+          pastDate.setDate(pastDate.getDate() - daysAgo);
+          date = pastDate.toISOString().split('T')[0];
+        }
+        
+        // Try to parse specific dates like "15 jan", "january 15"
+        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        for (let i = 0; i < monthNames.length; i++) {
+          if (lowerText.includes(monthNames[i])) {
+            const dayMatch = lowerText.match(/(\d+)(?:st|nd|rd|th)?/);
+            if (dayMatch) {
+              const day = parseInt(dayMatch[1]);
+              const year = today.getFullYear(); // Assume current year
+              const month = i;
+              date = new Date(year, month, day).toISOString().split('T')[0];
+              break;
+            }
           }
         }
       }
 
       // Determine transaction type and extract details
-      if (text.includes('add') || text.includes('receive') || text.includes('income') || 
-          text.includes('deposit') || text.includes('credit')) {
+      if (lowerText.includes('transfer') && lowerText.includes('from') && lowerText.includes('to')) {
+        type = "Transfer";
+        const transferMatch = lowerText.match(/transfer.*?(\d+).*?from (.*?) to (.*)/);
+        if (transferMatch) {
+          amount = parseFloat(transferMatch[1]);
+          fromBank = findMatchingBank(transferMatch[2]);
+          toBank = findMatchingBank(transferMatch[3]);
+          description = `Transfer from ${fromBank} to ${toBank}`;
+        }
+      } else if (lowerText.includes('add') || lowerText.includes('receive') || lowerText.includes('income') || 
+          lowerText.includes('deposit') || lowerText.includes('credit')) {
         type = "Income";
-      } else if (text.includes('spent') || text.includes('spend') || text.includes('pay') || 
-                 text.includes('expense') || text.includes('debit') || text.includes('withdraw')) {
+      } else if (lowerText.includes('spent') || lowerText.includes('spend') || lowerText.includes('pay') || 
+                 lowerText.includes('expense') || lowerText.includes('debit') || lowerText.includes('withdraw')) {
         type = "Expense";
       }
 
-      // Try to extract bank name
-      for (const bank of coaBanks) {
-        if (text.includes(bank.toLowerCase())) {
-          bankName = bank;
-          break;
+      // For non-transfer transactions, try to extract bank name
+      if (type !== "Transfer") {
+        for (const bank of coaBanks) {
+          if (lowerText.includes(bank.toLowerCase())) {
+            bankName = bank;
+            break;
+          }
+        }
+
+        // Try to extract account header from COA
+        for (const account of coaAccounts) {
+          if (lowerText.includes(account.toLowerCase())) {
+            accountHeader = account;
+            break;
+          }
+        }
+
+        // If no specific account header found, use a default based on context
+        if (!accountHeader) {
+          if (lowerText.includes('petrol') || lowerText.includes('fuel') || lowerText.includes('gas')) {
+            accountHeader = "Fuel";
+          } else if (lowerText.includes('food') || lowerText.includes('meal') || lowerText.includes('restaurant')) {
+            accountHeader = "Meals & Entertainment";
+          } else if (lowerText.includes('rent') || lowerText.includes('house') || lowerText.includes('apartment')) {
+            accountHeader = "Rent";
+          } else if (lowerText.includes('shopping') || lowerText.includes('store') || lowerText.includes('buy')) {
+            accountHeader = "Shopping";
+          } else if (bankName) {
+            accountHeader = bankName;
+          } else {
+            accountHeader = "Miscellaneous";
+          }
+        }
+
+        // If no bank found but we have cash mentioned
+        if (!bankName && lowerText.includes('cash')) {
+          bankName = "Cash";
         }
       }
 
-      // Try to extract account header from COA
-      for (const account of coaAccounts) {
-        if (text.includes(account.toLowerCase())) {
-          accountHeader = account;
-          break;
-        }
-      }
+      // Determine voucher type based on transaction type
+      let voucherType = "Payment";
+      if (type === "Income") voucherType = "Receipt";
+      else if (type === "Transfer") voucherType = "Transfer";
 
-      // If no specific account header found, use a default based on context
-      if (!accountHeader) {
-        if (text.includes('petrol') || text.includes('fuel') || text.includes('gas')) {
-          accountHeader = "Fuel";
-        } else if (text.includes('food') || text.includes('meal') || text.includes('restaurant')) {
-          accountHeader = "Meals & Entertainment";
-        } else if (text.includes('rent') || text.includes('house') || text.includes('apartment')) {
-          accountHeader = "Rent";
-        } else if (text.includes('shopping') || text.includes('store') || text.includes('buy')) {
-          accountHeader = "Shopping";
-        } else if (bankName) {
-          accountHeader = bankName;
-        } else {
-          accountHeader = "Miscellaneous";
-        }
-      }
-
-      // If no bank found but we have cash mentioned
-      if (!bankName && text.includes('cash')) {
-        bankName = "Cash";
-      }
-
-      // Auto-generate voucher number
-      const voucherType = type === "Income" ? "Receipt" : "Payment";
-      
-      // Prepare transaction data
-      const txData = {
-        DATE: new Date().toISOString().split('T')[0],
-        SINO: "", // Will be set after getting next voucher number
-        ACCOUNT_HEADER: accountHeader,
-        BANK_NAME: bankName,
-        MODE: bankName,
-        VOUCHER_TYPE: voucherType,
-        TYPE: type,
-        INCOME: type === "Income" ? amount : 0,
-        EXPENSE: type === "Expense" ? amount : 0,
-        BALANCE: 0,
-        DESCRIPTION: text.charAt(0).toUpperCase() + text.slice(1),
-        NOTES: "Quick add transaction",
-        CURRENCY: "USD",
-        createdAt: new Date(),
-        userId: currentUser.uid
+      return {
+        amount,
+        type,
+        accountHeader,
+        bankName,
+        description,
+        date,
+        voucherType,
+        fromBank,
+        toBank
       };
+    }
 
-      // Get next voucher number and save transaction
-      try {
-        const voucherNumber = await getNextVoucherNumber(voucherType);
-        txData.SINO = voucherNumber;
-        
-        await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-        Swal.fire({ icon: 'success', title: 'Success', text: 'Transaction added successfully' });
-        quickAddModal.hide();
-        await loadTransactions();
-      } catch (err) {
-        console.error("Quick add error", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add transaction' });
+    // Helper function to find matching bank from COA
+    function findMatchingBank(bankText) {
+      for (const bank of coaBanks) {
+        if (bank.toLowerCase().includes(bankText.trim()) || bankText.trim().includes(bank.toLowerCase())) {
+          return bank;
+        }
       }
+      return bankText; // Return original text if no match found
     }
 
     // Theme functions
