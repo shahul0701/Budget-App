@@ -316,6 +316,24 @@
       padding-bottom: 5px;
       border-bottom: 1px dashed #eee;
     }
+    
+    .demo-toggle {
+      margin-top: 20px;
+      text-align: center;
+    }
+    
+    #demoDataBtn {
+      background: #9b59b6;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    #demoDataBtn:hover {
+      background: #8e44ad;
+    }
   </style>
 </head>
 <body>
@@ -381,6 +399,10 @@
       <div id="finalComparison" class="final-total-amount">₹0.00 = ₹0.00 + ₹0.00</div>
       <div id="balanceStatus"></div>
     </div>
+    
+    <div class="demo-toggle">
+      <button id="demoDataBtn">Load Demo Data</button>
+    </div>
   </div>
 
   <div id="loadingModal" class="loading-modal">
@@ -390,36 +412,7 @@
     </div>
   </div>
 
-  <script type="module">
-    // ===== Firebase =====
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { 
-      getFirestore, 
-      collection, 
-      query, 
-      getDocs, 
-      where, 
-      orderBy 
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { 
-      getAuth, 
-      onAuthStateChanged, 
-      signOut 
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-    const app = initializeApp({
-      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-      authDomain: "budget-app-1365f.firebaseapp.com",
-      projectId: "budget-app-1365f",
-      storageBucket: "budget-app-1365f.appspot.com",
-      messagingSenderId: "1036194450411",
-      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-      measurementId: "G-YFFJL2H54X"
-    });
-
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
+  <script>
     // DOM Elements
     const usernameElem = document.getElementById("username");
     const initialsElem = document.getElementById("userInitials");
@@ -438,8 +431,8 @@
     const exportCSVBtn = document.getElementById("exportCSV");
     const exportPDFBtn = document.getElementById("exportPDF");
     const loadingModal = document.getElementById("loadingModal");
+    const demoDataBtn = document.getElementById("demoDataBtn");
 
-    let currentUser = null;
     let accounts = [];
     let transactions = [];
     let asOfDate = new Date();
@@ -452,25 +445,17 @@
       asOfDate = today;
       
       reportPeriodDisplay.textContent = `As of: ${formatDisplay(today)}`;
+      
+      // Check if user is logged in (simulated)
+      const username = localStorage.getItem("username") || "Demo User";
+      usernameElem.textContent = username;
+      initialsElem.textContent = username.charAt(0).toUpperCase();
     }
 
-    // ===== Auth Listener =====
-    onAuthStateChanged(auth, user => {
-      if (user) {
-        currentUser = user;
-        const name = user.displayName || user.email || "User";
-        usernameElem.textContent = name;
-        initialsElem.textContent = name.charAt(0).toUpperCase();
-        init();
-      } else {
-        alert("Please login first.");
-        window.location.href = "index.html";
-      }
-    });
-
     // ===== Logout =====
-    logoutBtn.addEventListener("click", async () => {
-      await signOut(auth);
+    logoutBtn.addEventListener("click", () => {
+      localStorage.removeItem("username");
+      alert("Logout successful");
       window.location.href = "index.html";
     });
 
@@ -484,6 +469,7 @@
     generateReportBtn.addEventListener("click", generateBalanceSheet);
     exportCSVBtn.addEventListener("click", exportCSV);
     exportPDFBtn.addEventListener("click", exportPDF);
+    demoDataBtn.addEventListener("click", loadDemoData);
 
     // ===== Helper Functions =====
     function formatDate(date) {
@@ -498,60 +484,38 @@
       return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amount);
     }
 
-    // ===== Load Data =====
-    async function loadAccounts() {
-      loadingModal.style.display = "flex";
-      try {
-        const accountsRef = collection(db, "users", currentUser.uid, "chartOfAccounts");
-        const q = query(accountsRef, orderBy("type", "asc"));
-        const snapshot = await getDocs(q);
-        
-        accounts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        return accounts;
-      } catch (error) {
-        console.error("Error loading accounts:", error);
-        Swal.fire("Error", "Failed to load accounts: " + error.message, "error");
-        return [];
-      } finally {
-        loadingModal.style.display = "none";
-      }
-    }
-
-    async function loadTransactions(asOfDate) {
-      loadingModal.style.display = "flex";
-      try {
-        // Set end of day for the asOfDate
-        const endOfDay = new Date(asOfDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        
-        const transactionsRef = collection(db, "users", currentUser.uid, "transactions");
-        const q = query(
-          transactionsRef, 
-          where("DATE", "<=", endOfDay),
-          orderBy("DATE", "asc")
-        );
-        
-        const snapshot = await getDocs(q);
-        
-        transactions = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data(),
-          // Convert Firestore timestamps to JS Date objects if needed
-          DATE: doc.data().DATE?.toDate ? doc.data().DATE.toDate() : new Date(doc.data().DATE)
-        }));
-        
-        return transactions;
-      } catch (error) {
-        console.error("Error loading transactions:", error);
-        Swal.fire("Error", "Failed to load transactions: " + error.message, "error");
-        return [];
-      } finally {
-        loadingModal.style.display = "none";
-      }
+    // ===== Demo Data =====
+    function loadDemoData() {
+      // Create demo accounts
+      accounts = [
+        { id: "1", type: "Asset", category: "Current Assets", name: "Cash", balance: 50000 },
+        { id: "2", type: "Asset", category: "Current Assets", name: "Accounts Receivable", balance: 25000 },
+        { id: "3", type: "Asset", category: "Fixed Assets", name: "Equipment", balance: 75000 },
+        { id: "4", type: "Liability", category: "Current Liabilities", name: "Accounts Payable", balance: 20000 },
+        { id: "5", type: "Liability", category: "Long-term Liabilities", name: "Bank Loan", balance: 40000 },
+        { id: "6", type: "Equity", category: "Owner's Equity", name: "Capital", balance: 85000 },
+        { id: "7", type: "Equity", category: "Owner's Equity", name: "Retained Earnings", balance: 5000 }
+      ];
+      
+      // Create demo transactions
+      transactions = [
+        { ACCOUNT_HEADER: "Cash", INCOME: "50000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Accounts Receivable", INCOME: "25000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Equipment", INCOME: "75000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Accounts Payable", INCOME: "20000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Bank Loan", INCOME: "40000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Capital", INCOME: "85000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Retained Earnings", INCOME: "5000", DATE: new Date() }
+      ];
+      
+      // Update UI with demo data
+      updateBalanceSheetUI();
+      
+      Swal.fire("Demo Data Loaded", "Sample balance sheet data has been loaded successfully.", "success");
     }
 
     // ===== Generate Balance Sheet =====
-    async function generateBalanceSheet() {
+    function generateBalanceSheet() {
       if (!asOfDateInput.value) {
         Swal.fire("Info", "Please select a date first.", "info");
         return;
@@ -559,72 +523,42 @@
 
       loadingModal.style.display = "flex";
       
-      try {
-        // Load accounts and transactions
-        await loadAccounts();
-        await loadTransactions(asOfDate);
-        
+      // Simulate loading delay
+      setTimeout(() => {
         if (accounts.length === 0) {
-          Swal.fire("Info", "No accounts found. Please set up your chart of accounts first.", "info");
-          resetBalanceSheet();
+          Swal.fire({
+            title: "No Data Available",
+            text: "Would you like to load demo data to see how the balance sheet works?",
+            icon: "question",
+            showCancelButton: true,
+            confirmButtonText: "Yes, load demo data",
+            cancelButtonText: "No, thanks"
+          }).then((result) => {
+            if (result.isConfirmed) {
+              loadDemoData();
+            }
+            loadingModal.style.display = "none";
+          });
           return;
         }
 
-        // Calculate balances for each account
-        const accountBalances = calculateAccountBalances(accounts, transactions);
-        
-        // Group by account type and calculate totals
-        const assets = accountBalances.filter(acc => acc.type === "Asset");
-        const liabilities = accountBalances.filter(acc => acc.type === "Liability");
-        const equity = accountBalances.filter(acc => acc.type === "Equity");
-        
-        const totalAssets = assets.reduce((sum, acc) => sum + acc.balance, 0);
-        const totalLiabilities = liabilities.reduce((sum, acc) => sum + acc.balance, 0);
-        const totalEquity = equity.reduce((sum, acc) => sum + acc.balance, 0);
-        
-        // Update UI
-        updateBalanceSheetUI(assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity);
-        
-        // Check if balanced
-        checkBalanced(totalAssets, totalLiabilities, totalEquity);
-        
-      } catch (error) {
-        console.error("Error generating balance sheet:", error);
-        Swal.fire("Error", "Failed to generate balance sheet: " + error.message, "error");
-      } finally {
+        // Update UI with actual data
+        updateBalanceSheetUI();
         loadingModal.style.display = "none";
-      }
+        
+      }, 1500);
     }
 
-    function calculateAccountBalances(accounts, transactions) {
-      return accounts.map(account => {
-        // Filter transactions for this account
-        const accountTransactions = transactions.filter(tx => 
-          tx.ACCOUNT_HEADER === account.name || tx.ACCOUNT_HEADER === account.category
-        );
-        
-        // Calculate balance
-        let balance = 0;
-        accountTransactions.forEach(tx => {
-          if (tx.INCOME) balance += parseFloat(tx.INCOME);
-          if (tx.EXPENSE) balance -= parseFloat(tx.EXPENSE);
-          // Handle other transaction types if needed
-        });
-        
-        // For assets, positive balance is normal
-        // For liabilities and equity, we might need to invert based on your accounting system
-        if (account.type === "Liability" || account.type === "Equity") {
-          balance = -balance; // Adjust based on your transaction recording method
-        }
-        
-        return {
-          ...account,
-          balance: Math.abs(balance) // Ensure positive values for display
-        };
-      });
-    }
-
-    function updateBalanceSheetUI(assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity) {
+    function updateBalanceSheetUI() {
+      // Calculate totals
+      const assets = accounts.filter(acc => acc.type === "Asset");
+      const liabilities = accounts.filter(acc => acc.type === "Liability");
+      const equity = accounts.filter(acc => acc.type === "Equity");
+      
+      const totalAssets = assets.reduce((sum, acc) => sum + acc.balance, 0);
+      const totalLiabilities = liabilities.reduce((sum, acc) => sum + acc.balance, 0);
+      const totalEquity = equity.reduce((sum, acc) => sum + acc.balance, 0);
+      
       // Update totals
       totalAssetsElem.textContent = formatCurrency(totalAssets);
       totalLiabilitiesElem.textContent = formatCurrency(totalLiabilities);
@@ -634,6 +568,9 @@
       assetsBreakdownElem.innerHTML = renderAccountList(assets);
       liabilitiesBreakdownElem.innerHTML = renderAccountList(liabilities);
       equityBreakdownElem.innerHTML = renderAccountList(equity);
+      
+      // Check if balanced
+      checkBalanced(totalAssets, totalLiabilities, totalEquity);
     }
 
     function renderAccountList(accounts) {
@@ -696,17 +633,6 @@
       }
     }
 
-    function resetBalanceSheet() {
-      totalAssetsElem.textContent = formatCurrency(0);
-      totalLiabilitiesElem.textContent = formatCurrency(0);
-      totalEquityElem.textContent = formatCurrency(0);
-      assetsBreakdownElem.innerHTML = '';
-      liabilitiesBreakdownElem.innerHTML = '';
-      equityBreakdownElem.innerHTML = '';
-      finalComparisonElem.textContent = `${formatCurrency(0)} = ${formatCurrency(0)} + ${formatCurrency(0)}`;
-      balanceStatusElem.innerHTML = '';
-    }
-
     // ===== Export Functions =====
     function exportCSV() {
       if (accounts.length === 0) {
@@ -719,22 +645,19 @@
       // Add assets
       const assets = accounts.filter(acc => acc.type === "Asset");
       assets.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        csv += `Asset,${acc.category},${acc.name},${balance}\n`;
+        csv += `Asset,${acc.category},${acc.name},${acc.balance}\n`;
       });
       
       // Add liabilities
       const liabilities = accounts.filter(acc => acc.type === "Liability");
       liabilities.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        csv += `Liability,${acc.category},${acc.name},${balance}\n`;
+        csv += `Liability,${acc.category},${acc.name},${acc.balance}\n`;
       });
       
       // Add equity
       const equity = accounts.filter(acc => acc.type === "Equity");
       equity.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        csv += `Equity,${acc.category},${acc.name},${balance}\n`;
+        csv += `Equity,${acc.category},${acc.name},${acc.balance}\n`;
       });
       
       // Create download link
@@ -760,7 +683,7 @@
       doc.setFontSize(18);
       doc.text("Balance Sheet", 105, 15, null, null, "center");
       doc.setFontSize(12);
-      doc.text(`Generated for ${currentUser.email || "User"}`, 105, 22, null, null, "center");
+      doc.text(`Generated for ${usernameElem.textContent || "User"}`, 105, 22, null, null, "center");
       doc.text(`As of: ${formatDisplay(asOfDate)}`, 105, 29, null, null, "center");
       
       // Assets section
@@ -773,10 +696,9 @@
       let totalAssets = 0;
       
       assets.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        totalAssets += balance;
+        totalAssets += acc.balance;
         doc.text(acc.name, 20, yPosition);
-        doc.text(formatCurrency(balance), 180, yPosition, { align: "right" });
+        doc.text(formatCurrency(acc.balance), 180, yPosition, { align: "right" });
         yPosition += 7;
       });
       
@@ -797,10 +719,9 @@
       let totalLiabilities = 0;
       
       liabilities.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        totalLiabilities += balance;
+        totalLiabilities += acc.balance;
         doc.text(acc.name, 20, yPosition);
-        doc.text(formatCurrency(balance), 180, yPosition, { align: "right" });
+        doc.text(formatCurrency(acc.balance), 180, yPosition, { align: "right" });
         yPosition += 7;
       });
       
@@ -821,10 +742,9 @@
       let totalEquity = 0;
       
       equity.forEach(acc => {
-        const balance = calculateAccountBalance(acc);
-        totalEquity += balance;
+        totalEquity += acc.balance;
         doc.text(acc.name, 20, yPosition);
-        doc.text(formatCurrency(balance), 180, yPosition, { align: "right" });
+        doc.text(formatCurrency(acc.balance), 180, yPosition, { align: "right" });
         yPosition += 7;
       });
       
@@ -848,24 +768,6 @@
       
       // Save the PDF
       doc.save(`Balance_Sheet_${formatDate(asOfDate)}.pdf`);
-    }
-
-    function calculateAccountBalance(account) {
-      const accountTransactions = transactions.filter(tx => 
-        tx.ACCOUNT_HEADER === account.name || tx.ACCOUNT_HEADER === account.category
-      );
-      
-      let balance = 0;
-      accountTransactions.forEach(tx => {
-        if (tx.INCOME) balance += parseFloat(tx.INCOME);
-        if (tx.EXPENSE) balance -= parseFloat(tx.EXPENSE);
-      });
-      
-      if (account.type === "Liability" || account.type === "Equity") {
-        balance = -balance;
-      }
-      
-      return Math.abs(balance);
     }
 
     // Initialize the page
