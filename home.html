@@ -811,6 +811,30 @@
       border-left: 4px solid var(--warning);
     }
 
+    /* Quick Add Modal Styles */
+    .quick-add-examples {
+      background: var(--light-dark);
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 15px;
+      font-size: 13px;
+    }
+    
+    .quick-add-examples ul {
+      text-align: left;
+      margin: 10px 0 0 0;
+      padding-left: 20px;
+    }
+    
+    .quick-add-examples li {
+      margin-bottom: 5px;
+      color: var(--text-light);
+    }
+    
+    [data-theme="dark"] .quick-add-examples {
+      background: var(--dark-light);
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .grid {
@@ -1075,6 +1099,30 @@
       </div>
     </div>
 
+    <!-- Quick Add Modal -->
+    <div class="popup" id="quickAddModal">
+      <div class="popup-content">
+        <h2>Quick Add Transaction</h2>
+        <div class="form-group">
+          <label for="quickAddInput">Enter transaction in natural language:</label>
+          <textarea id="quickAddInput" class="form-control" rows="3" placeholder="Examples:&#10;• Add 500 to cash&#10;• Spent 200 on petrol from SBI&#10;• Received 1000 payment from client in AXIS"></textarea>
+        </div>
+        
+        <div class="quick-add-examples">
+          <strong>Format examples:</strong>
+          <ul>
+            <li>Add [amount] to [account]</li>
+            <li>Spent [amount] on [category] from [bank]</li>
+            <li>Received [amount] for [description] in [bank]</li>
+            <li>Transfer [amount] from [bank1] to [bank2]</li>
+          </ul>
+        </div>
+        
+        <button class="classic-btn" id="processQuickAddBtn">Process</button>
+        <button class="close-btn" onclick="closeQuickAddModal()">Cancel</button>
+      </div>
+    </div>
+
     <!-- Reminder Modal -->
     <div class="popup" id="reminderModal">
       <div class="popup-content">
@@ -1280,6 +1328,7 @@
     const expensePopup = document.getElementById("expensePopup");
     const reportPopup = document.getElementById("reportPopup");
     const transactionTypePopup = document.getElementById("transactionTypePopup");
+    const quickAddModal = document.getElementById("quickAddModal");
     const reminderModal = document.getElementById("reminderModal");
     const reminderDetailModal = document.getElementById("reminderDetailModal");
     const transactionModal = document.getElementById("transactionModal");
@@ -1295,6 +1344,8 @@
     const filterButtons = document.querySelectorAll('.filter-btn');
     const currentDateEl = document.getElementById("currentDate");
     const currentTimeEl = document.getElementById("currentTime");
+    const quickAddInput = document.getElementById("quickAddInput");
+    const processQuickAddBtn = document.getElementById("processQuickAddBtn");
     
     // New elements
     const loadingOverlay = document.getElementById("loadingOverlay");
@@ -1330,6 +1381,8 @@
     let balanceVisible = false;
     let currentFilter = 'today';
     let allTransactions = [];
+    let accountHeaders = [];
+    let bankNames = [];
 
     // Update date and time
     function updateDateTime() {
@@ -1436,6 +1489,16 @@
     // Close transaction type popup
     function closeTransactionTypePopup() {
       transactionTypePopup.classList.remove('active');
+    }
+
+    // Quick Add Modal functions
+    function openQuickAddModal() {
+      quickAddInput.value = "";
+      quickAddModal.classList.add("active");
+    }
+    
+    function closeQuickAddModal() {
+      quickAddModal.classList.remove("active");
     }
 
     // Check if user is logged in
@@ -1581,10 +1644,15 @@
           accountHeaderSelect.remove(1);
         }
         
+        // Clear and repopulate the accountHeaders array
+        accountHeaders = [];
+        
         // Add options from COA
         coaSnapshot.forEach(doc => {
           const data = doc.data();
           if (data.name) {
+            accountHeaders.push(data.name);
+            
             const option = document.createElement("option");
             option.value = data.name;
             option.textContent = data.name;
@@ -1657,6 +1725,12 @@
     totalExpensesEl.addEventListener('click', () => {
       reportPopup.classList.add('active');
     });
+
+    // Quick Add button
+    quickAddBtn.addEventListener("click", openQuickAddModal);
+
+    // Process Quick Add button
+    processQuickAddBtn.addEventListener("click", processQuickAdd);
 
     // Expense Popup
     function openExpensePopup() {
@@ -2025,6 +2099,9 @@
           bankSelect.remove(1);
         }
         
+        // Clear and repopulate the bankNames array
+        bankNames = [];
+        
         // Query COA for Asset -> Bank accounts
         const coaSnapshot = await db.collection("users")
           .doc(userId)
@@ -2037,6 +2114,8 @@
         coaSnapshot.forEach(doc => {
           const data = doc.data();
           if (data.name) {
+            bankNames.push(data.name);
+            
             const option = document.createElement("option");
             option.value = data.name;
             option.textContent = data.name;
@@ -2056,6 +2135,164 @@
         console.error("Error loading bank names:", error);
         showToast('Error loading bank accounts', 'error');
       }
+    }
+
+    // Process Quick Add functionality
+    async function processQuickAdd() {
+      const text = quickAddInput.value.trim();
+      if (!text) {
+        showToast("Please enter a transaction description", "error");
+        return;
+      }
+
+      try {
+        setButtonLoading(processQuickAddBtn, true);
+        showLoading('Processing your input...');
+        
+        // Parse the natural language input
+        const parsedData = parseQuickAddInput(text);
+        
+        if (!parsedData.amount) {
+          showToast("Could not detect an amount in your input", "error");
+          return;
+        }
+
+        // Get next voucher number
+        const user = auth.currentUser;
+        const voucherNumber = await getNextVoucherNumber(user.uid);
+        
+        // Prepare transaction data
+        const transactionData = {
+          DATE: parsedData.date || new Date().toISOString().split('T')[0],
+          SINO: voucherNumber,
+          ACCOUNT_HEADER: parsedData.accountHeader,
+          VOUCHER_TYPE: parsedData.voucherType,
+          TYPE: parsedData.type,
+          BANK_NAME: parsedData.bankName,
+          INCOME: parsedData.type === "Income" ? parsedData.amount : 0,
+          EXPENSE: parsedData.type === "Expense" ? parsedData.amount : 0,
+          BALANCE: 0,
+          NOTES: parsedData.description,
+          DESCRIPTION: parsedData.description,
+          MODE: parsedData.bankName,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        // Check for duplicates
+        const duplicateCheck = await checkForDuplicateTransaction(user.uid, transactionData);
+        
+        if (duplicateCheck.isDuplicate) {
+          showToast(`Duplicate transaction: ${duplicateCheck.reason}`, "error");
+          return;
+        }
+
+        showLoading('Saving transaction...');
+        
+        // Add to transactions collection
+        await db.collection("users").doc(user.uid).collection("transactions").add(transactionData);
+
+        closeQuickAddModal();
+        showToast("Transaction added successfully!", "success");
+        loadFinancialData(user.uid); // Refresh financial data
+      } catch (error) {
+        console.error("Error processing quick add: ", error);
+        showToast("Error adding transaction. Please try again.", "error");
+      } finally {
+        setButtonLoading(processQuickAddBtn, false);
+        hideLoading();
+      }
+    }
+
+    // Parse natural language input for quick add
+    function parseQuickAddInput(text) {
+      const lowerText = text.toLowerCase();
+      let amount = 0;
+      let type = "";
+      let accountHeader = "";
+      let bankName = "";
+      let description = text;
+      let date = new Date().toISOString().split('T')[0]; // Default to today
+      let voucherType = "Payment";
+      
+      // Try to extract amount
+      const amountMatch = text.match(/(\d+)(\.\d+)?/);
+      if (amountMatch) {
+        amount = parseFloat(amountMatch[0]);
+      }
+      
+      // Try to extract date patterns (e.g., "yesterday", "last friday", "15th jan")
+      const today = new Date();
+      if (lowerText.includes('yesterday')) {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        date = yesterday.toISOString().split('T')[0];
+      } else if (lowerText.includes('tomorrow')) {
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        date = tomorrow.toISOString().split('T')[0];
+      }
+      
+      // Determine transaction type and extract details
+      if (lowerText.includes('add') || lowerText.includes('receive') || lowerText.includes('income') || 
+          lowerText.includes('deposit') || lowerText.includes('credit')) {
+        type = "Income";
+        voucherType = "Receipt";
+      } else if (lowerText.includes('spent') || lowerText.includes('spend') || lowerText.includes('pay') || 
+                 lowerText.includes('expense') || lowerText.includes('debit') || lowerText.includes('withdraw')) {
+        type = "Expense";
+        voucherType = "Payment";
+      } else if (lowerText.includes('transfer')) {
+        type = "Transfer";
+        voucherType = "Transfer";
+      }
+
+      // Try to extract bank name
+      for (const bank of bankNames) {
+        if (lowerText.includes(bank.toLowerCase())) {
+          bankName = bank;
+          break;
+        }
+      }
+
+      // Try to extract account header
+      for (const account of accountHeaders) {
+        if (lowerText.includes(account.toLowerCase())) {
+          accountHeader = account;
+          break;
+        }
+      }
+
+      // If no specific account header found, use a default based on context
+      if (!accountHeader) {
+        if (lowerText.includes('petrol') || lowerText.includes('fuel') || lowerText.includes('gas')) {
+          accountHeader = "Fuel";
+        } else if (lowerText.includes('food') || lowerText.includes('meal') || lowerText.includes('restaurant')) {
+          accountHeader = "Meals & Entertainment";
+        } else if (lowerText.includes('rent') || lowerText.includes('house') || lowerText.includes('apartment')) {
+          accountHeader = "Rent";
+        } else if (lowerText.includes('shopping') || lowerText.includes('store') || lowerText.includes('buy')) {
+          accountHeader = "Shopping";
+        } else if (bankName) {
+          accountHeader = bankName;
+        } else {
+          accountHeader = "Miscellaneous";
+        }
+      }
+
+      // If no bank found but we have cash mentioned
+      if (!bankName && lowerText.includes('cash')) {
+        bankName = "Cash";
+      }
+
+      return {
+        amount,
+        type,
+        accountHeader,
+        bankName,
+        description,
+        date,
+        voucherType
+      };
     }
   </script>
 </body>
