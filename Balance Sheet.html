@@ -23,11 +23,11 @@ h1{text-align:center;margin-bottom:30px;}
 .user-email{text-align:center;margin:-20px 0 20px;color:#7f8c8d;font-style:italic;}
 
 .date-controls{background:white;padding:20px;border-radius:8px;display:flex;flex-wrap:wrap;gap:15px;margin-bottom:20px;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,0.05);}
-.date-controls select,input{padding:6px 10px;border-radius:4px;border:1px solid #ddd;}
-#generateReportBtn{background:#3498db;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;}
+.date-controls select,input{padding:8px 12px;border-radius:4px;border:1px solid #ddd;}
+#generateReportBtn{background:#3498db;color:white;border:none;padding:10px 16px;border-radius:4px;cursor:pointer;font-weight:bold;}
 #generateReportBtn:hover{background:#2980b9;}
 .export-buttons{display:flex;gap:10px;margin-bottom:20px;}
-.export-buttons button{background:#3498db;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;}
+.export-buttons button{background:#3498db;color:white;border:none;padding:10px 16px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:5px;}
 .export-buttons button:hover{background:#2980b9;}
 
 .balance-sheet{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:30px;}
@@ -67,6 +67,9 @@ h1{text-align:center;margin-bottom:30px;}
 .demo-toggle{margin-top:20px;text-align:center;}
 #demoDataBtn{background:#9b59b6;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;}
 #demoDataBtn:hover{background:#8e44ad;}
+
+.auth-error{text-align:center;padding:20px;color:#e74c3c;background:#ffeaea;border-radius:8px;margin:20px 0;}
+.auth-error button{background:#3498db;color:white;border:none;padding:10px 20px;border-radius:4px;cursor:pointer;margin-top:10px;}
 </style>
 </head>
 <body>
@@ -85,6 +88,12 @@ h1{text-align:center;margin-bottom:30px;}
 <h1><i class="fas fa-balance-scale"></i> Balance Sheet</h1>
 <div id="userEmailDisplay" class="user-email"></div>
 
+<div id="authError" class="auth-error" style="display:none;">
+    <p><i class="fas fa-exclamation-triangle"></i> Authentication Error: Please login to access the Balance Sheet</p>
+    <button onclick="window.location.href='index.html'">Go to Login</button>
+</div>
+
+<div id="mainContent">
 <div class="date-controls">
 <label>As of Date:
 <input type="date" id="asOfDate" required>
@@ -183,6 +192,8 @@ const exportCSVBtn = document.getElementById("exportCSV");
 const exportPDFBtn = document.getElementById("exportPDF");
 const loadingModal = document.getElementById("loadingModal");
 const demoDataBtn = document.getElementById("demoDataBtn");
+const authErrorElem = document.getElementById("authError");
+const mainContentElem = document.getElementById("mainContent");
 
 let currentUser = null;
 let accounts = [];
@@ -192,8 +203,9 @@ let asOfDate = new Date();
 // ===== Auth Listener =====
 onAuthStateChanged(auth, user => {
     if (user) {
+        // User is signed in
         currentUser = user;
-        const name = user.displayName || user.email || "User";
+        const name = user.displayName || "User";
         const email = user.email || "No email";
         
         usernameElem.textContent = name;
@@ -201,17 +213,37 @@ onAuthStateChanged(auth, user => {
         userEmailDisplayElem.textContent = email;
         initialsElem.textContent = name.charAt(0).toUpperCase();
         
+        // Show main content, hide auth error
+        mainContentElem.style.display = "block";
+        authErrorElem.style.display = "none";
+        
         setDefaultDates();
     } else {
-        alert("Please login first.");
-        window.location.href = "index.html";
+        // User is signed out
+        console.log("No user signed in");
+        
+        // Show auth error, hide main content
+        mainContentElem.style.display = "none";
+        authErrorElem.style.display = "block";
+        
+        // Check if we're already on the login page to avoid redirect loops
+        if (!window.location.href.includes("index.html")) {
+            setTimeout(() => {
+                alert("Please login to access the Balance Sheet");
+                window.location.href = "index.html";
+            }, 1000);
+        }
     }
 });
 
 // ===== Logout =====
 logoutBtn.addEventListener("click", async () => {
-    await signOut(auth);
-    window.location.href = "index.html";
+    try {
+        await signOut(auth);
+        window.location.href = "index.html";
+    } catch (error) {
+        console.error("Logout error:", error);
+    }
 });
 
 // ===== Initialize =====
@@ -255,6 +287,87 @@ function formatDisplay(date) {
 
 function formatCurrency(amount) {
     return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amount);
+}
+
+// ===== Demo Data =====
+function loadDemoData() {
+    // Create demo accounts based on Chart of Accounts structure
+    accounts = [
+        { id: "1", type: "Asset", category: "Current Assets", name: "Cash", balance: 50000 },
+        { id: "2", type: "Asset", category: "Current Assets", name: "Accounts Receivable", balance: 25000 },
+        { id: "3", type: "Asset", category: "Fixed Assets", name: "Equipment", balance: 75000 },
+        { id: "4", type: "Liability", category: "Current Liabilities", name: "Accounts Payable", balance: 20000 },
+        { id: "5", type: "Liability", category: "Long-term Liabilities", name: "Bank Loan", balance: 40000 },
+        { id: "6", type: "Equity", category: "Owner's Equity", name: "Capital", balance: 85000 },
+        { id: "7", type: "Equity", category: "Owner's Equity", name: "Retained Earnings", balance: 5000 }
+    ];
+    
+    // Create demo transactions
+    transactions = [
+        { ACCOUNT_HEADER: "Cash", INCOME: "50000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Accounts Receivable", INCOME: "25000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Equipment", INCOME: "75000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Accounts Payable", INCOME: "20000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Bank Loan", INCOME: "40000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Capital", INCOME: "85000", DATE: new Date() },
+        { ACCOUNT_HEADER: "Retained Earnings", INCOME: "5000", DATE: new Date() }
+    ];
+    
+    // Update UI with demo data
+    updateBalanceSheetUI();
+    
+    Swal.fire("Demo Data Loaded", "Sample balance sheet data has been loaded successfully.", "success");
+}
+
+// ===== Generate Balance Sheet =====
+async function generateBalanceSheet() {
+    if (!asOfDateInput.value) {
+        Swal.fire("Info", "Please select a date first.", "info");
+        return;
+    }
+
+    // Check if user is authenticated
+    if (!currentUser) {
+        Swal.fire("Error", "Please login to generate a balance sheet.", "error");
+        return;
+    }
+
+    loadingModal.style.display = "flex";
+    
+    try {
+        // Load accounts and transactions
+        await loadAccounts();
+        await loadTransactions(asOfDate);
+        
+        if (accounts.length === 0) {
+            Swal.fire({
+                title: "No Data Available",
+                text: "Would you like to load demo data to see how the balance sheet works?",
+                icon: "question",
+                showCancelButton: true,
+                confirmButtonText: "Yes, load demo data",
+                cancelButtonText: "No, thanks"
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    loadDemoData();
+                }
+                loadingModal.style.display = "none";
+            });
+            return;
+        }
+
+        // Calculate balances for each account
+        const accountBalances = calculateAccountBalances(accounts, transactions);
+        
+        // Update UI with actual data
+        updateBalanceSheetUIWithAccounts(accountBalances);
+        
+    } catch (error) {
+        console.error("Error generating balance sheet:", error);
+        Swal.fire("Error", "Failed to generate balance sheet: " + error.message, "error");
+    } finally {
+        loadingModal.style.display = "none";
+    }
 }
 
 // ===== Load Data =====
@@ -304,81 +417,6 @@ async function loadTransactions(asOfDate) {
         console.error("Error loading transactions:", error);
         Swal.fire("Error", "Failed to load transactions: " + error.message, "error");
         return [];
-    } finally {
-        loadingModal.style.display = "none";
-    }
-}
-
-// ===== Demo Data =====
-function loadDemoData() {
-    // Create demo accounts based on Chart of Accounts structure
-    accounts = [
-        { id: "1", type: "Asset", category: "Current Assets", name: "Cash", balance: 50000 },
-        { id: "2", type: "Asset", category: "Current Assets", name: "Accounts Receivable", balance: 25000 },
-        { id: "3", type: "Asset", category: "Fixed Assets", name: "Equipment", balance: 75000 },
-        { id: "4", type: "Liability", category: "Current Liabilities", name: "Accounts Payable", balance: 20000 },
-        { id: "5", type: "Liability", category: "Long-term Liabilities", name: "Bank Loan", balance: 40000 },
-        { id: "6", type: "Equity", category: "Owner's Equity", name: "Capital", balance: 85000 },
-        { id: "7", type: "Equity", category: "Owner's Equity", name: "Retained Earnings", balance: 5000 }
-    ];
-    
-    // Create demo transactions
-    transactions = [
-        { ACCOUNT_HEADER: "Cash", INCOME: "50000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Accounts Receivable", INCOME: "25000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Equipment", INCOME: "75000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Accounts Payable", INCOME: "20000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Bank Loan", INCOME: "40000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Capital", INCOME: "85000", DATE: new Date() },
-        { ACCOUNT_HEADER: "Retained Earnings", INCOME: "5000", DATE: new Date() }
-    ];
-    
-    // Update UI with demo data
-    updateBalanceSheetUI();
-    
-    Swal.fire("Demo Data Loaded", "Sample balance sheet data has been loaded successfully.", "success");
-}
-
-// ===== Generate Balance Sheet =====
-async function generateBalanceSheet() {
-    if (!asOfDateInput.value) {
-        Swal.fire("Info", "Please select a date first.", "info");
-        return;
-    }
-
-    loadingModal.style.display = "flex";
-    
-    try {
-        // Load accounts and transactions
-        await loadAccounts();
-        await loadTransactions(asOfDate);
-        
-        if (accounts.length === 0) {
-            Swal.fire({
-                title: "No Data Available",
-                text: "Would you like to load demo data to see how the balance sheet works?",
-                icon: "question",
-                showCancelButton: true,
-                confirmButtonText: "Yes, load demo data",
-                cancelButtonText: "No, thanks"
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    loadDemoData();
-                }
-                loadingModal.style.display = "none";
-            });
-            return;
-        }
-
-        // Calculate balances for each account
-        const accountBalances = calculateAccountBalances(accounts, transactions);
-        
-        // Update UI with actual data
-        updateBalanceSheetUIWithAccounts(accountBalances);
-        
-    } catch (error) {
-        console.error("Error generating balance sheet:", error);
-        Swal.fire("Error", "Failed to generate balance sheet: " + error.message, "error");
     } finally {
         loadingModal.style.display = "none";
     }
