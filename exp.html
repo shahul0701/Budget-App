@@ -975,11 +975,13 @@
       }
 
       /* COA Modal Styles */
-      #coaModal .modal-content {
-          max-width: 600px;
-          max-height: 80vh;
-          overflow-y: auto;
-      }
+    #coaModal {
+    z-index: 10002; /* Higher than transaction modal's z-index (10001) */
+}
+
+#transactionModal {
+    z-index: 10001;
+}
 
       .coa-header {
           display: flex;
@@ -1597,14 +1599,15 @@
         await addStarterAccounts();
     });
 
-    // Event listener for account header dropdown change
-    formHEADER.addEventListener("change", function() {
-        if (this.value === "add-new") {
-            // Open COA modal
-            coaModal.style.display = "flex";
-            this.value = ""; // Reset the selection
-        }
-    });
+    // Replace the current formHEADER event listener with this:
+formHEADER.addEventListener("change", function() {
+    if (this.value === "add-new") {
+        // Open COA modal as a popup over the transaction form
+        coaModal.style.display = "flex";
+        loadCOAAccounts(); // Load existing COA data
+        this.value = ""; // Reset the selection
+    }
+});
 
     // Drag and drop functionality
     dropZone.addEventListener("dragover", (e) => {
@@ -2221,23 +2224,38 @@
         coaCategorySelect.appendChild(addNewOption);
     }
 
-    // Load COA accounts for display in the modal
-    async function loadCOAAccounts() {
+// Modify loadCOAAccounts function to show loading
+async function loadCOAAccounts() {
+    coaTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center;">Loading accounts...</td></tr>`;
+    
+    try {
+        const q = query(
+            collection(db, "users", currentUser.uid, "chartOfAccounts"), 
+            where("userId", "==", currentUser.uid)
+        );
+        const snapshot = await getDocs(q);
+        
         coaTableBody.innerHTML = "";
-        try {
-            const q = query(
-                collection(db, "users", currentUser.uid, "chartOfAccounts"), 
-                where("userId", "==", currentUser.uid)
-            );
-            const snapshot = await getDocs(q);
-            snapshot.forEach((docSnap) => {
-                const data = docSnap.data();
-                addCOAAccountRow(docSnap.id, data.type, data.category, data.name);
-            });
-        } catch (error) {
-            console.error("Error loading COA accounts:", error);
+        if (snapshot.empty) {
+            coaTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#777;">No accounts found.</td></tr>`;
+            return;
         }
+        
+        snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            addCOAAccountRow(docSnap.id, data.type, data.category, data.name);
+        });
+    } catch (error) {
+        console.error("Error loading COA accounts:", error);
+        coaTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:red;">Error loading accounts.</td></tr>`;
     }
+}
+// Call this function when the COA modal opens
+coaModal.addEventListener("click", async (e) => {
+    if (e.target === coaModal) {
+        await loadCOAAccounts();
+    }
+});
 
     // Add COA account row to the table
     function addCOAAccountRow(id, type, category, name) {
@@ -2295,6 +2313,7 @@
         if (!type || !category || !name) {
             alert("Please fill all fields.");
             return;
+            await loadAccounts();
         }
 
         try {
