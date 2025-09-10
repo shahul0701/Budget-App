@@ -588,6 +588,10 @@
                                     <label for="expense-amount">Amount</label>
                                     <input type="number" id="expense-amount" step="0.01" placeholder="0.00" required>
                                 </div>
+                                <div class="input-group" id="fuel-volume-group" style="display: none;">
+                                    <label for="expense-fuel-volume">Fuel Volume (L)</label>
+                                    <input type="number" id="expense-fuel-volume" step="0.01" placeholder="0.00">
+                                </div>
                                 <div class="input-group">
                                     <label for="expense-date">Date</label>
                                     <input type="date" id="expense-date" required>
@@ -615,6 +619,7 @@
                                         <th>Date</th>
                                         <th>Type</th>
                                         <th>Amount</th>
+                                        <th>Volume (L)</th>
                                         <th>Odometer</th>
                                         <th>Notes</th>
                                         <th>Actions</th>
@@ -977,6 +982,8 @@
         const expenseSubmitBtn = document.getElementById('expense-submit-btn');
         const serviceSubmitBtn = document.getElementById('service-submit-btn');
         const tripSubmitBtn = document.getElementById('trip-submit-btn');
+        const expenseType = document.getElementById('expense-type');
+        const fuelVolumeGroup = document.getElementById('fuel-volume-group');
         
         function init() {
             setupEventListeners();
@@ -1123,33 +1130,6 @@
                 });
         }
         
-        function loadMileageRecords(vehicleId) {
-            const user = auth.currentUser;
-            if (!user) return;
-            
-            db.collection('users').doc(user.uid).collection('vehicles').doc(vehicleId).collection('trips')
-                .orderBy('date', 'desc')
-                .onSnapshot(snapshot => {
-                    mileageRecords = [];
-                    snapshot.forEach(doc => {
-                        const trip = doc.data();
-                        if (trip.fuelAmount && trip.distance) {
-                            mileageRecords.push({
-                                id: doc.id,
-                                date: trip.date,
-                                distance: trip.distance,
-                                fuelAmount: trip.fuelAmount,
-                                cost: trip.fuelCost
-                            });
-                        }
-                    });
-                    renderMileageHistory();
-                    drawMileageChart();
-                }, error => {
-                    console.error('Error loading mileage records:', error);
-                });
-        }
-        
         function renderVehicles() {
             vehicleList.innerHTML = '';
             
@@ -1210,11 +1190,47 @@
                 loadExpenses(vehicleId);
                 loadServices(vehicleId);
                 loadTrips(vehicleId);
-                loadMileageRecords(vehicleId);
             }
         }
         
+        function calculateMileageRecords() {
+            const fuelExpenses = expenses.filter(e => e.type === 'fuel' && e.fuelVolume && e.odometer).map(e => ({
+                type: 'expense',
+                id: e.id,
+                date: e.date,
+                odometer: e.odometer,
+                fuelAmount: e.fuelVolume,
+                cost: e.amount
+            }));
+            const tripFills = trips.filter(t => t.fuelAmount && t.endOdometer).map(t => ({
+                type: 'trip',
+                id: t.id,
+                date: t.date,
+                odometer: t.endOdometer,
+                fuelAmount: t.fuelAmount,
+                cost: t.fuelCost
+            }));
+            const allFills = [...fuelExpenses, ...tripFills].sort((a, b) => a.odometer - b.odometer);
+            mileageRecords = [];
+            for (let i = 1; i < allFills.length; i++) {
+                const prevFill = allFills[i - 1];
+                const currFill = allFills[i];
+                const distance = currFill.odometer - prevFill.odometer;
+                if (distance > 0 && currFill.fuelAmount > 0) {
+                    mileageRecords.push({
+                        date: currFill.date,
+                        distance,
+                        fuelAmount: currFill.fuelAmount,
+                        cost: currFill.cost,
+                        mileage: distance / currFill.fuelAmount
+                    });
+                }
+            }
+            mileageRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+        }
+        
         function updateVehicleDashboard() {
+            calculateMileageRecords();
             const vehicle = vehicles.find(v => v.id === selectedVehicleId);
             if (!vehicle) return;
             
@@ -1247,12 +1263,7 @@
             document.getElementById('total-spent').textContent = totalSpent.toFixed(2);
             
             if (mileageRecords.length > 0) {
-                const totalMileage = mileageRecords.reduce((sum, record) => {
-                    if (record.distance && record.fuelAmount && record.fuelAmount > 0) {
-                        return sum + (record.distance / record.fuelAmount);
-                    }
-                    return sum;
-                }, 0);
+                const totalMileage = mileageRecords.reduce((sum, record) => sum + record.mileage, 0);
                 const avgMileage = totalMileage / mileageRecords.length;
                 document.getElementById('avg-mileage').textContent = avgMileage.toFixed(1);
             } else {
@@ -1363,7 +1374,7 @@
             expenseHistory.innerHTML = '';
             
             if (expenses.length === 0) {
-                expenseHistory.innerHTML = '<tr><td colspan="6" style="text-align: center;">No expenses recorded yet</td></tr>';
+                expenseHistory.innerHTML = '<tr><td colspan="7" style="text-align: center;">No expenses recorded yet</td></tr>';
                 return;
             }
             
@@ -1373,6 +1384,7 @@
                     <td>${formatDate(expense.date)}</td>
                     <td>${expense.type}</td>
                     <td>${expense.amount.toFixed(2)}</td>
+                    <td>${expense.fuelVolume ? expense.fuelVolume.toFixed(2) : '-'}</td>
                     <td>${expense.odometer || '-'}</td>
                     <td>${expense.notes || '-'}</td>
                     <td>
@@ -1456,13 +1468,12 @@
             }
             
             mileageRecords.forEach(record => {
-                const mileage = record.fuelAmount > 0 ? (record.distance / record.fuelAmount).toFixed(1) : 'N/A';
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${formatDate(record.date)}</td>
-                    <td>${record.distance}</td>
-                    <td>${record.fuelAmount}</td>
-                    <td>${mileage}</td>
+                    <td>${record.distance.toFixed(1)}</td>
+                    <td>${record.fuelAmount.toFixed(2)}</td>
+                    <td>${record.mileage.toFixed(1)}</td>
                     <td>${record.cost ? record.cost.toFixed(2) : '-'}</td>
                 `;
                 mileageHistory.appendChild(row);
@@ -1480,10 +1491,8 @@
             data.addColumn('number', 'Mileage (km/L)');
             
             const chartData = mileageRecords
-                .filter(record => record.fuelAmount > 0)
                 .map(record => {
-                    const mileage = record.distance / record.fuelAmount;
-                    return [new Date(record.date), mileage];
+                    return [new Date(record.date), record.mileage];
                 });
             
             data.addRows(chartData);
@@ -1704,7 +1713,11 @@
                     switchTab(tabName);
                     
                     if (tabName === 'mileage') {
-                        google.charts.setOnLoadCallback(drawMileageChart);
+                        google.charts.setOnLoadCallback(() => {
+                            calculateMileageRecords();
+                            renderMileageHistory();
+                            drawMileageChart();
+                        });
                     } else if (tabName === 'reports') {
                         google.charts.setOnLoadCallback(generateExpenseReport);
                     }
@@ -1735,6 +1748,10 @@
                 } else {
                     label.textContent = 'End Odometer (km)';
                 }
+            });
+            
+            expenseType.addEventListener('change', () => {
+                fuelVolumeGroup.style.display = expenseType.value === 'fuel' ? 'block' : 'none';
             });
         }
         
@@ -1896,6 +1913,7 @@
             const date = document.getElementById('expense-date').value;
             const odometer = document.getElementById('expense-odometer').value;
             const notes = document.getElementById('expense-notes').value;
+            const fuelVolume = type === 'fuel' ? parseFloat(document.getElementById('expense-fuel-volume').value) || null : null;
             
             const expenseData = {
                 type,
@@ -1903,6 +1921,7 @@
                 date,
                 odometer: odometer ? parseInt(odometer) : null,
                 notes,
+                fuelVolume,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
@@ -1933,6 +1952,7 @@
             const date = document.getElementById('expense-date').value;
             const odometer = document.getElementById('expense-odometer').value;
             const notes = document.getElementById('expense-notes').value;
+            const fuelVolume = type === 'fuel' ? parseFloat(document.getElementById('expense-fuel-volume').value) || null : null;
             
             const expenseData = {
                 type,
@@ -1940,6 +1960,7 @@
                 date,
                 odometer: odometer ? parseInt(odometer) : null,
                 notes,
+                fuelVolume,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -1964,6 +1985,7 @@
             setCurrentDate();
             document.getElementById('expense-id').value = '';
             expenseSubmitBtn.innerHTML = '<i class="fas fa-save"></i> Add Expense';
+            fuelVolumeGroup.style.display = 'none';
         }
         
         function addNewService() {
@@ -2247,8 +2269,10 @@
             document.getElementById('expense-date').value = expense.date;
             document.getElementById('expense-odometer').value = expense.odometer || '';
             document.getElementById('expense-notes').value = expense.notes || '';
+            document.getElementById('expense-fuel-volume').value = expense.fuelVolume || '';
             document.getElementById('expense-id').value = expenseId;
             expenseSubmitBtn.innerHTML = '<i class="fas fa-save"></i> Update Expense';
+            expenseType.dispatchEvent(new Event('change'));
             // Scroll to form if needed
             expenseForm.scrollIntoView({behavior: 'smooth'});
         }
