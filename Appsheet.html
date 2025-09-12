@@ -151,6 +151,46 @@
         .grid-item i {
             color: #6b7280;
         }
+        .folder {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .folder:hover {
+            background: #e0f2fe;
+            transform: translateY(-2px);
+        }
+        .folder.active {
+            background: #bae6fd;
+            border-color: #7dd3fc;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -158,14 +198,15 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Firebase configuration (replace with your Firebase project config)
+        // Firebase configuration
         const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_AUTH_DOMAIN",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
+            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+            authDomain: "budget-app-1365f.firebaseapp.com",
+            projectId: "budget-app-1365f",
+            storageBucket: "budget-app-1365f.firebasestorage.app",
+            messagingSenderId: "1036194450411",
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+            measurementId: "G-YFFJL2H54X"
         };
 
         // Initialize Firebase
@@ -189,6 +230,12 @@
             const [chartFieldY, setChartFieldY] = useState('');
             const [isDraggingOver, setIsDraggingOver] = useState(false);
             const [editingFieldIndex, setEditingFieldIndex] = useState(null);
+            const [folders, setFolders] = useState(['All Forms']);
+            const [currentFolder, setCurrentFolder] = useState('All Forms');
+            const [showFolderModal, setShowFolderModal] = useState(false);
+            const [editingFormulaIndex, setEditingFormulaIndex] = useState(null);
+            const [formulaEditName, setFormulaEditName] = useState('');
+            const [formulaEditFormula, setFormulaEditFormula] = useState('');
             const chartInstance = useRef(null);
             const canvasRef = useRef(null);
             const unsubscribe = useRef(null);
@@ -208,17 +255,31 @@
                     setTableFields(configs);
                     setComputedFields(computedConfigs);
                 });
+
+                // Fetch folders
+                db.collection('folders').onSnapshot(snapshot => {
+                    const folderNames = snapshot.docs.map(doc => doc.id);
+                    setFolders(['All Forms', ...folderNames]);
+                });
             }, []);
 
             // Fetch records for current table
             useEffect(() => {
                 if (unsubscribe.current) unsubscribe.current();
-                unsubscribe.current = db.collection('tables').doc(currentTable).collection('records').onSnapshot(snapshot => {
+                
+                let query = db.collection('tables').doc(currentTable).collection('records');
+                
+                // If a specific folder is selected, filter by folder
+                if (currentFolder !== 'All Forms') {
+                    query = query.where('folder', '==', currentFolder);
+                }
+                
+                unsubscribe.current = query.onSnapshot(snapshot => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setRecords(data);
                 });
                 return () => unsubscribe.current && unsubscribe.current();
-            }, [currentTable]);
+            }, [currentTable, currentFolder]);
 
             // Handle drag start
             const handleDragStart = (e, fieldType) => {
@@ -302,6 +363,12 @@
             const saveRecord = () => {
                 if (Object.keys(newRecord).length > 0) {
                     let data = { ...newRecord };
+                    
+                    // Add folder information if not "All Forms"
+                    if (currentFolder !== 'All Forms') {
+                        data.folder = currentFolder;
+                    }
+                    
                     (computedFields[currentTable] || []).forEach(cf => {
                         let expr = cf.formula;
                         expr = expr.replace(/\[(.*?)\]/g, (match, f) => newRecord[f] !== undefined ? (typeof newRecord[f] === 'string' ? `"${newRecord[f]}"` : newRecord[f]) : '0');
@@ -346,6 +413,52 @@
                     });
                     document.getElementById('comp-name').value = '';
                     document.getElementById('comp-formula').value = '';
+                }
+            };
+
+            // Edit computed field
+            const editComputedField = (index) => {
+                const cf = computedFields[currentTable][index];
+                setFormulaEditName(cf.name);
+                setFormulaEditFormula(cf.formula);
+                setEditingFormulaIndex(index);
+            };
+
+            // Save edited computed field
+            const saveEditedComputedField = () => {
+                if (formulaEditName && formulaEditFormula) {
+                    const newComputed = [...(computedFields[currentTable] || [])];
+                    newComputed[editingFormulaIndex] = { 
+                        name: formulaEditName, 
+                        formula: formulaEditFormula 
+                    };
+                    setComputedFields({ ...computedFields, [currentTable]: newComputed });
+                    db.collection('tables').doc(currentTable).set({ 
+                        fields: tableFields[currentTable] || [], 
+                        computedFields: newComputed 
+                    }, { merge: true });
+                    
+                    // Update existing records
+                    db.collection('tables').doc(currentTable).collection('records').get().then(snapshot => {
+                        snapshot.docs.forEach(doc => {
+                            const record = doc.data();
+                            let expr = formulaEditFormula;
+                            expr = expr.replace(/\[(.*?)\]/g, (match, f) => record[f] !== undefined ? (typeof record[f] === 'string' ? `"${record[f]}"` : record[f]) : '0');
+                            try {
+                                db.collection('tables').doc(currentTable).collection('records').doc(doc.id).update({ 
+                                    [formulaEditName]: eval(expr) 
+                                });
+                            } catch (err) {
+                                db.collection('tables').doc(currentTable).collection('records').doc(doc.id).update({ 
+                                    [formulaEditName]: 'Error' 
+                                });
+                            }
+                        });
+                    });
+                    
+                    setEditingFormulaIndex(null);
+                    setFormulaEditName('');
+                    setFormulaEditFormula('');
                 }
             };
 
@@ -400,6 +513,20 @@
                                 });
                         })
                         .catch(error => console.error("Error deleting table:", error));
+                }
+            };
+
+            // Add new folder
+            const addNewFolder = () => {
+                const name = document.getElementById('newFolder').value.trim();
+                if (name && !folders.includes(name)) {
+                    db.collection('folders').doc(name).set({})
+                        .then(() => {
+                            setFolders([...folders, name]);
+                            document.getElementById('newFolder').value = '';
+                            setShowFolderModal(false);
+                        })
+                        .catch(error => console.error("Error adding folder:", error));
                 }
             };
 
@@ -547,6 +674,27 @@
                                     </div>
                                     
                                     <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center">
+                                        <i className="fas fa-folder mr-2"></i>Folders
+                                    </h3>
+                                    <div className="mb-4 space-y-2">
+                                        {folders.map(folder => (
+                                            <div 
+                                                key={folder} 
+                                                className={`folder ${currentFolder === folder ? 'active' : ''}`}
+                                                onClick={() => setCurrentFolder(folder)}
+                                            >
+                                                <i className="fas fa-folder mr-2"></i> {folder}
+                                            </div>
+                                        ))}
+                                        <button 
+                                            className="btn btn-primary w-full mt-2"
+                                            onClick={() => setShowFolderModal(true)}
+                                        >
+                                            <i className="fas fa-plus mr-1"></i>New Folder
+                                        </button>
+                                    </div>
+                                    
+                                    <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center">
                                         <i className="fas fa-shapes mr-2"></i>Available Fields
                                     </h3>
                                     <div className="grid-stack">
@@ -562,6 +710,7 @@
                                 <div className="lg:col-span-3">
                                     <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                                         <i className="fas fa-pen-to-square mr-2"></i>Form Builder for {currentTable}
+                                        {currentFolder !== 'All Forms' && <span className="ml-2 text-sm text-blue-600 bg-blue-100 px-2 py-1 rounded">Folder: {currentFolder}</span>}
                                     </h2>
                                     
                                     <div 
@@ -650,6 +799,7 @@
                             <div>
                                 <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                                     <i className="fas fa-database mr-2"></i>Data Records for {currentTable}
+                                    {currentFolder !== 'All Forms' && <span className="ml-2 text-sm text-blue-600 bg-blue-100 px-2 py-1 rounded">Folder: {currentFolder}</span>}
                                 </h2>
                                 
                                 {records.length === 0 ? (
@@ -712,13 +862,22 @@
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {(computedFields[currentTable] || []).map((cf, index) => (
                                             <div key={index} className="card relative">
-                                                <button 
-                                                    className="absolute top-3 right-3 text-red-500 hover:text-red-700" 
-                                                    onClick={() => deleteComputedField(index)}
-                                                    title="Delete Formula"
-                                                >
-                                                    <i className="fas fa-trash"></i>
-                                                </button>
+                                                <div className="absolute top-3 right-3 flex gap-2">
+                                                    <button 
+                                                        className="text-blue-500 hover:text-blue-700" 
+                                                        onClick={() => editComputedField(index)}
+                                                        title="Edit Formula"
+                                                    >
+                                                        <i className="fas fa-edit"></i>
+                                                    </button>
+                                                    <button 
+                                                        className="text-red-500 hover:text-red-700" 
+                                                        onClick={() => deleteComputedField(index)}
+                                                        title="Delete Formula"
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
                                                 <h4 className="font-medium text-blue-600">{cf.name}</h4>
                                                 <p className="text-sm text-gray-600 mt-1 font-mono bg-gray-100 p-2 rounded">{cf.formula}</p>
                                             </div>
@@ -779,6 +938,65 @@
                                 )}
                             </div>
                         )}
+                    </div>
+
+                    {/* Folder Modal */}
+                    <div className={`modal ${showFolderModal ? 'active' : ''}`}>
+                        <div className="modal-content">
+                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Create New Folder</h3>
+                            <input 
+                                id="newFolder" 
+                                placeholder="Folder Name" 
+                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 mb-4" 
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button 
+                                    className="btn btn-danger" 
+                                    onClick={() => setShowFolderModal(false)}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    className="btn btn-success" 
+                                    onClick={addNewFolder}
+                                >
+                                    Create Folder
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Formula Edit Modal */}
+                    <div className={`modal ${editingFormulaIndex !== null ? 'active' : ''}`}>
+                        <div className="modal-content">
+                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Edit Formula</h3>
+                            <input 
+                                value={formulaEditName} 
+                                onChange={(e) => setFormulaEditName(e.target.value)}
+                                placeholder="Field Name" 
+                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 mb-4" 
+                            />
+                            <input 
+                                value={formulaEditFormula} 
+                                onChange={(e) => setFormulaEditFormula(e.target.value)}
+                                placeholder="Formula e.g. [number] + 100" 
+                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 mb-4" 
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button 
+                                    className="btn btn-danger" 
+                                    onClick={() => setEditingFormulaIndex(null)}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    className="btn btn-success" 
+                                    onClick={saveEditedComputedField}
+                                >
+                                    Save Formula
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             );
