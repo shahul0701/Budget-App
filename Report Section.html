@@ -56,7 +56,13 @@ h1{text-align:center;margin-bottom:30px;}
 .email-section{background:white;border-radius:8px;padding:20px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.05);}
 .email-section h3{margin-top:0;}
 .email-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-#emailToggle{width:50px;height:24px;}
+.insights-section{background:#f8f9fa;border-radius:8px;padding:20px;margin-bottom:20px;border-left:4px solid #3498db;}
+.insight-item{margin-bottom:15px;padding:10px;background:white;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+.insight-header{display:flex;align-items:center;gap:10px;margin-bottom:5px;}
+.insight-icon{font-size:18px;}
+.insight-high{color:#e74c3c;}
+.insight-medium{color:#f39c12;}
+.insight-low{color:#2ecc71;}
 </style>
 </head>
 <body>
@@ -100,12 +106,10 @@ h1{text-align:center;margin-bottom:30px;}
 </div>
 
 <div class="email-section">
-<h3><i class="fas fa-envelope"></i> Monthly Email Reports</h3>
+<h3><i class="fas fa-envelope"></i> Monthly Report</h3>
 <div class="email-controls">
-<label>Enable Monthly Reports:
-<input type="checkbox" id="emailToggle">
-</label>
-<button id="testEmailBtn">Send Test Report</button>
+<button id="generateMonthlyBtn"><i class="fas fa-file-pdf"></i> Generate Monthly Report</button>
+<button id="emailReportBtn"><i class="fas fa-paper-plane"></i> Email This Report</button>
 </div>
 </div>
 
@@ -120,6 +124,11 @@ h1{text-align:center;margin-bottom:30px;}
 <div class="summary-card income"><div class="card-title">Total Income</div><div class="card-value" id="totalIncome">₹0.00</div></div>
 <div class="summary-card expenses"><div class="card-title">Total Expenses</div><div class="card-value" id="totalExpenses">₹0.00</div></div>
 <div class="summary-card net"><div class="card-title">Net Profit/Loss</div><div class="card-value" id="netProfit">₹0.00</div></div>
+</div>
+
+<div class="insights-section">
+<h3><i class="fas fa-lightbulb"></i> Spending Insights</h3>
+<div id="spendingInsights"></div>
 </div>
 
 <div class="chart-container">
@@ -145,9 +154,8 @@ h1{text-align:center;margin-bottom:30px;}
 <script type="module">
 // ===== Firebase =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, query, getDocs, orderBy, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, query, getDocs, orderBy, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 const app = initializeApp({
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -161,7 +169,6 @@ const app = initializeApp({
 
 const db = getFirestore(app);
 const auth = getAuth(app);
-const functions = getFunctions(app);
 
 // DOM Elements
 const usernameElem = document.getElementById("username");
@@ -182,13 +189,14 @@ const chartTypeSelect = document.getElementById("chartType");
 const exportCSVBtn = document.getElementById("exportCSV");
 const exportPDFBtn = document.getElementById("exportPDF");
 const loadingModal = document.getElementById("loadingModal");
-const emailToggle = document.getElementById("emailToggle");
-const testEmailBtn = document.getElementById("testEmailBtn");
+const generateMonthlyBtn = document.getElementById("generateMonthlyBtn");
+const emailReportBtn = document.getElementById("emailReportBtn");
+const spendingInsightsElem = document.getElementById("spendingInsights");
 
 let currentUser = null;
 let allTransactions = [];
 let profitLossChart = null;
-let userSettings = { monthlyReports: false };
+let currentReportData = null;
 
 // ===== Auth Listener =====
 onAuthStateChanged(auth, async user => {
@@ -198,14 +206,8 @@ onAuthStateChanged(auth, async user => {
         usernameElem.textContent = name;
         initialsElem.textContent = name.charAt(0).toUpperCase();
         
-        // Load user settings
-        await loadUserSettings();
-        
         setDefaultDates();
         generateReport();
-        
-        // Check if it's the first of the month and send report if enabled
-        checkAndSendMonthlyReport();
     } else {
         alert("Login first.");
         window.location.href = "index.html";
@@ -228,179 +230,10 @@ chartTypeSelect.addEventListener("change", () => {
 });
 exportCSVBtn.addEventListener("click", exportCSV);
 exportPDFBtn.addEventListener("click", exportPDF);
-emailToggle.addEventListener("change", updateEmailPreference);
-testEmailBtn.addEventListener("click", sendTestEmail);
+generateMonthlyBtn.addEventListener("click", generateMonthlyReport);
+emailReportBtn.addEventListener("click", emailReport);
 
-// ===== Email Settings =====
-async function loadUserSettings() {
-    try {
-        const settingsDoc = await getDoc(doc(db, "users", currentUser.uid, "preferences", "settings"));
-        if (settingsDoc.exists()) {
-            userSettings = settingsDoc.data();
-            emailToggle.checked = userSettings.monthlyReports || false;
-        }
-    } catch (error) {
-        console.error("Error loading user settings:", error);
-    }
-}
-
-async function updateEmailPreference() {
-    try {
-        userSettings.monthlyReports = emailToggle.checked;
-        await setDoc(doc(db, "users", currentUser.uid, "preferences", "settings"), userSettings);
-        
-        Swal.fire(
-            "Success", 
-            `Monthly reports ${emailToggle.checked ? "enabled" : "disabled"}`,
-            "success"
-        );
-    } catch (error) {
-        console.error("Error updating email preference:", error);
-        Swal.fire("Error", "Failed to update preference", "error");
-    }
-}
-
-async function sendTestEmail() {
-    loadingModal.style.display = "flex";
-    try {
-        // Use the last month's data for the test
-        const today = new Date();
-        const startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const endDate = new Date(today.getFullYear(), today.getMonth(), 0);
-        
-        const transactions = await loadTransactions(startDate, endDate);
-        const reportData = generateEmailData(transactions, startDate, endDate);
-        
-        // Call Cloud Function to send email
-        const sendEmail = httpsCallable(functions, 'sendMonthlyReport');
-        const result = await sendEmail({
-            email: currentUser.email,
-            reportData: reportData,
-            isTest: true
-        });
-        
-        Swal.fire("Success", "Test email sent successfully!", "success");
-    } catch (error) {
-        console.error("Error sending test email:", error);
-        Swal.fire("Error", "Failed to send test email: " + error.message, "error");
-    } finally {
-        loadingModal.style.display = "none";
-    }
-}
-
-function checkAndSendMonthlyReport() {
-    const today = new Date();
-    
-    // Check if it's the first day of the month and reports are enabled
-    if (today.getDate() === 1 && userSettings.monthlyReports) {
-        // Use the previous month's data
-        const startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const endDate = new Date(today.getFullYear(), today.getMonth(), 0);
-        
-        // Load transactions and send report
-        loadTransactions(startDate, endDate).then(transactions => {
-            if (transactions.length > 0) {
-                const reportData = generateEmailData(transactions, startDate, endDate);
-                
-                // Call Cloud Function to send email
-                const sendEmail = httpsCallable(functions, 'sendMonthlyReport');
-                sendEmail({
-                    email: currentUser.email,
-                    reportData: reportData,
-                    isTest: false
-                }).then(result => {
-                    console.log("Monthly report sent successfully");
-                }).catch(error => {
-                    console.error("Error sending monthly report:", error);
-                });
-            }
-        });
-    }
-}
-
-function generateEmailData(transactions, startDate, endDate) {
-    // Calculate totals
-    const totalIncome = transactions.filter(tx => parseFloat(tx.INCOME) > 0)
-        .reduce((s, tx) => s + parseFloat(tx.INCOME), 0);
-    const totalExpenses = transactions.filter(tx => parseFloat(tx.EXPENSE) > 0)
-        .reduce((s, tx) => s + parseFloat(tx.EXPENSE), 0);
-    const netProfit = totalIncome - totalExpenses;
-    
-    // Categorize transactions
-    const incomeByCategory = {};
-    const expensesByCategory = {};
-    
-    transactions.forEach(tx => {
-        if (parseFloat(tx.INCOME) > 0) {
-            const category = tx.ACCOUNT_HEADER || "Uncategorized Income";
-            incomeByCategory[category] = (incomeByCategory[category] || 0) + parseFloat(tx.INCOME);
-        }
-        
-        if (parseFloat(tx.EXPENSE) > 0) {
-            const category = tx.ACCOUNT_HEADER || "Uncategorized Expense";
-            expensesByCategory[category] = (expensesByCategory[category] || 0) + parseFloat(tx.EXPENSE);
-        }
-    });
-    
-    // Generate spending insights
-    const insights = generateSpendingInsights(expensesByCategory, totalExpenses);
-    
-    return {
-        period: `${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`,
-        totalIncome: totalIncome.toFixed(2),
-        totalExpenses: totalExpenses.toFixed(2),
-        netProfit: netProfit.toFixed(2),
-        incomeByCategory,
-        expensesByCategory,
-        insights
-    };
-}
-
-function generateSpendingInsights(expensesByCategory, totalExpenses) {
-    const insights = [];
-    
-    if (totalExpenses === 0) {
-        insights.push("No expenses recorded for this period.");
-        return insights;
-    }
-    
-    // Get categories sorted by amount (highest first)
-    const sortedCategories = Object.entries(expensesByCategory)
-        .sort((a, b) => b[1] - a[1]);
-    
-    // Top spending category
-    if (sortedCategories.length > 0) {
-        const [topCategory, amount] = sortedCategories[0];
-        const percentage = ((amount / totalExpenses) * 100).toFixed(1);
-        insights.push(`Your highest spending category was <strong>${topCategory}</strong> at ₹${amount.toFixed(2)} (${percentage}% of total expenses).`);
-    }
-    
-    // Compare to previous month (this would need additional data)
-    // For now, we'll just provide generic advice based on spending patterns
-    
-    // Check if any category is over 50% of total expenses
-    const highSpendCategories = sortedCategories.filter(([cat, amount]) => 
-        (amount / totalExpenses) >= 0.5);
-    
-    if (highSpendCategories.length > 0) {
-        insights.push(`<strong>Budget Alert:</strong> ${highSpendCategories.map(([cat]) => cat).join(', ')} account for more than 50% of your total expenses. Consider reviewing spending in these areas.`);
-    }
-    
-    // Check for many small categories vs few large ones
-    if (sortedCategories.length > 5) {
-        insights.push("Your expenses are spread across many categories. This might indicate diverse spending habits.");
-    } else {
-        insights.push("Your expenses are concentrated in a few categories. Consider whether this aligns with your budgeting goals.");
-    }
-    
-    // Net profit/loss insight
-    // This would need income data which we don't have in this function
-    // But we'll add a generic tip
-    insights.push("Review your income and expenses regularly to maintain a healthy financial balance.");
-    
-    return insights;
-}
-
+// ===== Set Default Dates =====
 function setDefaultDates() {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -518,9 +351,21 @@ async function generateReport() {
     netProfitElem.textContent = `₹${netProfit.toFixed(2)}`;
     netProfitElem.style.color = netProfit > 0 ? "#2ecc71" : netProfit < 0 ? "#e74c3c" : "#3498db";
 
+    // Store current report data for email
+    currentReportData = {
+        period: reportPeriodDisplay.textContent,
+        totalIncome,
+        totalExpenses,
+        netProfit,
+        transactions
+    };
+
     // Breakdown
     updateBreakdown(transactions, "INCOME", incomeBreakdownElem);
     updateBreakdown(transactions, "EXPENSE", expenseBreakdownElem);
+
+    // Insights
+    generateSpendingInsights(transactions);
 
     // Chart
     updateChart(transactions);
@@ -532,6 +377,7 @@ function resetReport() {
     netProfitElem.textContent = "₹0.00";
     incomeBreakdownElem.innerHTML = "";
     expenseBreakdownElem.innerHTML = "";
+    spendingInsightsElem.innerHTML = "";
     if (profitLossChart) {
         profitLossChart.destroy();
     }
@@ -553,6 +399,108 @@ function updateBreakdown(transactions, type, container) {
                 <div class="transaction-amount">₹${v.toFixed(2)}</div>
             </div>`
         ).join("");
+}
+
+function generateSpendingInsights(transactions) {
+    const expensesByCategory = {};
+    const expenses = transactions.filter(tx => parseFloat(tx.EXPENSE) > 0);
+    
+    expenses.forEach(tx => {
+        const category = tx.ACCOUNT_HEADER || "Uncategorized";
+        expensesByCategory[category] = (expensesByCategory[category] || 0) + parseFloat(tx.EXPENSE);
+    });
+    
+    const totalExpenses = expenses.reduce((sum, tx) => sum + parseFloat(tx.EXPENSE), 0);
+    
+    // Sort categories by amount (highest first)
+    const sortedCategories = Object.entries(expensesByCategory)
+        .sort((a, b) => b[1] - a[1]);
+    
+    spendingInsightsElem.innerHTML = "";
+    
+    if (sortedCategories.length === 0) {
+        spendingInsightsElem.innerHTML = '<p class="empty-state">No spending data available for insights.</p>';
+        return;
+    }
+    
+    // Top spending category
+    const [topCategory, topAmount] = sortedCategories[0];
+    const topPercentage = ((topAmount / totalExpenses) * 100).toFixed(1);
+    
+    let insightHTML = `
+        <div class="insight-item">
+            <div class="insight-header">
+                <i class="fas fa-chart-pie insight-high"></i>
+                <strong>Top Spending Category</strong>
+            </div>
+            <p>Your highest spending was on <strong>${topCategory}</strong> at ₹${topAmount.toFixed(2)} (${topPercentage}% of total expenses).</p>
+        </div>
+    `;
+    
+    // Check for high spending categories (>30% of total)
+    const highSpendCategories = sortedCategories.filter(([cat, amount]) => 
+        (amount / totalExpenses) >= 0.3);
+    
+    if (highSpendCategories.length > 0 && highSpendCategories[0][0] !== topCategory) {
+        insightHTML += `
+            <div class="insight-item">
+                <div class="insight-header">
+                    <i class="fas fa-exclamation-triangle insight-high"></i>
+                    <strong>High Spending Alert</strong>
+                </div>
+                <p>${highSpendCategories.map(([cat, amount]) => 
+                    `${cat} (${((amount / totalExpenses) * 100).toFixed(1)}% of expenses)`
+                ).join(', ')} account for a significant portion of your spending. Consider reviewing these areas.</p>
+            </div>
+        `;
+    }
+    
+    // Compare categories (if we have enough data)
+    if (sortedCategories.length >= 3) {
+        const [first, second, third] = sortedCategories;
+        insightHTML += `
+            <div class="insight-item">
+                <div class="insight-header">
+                    <i class="fas fa-balance-scale insight-medium"></i>
+                    <strong>Spending Distribution</strong>
+                </div>
+                <p>Your top 3 spending categories are: 
+                <strong>${first[0]}</strong> (${((first[1] / totalExpenses) * 100).toFixed(1)}%), 
+                <strong>${second[0]}</strong> (${((second[1] / totalExpenses) * 100).toFixed(1)}%), 
+                and <strong>${third[0]}</strong> (${((third[1] / totalExpenses) * 100).toFixed(1)}%).</p>
+            </div>
+        `;
+    }
+    
+    // Net profit insight
+    const totalIncome = transactions.filter(tx => parseFloat(tx.INCOME) > 0)
+        .reduce((sum, tx) => sum + parseFloat(tx.INCOME), 0);
+    const netProfit = totalIncome - totalExpenses;
+    const profitPercentage = totalIncome > 0 ? ((netProfit / totalIncome) * 100).toFixed(1) : 0;
+    
+    if (netProfit > 0) {
+        insightHTML += `
+            <div class="insight-item">
+                <div class="insight-header">
+                    <i class="fas fa-smile insight-low"></i>
+                    <strong>Positive Cash Flow</strong>
+                </div>
+                <p>Great job! You have a net profit of ₹${netProfit.toFixed(2)} (${profitPercentage}% of income).</p>
+            </div>
+        `;
+    } else {
+        insightHTML += `
+            <div class="insight-item">
+                <div class="insight-header">
+                    <i class="fas fa-exclamation-circle insight-high"></i>
+                    <strong>Negative Cash Flow</strong>
+                </div>
+                <p>Your expenses exceed your income by ₹${Math.abs(netProfit).toFixed(2)}. Consider reviewing your spending habits.</p>
+            </div>
+        `;
+    }
+    
+    spendingInsightsElem.innerHTML = insightHTML;
 }
 
 function updateChart(transactions) {
@@ -601,6 +549,59 @@ function updateChart(transactions) {
     });
 }
 
+// ===== Monthly Report =====
+async function generateMonthlyReport() {
+    const today = new Date();
+    const startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const endDate = new Date(today.getFullYear(), today.getMonth(), 0);
+    
+    reportPeriod.value = "lastMonth";
+    startDateInput.value = formatDate(startDate);
+    endDateInput.value = formatDate(endDate);
+    
+    await generateReport();
+    
+    // Create a more detailed PDF for monthly report
+    exportPDF(true);
+}
+
+// ===== Email Report =====
+function emailReport() {
+    if (!currentReportData || currentReportData.transactions.length === 0) {
+        Swal.fire("Info", "No report data to email. Generate a report first.", "info");
+        return;
+    }
+    
+    const { period, totalIncome, totalExpenses, netProfit, transactions } = currentReportData;
+    
+    // Create email content
+    const subject = `Financial Report: ${period}`;
+    
+    // Format transactions for email body
+    const transactionSummary = transactions.map(tx => 
+        `Date: ${tx.DATE}, Category: ${tx.ACCOUNT_HEADER || "Uncategorized"}, ` +
+        `Income: ₹${tx.INCOME || 0}, Expense: ₹${tx.EXPENSE || 0}, Notes: ${tx.NOTES || ""}`
+    ).join("\n");
+    
+    const body = `Financial Report: ${period}
+
+Income: ₹${totalIncome.toFixed(2)}
+Expenses: ₹${totalExpenses.toFixed(2)}
+Net: ₹${netProfit.toFixed(2)} ${netProfit >= 0 ? "(Profit)" : "(Loss)"}
+
+Transaction Summary:
+${transactionSummary}
+
+Generated by Budget App.
+`;
+    
+    // Create mailto link
+    const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    
+    // Open email client
+    window.location.href = mailtoLink;
+}
+
 // ===== Export =====
 function exportCSV() {
     if (allTransactions.length === 0) {
@@ -622,7 +623,7 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 }
 
-function exportPDF() {
+function exportPDF(isMonthly = false) {
     if (allTransactions.length === 0) {
         alert("No data to export.");
         return;
@@ -631,8 +632,10 @@ function exportPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
+    const reportTitle = isMonthly ? "Monthly Financial Report" : "Profit & Loss Report";
+    
     doc.setFontSize(18);
-    doc.text("Profit & Loss Report", 105, 15, null, null, "center");
+    doc.text(reportTitle, 105, 15, null, null, "center");
     doc.setFontSize(12);
     doc.text(`Generated for ${currentUser.email || "User"}`, 105, 23, null, null, "center");
     doc.text(reportPeriodDisplay.textContent, 105, 30, null, null, "center");
@@ -645,9 +648,19 @@ function exportPDF() {
     doc.text(`Total Expenses: ₹${totalExpensesElem.textContent.replace("₹", "")}`, 14, 60);
     doc.text(`Net Profit/Loss: ₹${netProfitElem.textContent.replace("₹", "")}`, 14, 67);
 
+    // Spending Insights
+    if (isMonthly) {
+        const insights = spendingInsightsElem.innerText;
+        if (insights) {
+            doc.text("Spending Insights", 14, 80);
+            const splitInsights = doc.splitTextToSize(insights, 180);
+            doc.text(splitInsights, 14, 88);
+        }
+    }
+
     // Transactions Table
     doc.autoTable({
-        startY: 75,
+        startY: isMonthly ? 110 : 75,
         head: [["Date", "Category", "Income", "Expense", "Notes"]],
         body: allTransactions.map(tx => [
             tx.DATE, 
@@ -659,7 +672,11 @@ function exportPDF() {
         theme: "grid"
     });
     
-    doc.save("ProfitLossReport.pdf");
+    const fileName = isMonthly ? 
+        `Monthly_Report_${new Date().getFullYear()}_${new Date().getMonth()}.pdf` : 
+        "ProfitLossReport.pdf";
+    
+    doc.save(fileName);
 }
 </script>
 </body>
