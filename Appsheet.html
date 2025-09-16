@@ -373,7 +373,6 @@
             border-left-color: #10b981;
         }
     </style>
-</head>
 <body class="bg-gray-50">
     <div id="root"></div>
     <script type="text/babel">
@@ -393,6 +392,14 @@
         // Initialize Firebase
         const app = firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
+        
+        // Enable persistence for offline support
+        db.enablePersistence()
+          .catch((err) => {
+              console.error("Persistence error:", err);
+          });
+        
+        // Sign in anonymously
         firebase.auth().signInAnonymously()
             .then(() => console.log("Signed in anonymously"))
             .catch(error => console.error("Anonymous auth error:", error));
@@ -459,11 +466,17 @@
                     setComputedFields(computedConfigs);
                 });
 
-                // Fetch folders
-                db.collection('folders').onSnapshot(snapshot => {
-                    const folderNames = snapshot.docs.map(doc => doc.id);
-                    setFolders(['All Forms', ...folderNames]);
-                });
+                // Fetch folders - FIXED: Handle errors and empty state
+                const foldersUnsubscribe = db.collection('folders').onSnapshot(
+                    snapshot => {
+                        const folderNames = snapshot.docs.map(doc => doc.id);
+                        setFolders(['All Forms', ...folderNames]);
+                    },
+                    error => {
+                        console.error("Error fetching folders:", error);
+                        setFolders(['All Forms']);
+                    }
+                );
                 
                 // Premium: Fetch dashboard widgets
                 db.collection('dashboards').doc(activeDashboard).collection('widgets').onSnapshot(snapshot => {
@@ -491,6 +504,10 @@
                 
                 // Premium: Load collaborators
                 loadCollaborators();
+                
+                return () => {
+                    foldersUnsubscribe();
+                };
             }, []);
 
             // Fetch records for current table
@@ -510,7 +527,10 @@
                     
                     // Premium: Check for automation triggers
                     checkAutomations(data);
+                }, error => {
+                    console.error("Error fetching records:", error);
                 });
+                
                 return () => unsubscribe.current && unsubscribe.current();
             }, [currentTable, currentFolder]);
 
@@ -557,7 +577,11 @@
                     db.collection('tables').doc(currentTable).set({ 
                         fields: newFields, 
                         computedFields: computedFields[currentTable] || [] 
-                    }, { merge: true });
+                    }, { merge: true })
+                    .catch(error => {
+                        console.error("Error saving field:", error);
+                        addNotification('error', 'Failed to save field.');
+                    });
                     
                     // Premium: Save to version history
                     saveToVersionHistory(`Added ${dragField} field to ${currentTable}`);
@@ -574,7 +598,11 @@
                 db.collection('tables').doc(currentTable).set({ 
                     fields: newFields, 
                     computedFields: computedFields[currentTable] || [] 
-                }, { merge: true });
+                }, { merge: true })
+                .catch(error => {
+                    console.error("Error deleting field:", error);
+                    addNotification('error', 'Failed to delete field.');
+                });
                 
                 // Premium: Save to version history
                 saveToVersionHistory(`Removed ${deletedField.type} field from ${currentTable}`);
@@ -595,7 +623,11 @@
                 db.collection('tables').doc(currentTable).set({ 
                     fields: newFields, 
                     computedFields: computedFields[currentTable] || [] 
-                }, { merge: true });
+                }, { merge: true })
+                .catch(error => {
+                    console.error("Error updating field:", error);
+                    addNotification('error', 'Failed to update field.');
+                });
                 
                 // Premium: Save to version history
                 saveToVersionHistory(`Renamed field from ${oldLabel} to ${newLabel} in ${currentTable}`);
@@ -610,7 +642,11 @@
                 db.collection('tables').doc(currentTable).set({ 
                     fields: newFields, 
                     computedFields: computedFields[currentTable] || [] 
-                }, { merge: true });
+                }, { merge: true })
+                .catch(error => {
+                    console.error("Error updating field type:", error);
+                    addNotification('error', 'Failed to update field type.');
+                });
                 
                 // Premium: Save to version history
                 saveToVersionHistory(`Changed ${fieldName} field type to ${newType} in ${currentTable}`);
@@ -668,7 +704,11 @@
                     db.collection('tables').doc(currentTable).set({ 
                         fields: tableFields[currentTable] || [], 
                         computedFields: newComputed 
-                    }, { merge: true });
+                    }, { merge: true })
+                    .catch(error => {
+                        console.error("Error adding computed field:", error);
+                        addNotification('error', 'Failed to add computed field.');
+                    });
                     
                     // Premium: Save to version history
                     saveToVersionHistory(`Added computed field ${name} to ${currentTable}`);
@@ -718,7 +758,11 @@
                     db.collection('tables').doc(currentTable).set({ 
                         fields: tableFields[currentTable] || [], 
                         computedFields: newComputed 
-                    }, { merge: true });
+                    }, { merge: true })
+                    .catch(error => {
+                        console.error("Error updating computed field:", error);
+                        addNotification('error', 'Failed to update computed field.');
+                    });
                     
                     // Premium: Save to version history
                     saveToVersionHistory(`Updated computed field ${oldName} in ${currentTable}`);
@@ -758,7 +802,11 @@
                 db.collection('tables').doc(currentTable).set({ 
                     fields: tableFields[currentTable] || [], 
                     computedFields: newComputed 
-                }, { merge: true });
+                }, { merge: true })
+                .catch(error => {
+                    console.error("Error deleting computed field:", error);
+                    addNotification('error', 'Failed to delete computed field.');
+                });
                 
                 // Premium: Save to version history
                 saveToVersionHistory(`Removed computed field ${deletedField.name} from ${currentTable}`);
@@ -772,7 +820,11 @@
                     setTableFields({ ...tableFields, [name]: [] });
                     setComputedFields({ ...computedFields, [name]: [] });
                     setCurrentTable(name);
-                    db.collection('tables').doc(name).set({ fields: [], computedFields: [] });
+                    db.collection('tables').doc(name).set({ fields: [], computedFields: [] })
+                    .catch(error => {
+                        console.error("Error creating table:", error);
+                        addNotification('error', 'Failed to create table.');
+                    });
                     document.getElementById('newTable').value = '';
                     
                     // Premium: Save to version history
@@ -822,7 +874,7 @@
                 }
             };
 
-            // Add new folder
+            // Add new folder - FIXED: Error handling
             const addNewFolder = () => {
                 const name = document.getElementById('newFolder').value.trim();
                 if (name && !folders.includes(name)) {
@@ -840,7 +892,7 @@
                         })
                         .catch(error => {
                             console.error("Error adding folder:", error);
-                            addNotification('error', 'Failed to create folder.');
+                            addNotification('error', 'Failed to create folder. Check security rules.');
                         });
                 }
             };
@@ -1029,6 +1081,9 @@
                 db.collection('versionHistory').add({
                     ...version,
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                })
+                .catch(error => {
+                    console.error("Error saving to version history:", error);
                 });
             };
 
@@ -1040,6 +1095,8 @@
                     .onSnapshot(snapshot => {
                         const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         setVersionHistory(history);
+                    }, error => {
+                        console.error("Error loading version history:", error);
                     });
             };
 
@@ -1048,6 +1105,8 @@
                 db.collection('collaborators').onSnapshot(snapshot => {
                     const collabs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setCollaborators(collabs);
+                }, error => {
+                    console.error("Error loading collaborators:", error);
                 });
             };
 
@@ -1080,7 +1139,11 @@
                 db.collection('tables').doc(currentTable).set({ 
                     fields: newFields, 
                     computedFields: computedFields[currentTable] || [] 
-                }, { merge: true });
+                }, { merge: true })
+                .catch(error => {
+                    console.error("Error applying template:", error);
+                    addNotification('error', 'Failed to apply template.');
+                });
                 
                 setShowTemplateModal(false);
                 addNotification('success', `Template "${template.name}" applied!`);
@@ -1705,8 +1768,7 @@
                                             value={activeDashboard} 
                                             onChange={(e) => setActiveDashboard(e.target.value)}
                                             className="p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            {dashboards.map(d => <option key={d} value={d}>{d}</option>)}
+                                                                                        {dashboards.map(d => <option key={d} value={d}>{d}</option>)}
                                         </select>
                                         <button className="btn btn-premium">
                                             <i className="fas fa-plus mr-1"></i>New Dashboard
