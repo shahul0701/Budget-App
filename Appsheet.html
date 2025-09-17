@@ -445,6 +445,7 @@
             const [automationRules, setAutomationRules] = useState([]);
             const [showAutomationModal, setShowAutomationModal] = useState(false);
             const [newAutomation, setNewAutomation] = useState({ trigger: '', condition: '', action: '' });
+            const [editingAutomation, setEditingAutomation] = useState(null);
             const [aiSuggestions, setAiSuggestions] = useState([]);
             const [darkMode, setDarkMode] = useState(false);
             const [collaborators, setCollaborators] = useState([]);
@@ -485,6 +486,12 @@
                     setFolders(['All Forms', ...folderNames]);
                 });
                 
+                // Premium: Fetch dashboards
+                db.collection('dashboards').onSnapshot(snapshot => {
+                    const dashboardNames = snapshot.docs.map(doc => doc.id);
+                    setDashboards(dashboardNames.length > 0 ? dashboardNames : ['default']);
+                });
+                
                 // Premium: Fetch dashboard widgets
                 db.collection('dashboards').doc(activeDashboard).collection('widgets').onSnapshot(snapshot => {
                     const widgets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -500,7 +507,34 @@
                 // Premium: Fetch templates
                 db.collection('templates').onSnapshot(snapshot => {
                     const templateData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setTemplates(templateData);
+                    if (snapshot.empty) {
+                        // Add default templates if none exist
+                        const defaultTemplates = [
+                            {
+                                name: 'Invoice',
+                                description: 'Basic invoice template',
+                                fields: [
+                                    { type: 'text', label: 'Customer Name', id: Date.now().toString() + '1' },
+                                    { type: 'number', label: 'Amount', id: Date.now().toString() + '2' },
+                                    { type: 'date', label: 'Date', id: Date.now().toString() + '3' }
+                                ]
+                            },
+                            {
+                                name: 'Todo List',
+                                description: 'Simple task management',
+                                fields: [
+                                    { type: 'text', label: 'Task', id: Date.now().toString() + '4' },
+                                    { type: 'checkbox', label: 'Completed', id: Date.now().toString() + '5' },
+                                    { type: 'date', label: 'Due Date', id: Date.now().toString() + '6' }
+                                ]
+                            }
+                        ];
+                        setTemplates(defaultTemplates);
+                        // Optionally save to DB
+                        defaultTemplates.forEach(temp => db.collection('templates').add(temp));
+                    } else {
+                        setTemplates(templateData);
+                    }
                 });
                 
                 // Premium: Generate AI suggestions
@@ -511,7 +545,7 @@
                 
                 // Premium: Load collaborators
                 loadCollaborators();
-            }, []);
+            }, [activeDashboard]);
 
             // Fetch records for current table
             useEffect(() => {
@@ -990,6 +1024,24 @@
                 { value: 'range', label: 'Range', icon: 'sliders' }
             ];
 
+            // Premium: Add new dashboard
+            const addNewDashboard = () => {
+                const name = prompt('Enter new dashboard name:');
+                if (name && !dashboards.includes(name)) {
+                    db.collection('dashboards').doc(name).set({})
+                        .then(() => {
+                            setDashboards([...dashboards, name]);
+                            setActiveDashboard(name);
+                            addNotification('success', `Dashboard "${name}" created!`);
+                            saveToVersionHistory(`Created new dashboard: ${name}`);
+                        })
+                        .catch(error => {
+                            console.error("Error creating dashboard:", error);
+                            addNotification('error', 'Failed to create dashboard.');
+                        });
+                }
+            };
+
             // Premium: Add dashboard widget
             const addDashboardWidget = (type) => {
                 const newWidget = {
@@ -1008,6 +1060,21 @@
                         console.error("Error adding widget:", error);
                         addNotification('error', 'Failed to add widget.');
                     });
+            };
+
+            // Premium: Delete dashboard widget
+            const deleteDashboardWidget = (id) => {
+                if (window.confirm('Are you sure you want to delete this widget?')) {
+                    db.collection('dashboards').doc(activeDashboard).collection('widgets').doc(id).delete()
+                        .then(() => {
+                            addNotification('success', 'Widget deleted!');
+                            saveToVersionHistory('Deleted widget from dashboard');
+                        })
+                        .catch(error => {
+                            console.error("Error deleting widget:", error);
+                            addNotification('error', 'Failed to delete widget.');
+                        });
+                }
             };
 
             // Premium: Add automation rule
@@ -1031,6 +1098,42 @@
                 }
             };
 
+            // Premium: Save edited automation
+            const saveEditedAutomation = () => {
+                if (editingAutomation.trigger && editingAutomation.condition && editingAutomation.action) {
+                    db.collection('automations').doc(editingAutomation.id).update({
+                        trigger: editingAutomation.trigger,
+                        condition: editingAutomation.condition,
+                        action: editingAutomation.action,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    })
+                    .then(() => {
+                        setEditingAutomation(null);
+                        addNotification('success', 'Automation rule updated!');
+                        saveToVersionHistory(`Updated automation rule for ${currentTable}`);
+                    })
+                    .catch(error => {
+                        console.error("Error updating automation:", error);
+                        addNotification('error', 'Failed to update automation rule.');
+                    });
+                }
+            };
+
+            // Premium: Delete automation rule
+            const deleteAutomationRule = (id) => {
+                if (window.confirm('Are you sure you want to delete this automation rule?')) {
+                    db.collection('automations').doc(id).delete()
+                        .then(() => {
+                            addNotification('success', 'Automation rule deleted!');
+                            saveToVersionHistory('Deleted automation rule');
+                        })
+                        .catch(error => {
+                            console.error("Error deleting automation:", error);
+                            addNotification('error', 'Failed to delete automation rule.');
+                        });
+                }
+            };
+
             // Premium: Check for automation triggers
             const checkAutomations = (records) => {
                 automationRules.forEach(rule => {
@@ -1040,7 +1143,8 @@
                             // This is a simplified condition check
                             // In a real app, you'd parse the condition properly
                             try {
-                                return new Function('return ' + rule.condition.replace(/\[(.*?)\]/g, (match, f) => `record.${f}`))();
+                                const func = new Function('record', `return ${rule.condition.replace(/\[(.*?)\]/g, (match, f) => `record["${f}"]`)};`);
+                                return func(record);
                             } catch (err) {
                                 console.error("Error evaluating automation condition:", err);
                                 return false;
@@ -1048,9 +1152,9 @@
                         });
                         
                         if (matchingRecords.length > 0) {
-                            // Trigger the action
-                            console.log(`Automation triggered: ${rule.action}`);
-                            addNotification('info', `Automation triggered: ${rule.action}`);
+                            // Trigger the action (mocked for demo - in real, integrate with email/Slack/etc.)
+                            console.log(`Automation triggered: ${rule.action} for ${matchingRecords.length} records`);
+                            addNotification('info', `Automation "${rule.action}" triggered for ${matchingRecords.length} records!`);
                         }
                     }
                 });
@@ -1072,17 +1176,12 @@
             const saveToVersionHistory = (action) => {
                 const version = {
                     action,
-                    timestamp: new Date(),
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     user: 'You'
                 };
                 
-                setVersionHistory(prev => [version, ...prev.slice(0, 49)]); // Keep last 50 items
-                
-                // Save to Firebase
-                db.collection('versionHistory').add({
-                    ...version,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                db.collection('versionHistory').add(version)
+                    .catch(error => console.error("Error saving version history:", error));
             };
 
             // Premium: Load version history
@@ -1124,6 +1223,20 @@
                 }
             };
 
+            // Premium: Delete collaborator
+            const deleteCollaborator = (id) => {
+                if (window.confirm('Are you sure you want to remove this collaborator?')) {
+                    db.collection('collaborators').doc(id).delete()
+                        .then(() => {
+                            addNotification('success', 'Collaborator removed!');
+                        })
+                        .catch(error => {
+                            console.error("Error deleting collaborator:", error);
+                            addNotification('error', 'Failed to remove collaborator.');
+                        });
+                }
+            };
+
             // Premium: Apply template
             const applyTemplate = (template) => {
                 // Apply template fields to current table
@@ -1150,7 +1263,7 @@
                     // Convert to CSV
                     const headers = allFields.join(',');
                     const rows = records.map(record => 
-                        allFields.map(field => `"${record[field] || ''}"`).join(',')
+                        allFields.map(field => `"${(record[field] || '').toString().replace(/"/g, '""')}"`).join(',')
                     );
                     dataStr = [headers, ...rows].join('\n');
                     fileExtension = 'csv';
@@ -1179,7 +1292,7 @@
 
             // Premium: Generate API endpoint
             const generateApiEndpoint = () => {
-                const endpoint = `https://yourapi.com/data/${currentTable}`;
+                const endpoint = `https://yourapi.com/data/${currentTable}`; // Mock - replace with real API if available
                 setApiEndpoint(endpoint);
                 setShowApiModal(true);
                 
@@ -1225,6 +1338,11 @@
                 setFieldEditValue('');
             };
 
+            // Handle editing automation changes
+            const handleAutomationChange = (field, value) => {
+                setEditingAutomation(prev => ({ ...prev, [field]: value }));
+            };
+
             return (
                 <div className="container mx-auto p-4 sm:p-6 bg-gray-50 min-h-screen">
                     {/* Notifications */}
@@ -1233,6 +1351,7 @@
                             <div key={notification.id} className={`p-4 rounded-lg shadow-lg border-l-4 ${
                                 notification.type === 'success' ? 'bg-green-100 border-green-500 text-green-700' :
                                 notification.type === 'error' ? 'bg-red-100 border-red-500 text-red-700' :
+                                notification.type === 'warning' ? 'bg-yellow-100 border-yellow-500 text-yellow-700' :
                                 'bg-blue-100 border-blue-500 text-blue-700'
                             }`}>
                                 <div className="flex justify-between items-center">
@@ -1702,7 +1821,7 @@
                                                     <div key={idx} className="version-history-item">
                                                         <div className="text-sm font-medium">{version.action}</div>
                                                         <div className="text-xs text-gray-500">
-                                                            {version.user} • {version.timestamp.toDate ? version.timestamp.toDate().toLocaleString() : new Date(version.timestamp).toLocaleString()}
+                                                            {version.user} • {version.timestamp?.toDate ? version.timestamp.toDate().toLocaleString() : 'Recent'}
                                                         </div>
                                                     </div>
                                                 ))
@@ -1802,363 +1921,423 @@
                                         <div className="card text-center py-10 text-gray-500">
                                             <i className="fas fa-chart-bar text-4xl mb-3"></i>
                                             <p>Select X and Y axis fields to generate a chart</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                    
-                    {activeTab === 'dashboard' && (
-                        <div>
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-semibold text-gray-800">
-                                    <i className="fas fa-gauge-high mr-2"></i>Dashboard <span className="premium-badge">PREMIUM</span>
-                                </h2>
-                                <div className="flex space-x-2">
-                                    <select 
-                                        value={activeDashboard} 
-                                        onChange={(e) => setActiveDashboard(e.target.value)}
-                                        className="p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        {dashboards.map(d => <option key={d} value={d}>{d}</option>)}
-                                    </select>
-                                    <button className="btn btn-premium">
-                                        <i className="fas fa-plus mr-1"></i>New Dashboard
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                                <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('summary')}>
-                                    <i className="fas fa-chart-pie text-3xl text-blue-500 mb-2"></i>
-                                    <h3 className="font-medium">Summary Widget</h3>
-                                    <p className="text-sm text-gray-500">Add key metrics</p>
-                                </div>
-                                <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('chart')}>
-                                    <i className="fas fa-chart-line text-3xl text-green-500 mb-2"></i>
-                                    <h3 className="font-medium">Chart Widget</h3>
-                                    <p className="text-sm text-gray-500">Visualize your data</p>
-                                </div>
-                                <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('table')}>
-                                    <i className="fas fa-table text-3xl text-purple-500 mb-2"></i>
-                                    <h3 className="font-medium">Table Widget</h3>
-                                    <p className="text-sm text-gray-500">Show data in table format</p>
-                                </div>
-                            </div>
-                            
-                            <h3 className="text-lg font-semibold text-gray-700 mb-4">Your Dashboard Widgets</h3>
-                            
-                            {dashboardWidgets.length > 0 ? (
-                                <div className="dashboard-grid">
-                                    {dashboardWidgets.map(widget => (
-                                        <div key={widget.id} className="dashboard-widget">
-                                            <div className="widget-actions">
-                                                <button className="text-red-500 hover:text-red-700">
-                                                    <i className="fas fa-times"></i>
-                                                </button>
-                                            </div>
-                                            <h4 className="font-medium mb-2">{widget.title}</h4>
-                                            <div className="bg-gray-100 rounded-lg p-4 text-center">
-                                                <i className="fas fa-cog text-2xl text-gray-400 mb-2"></i>
-                                                <p className="text-sm text-gray-500">Configure your {widget.type} widget</p>
-                                            </div>
                                         </div>
-                                    ))}
+                                    )}
                                 </div>
-                            ) : (
-                                <div className="card text-center py-10 text-gray-500">
-                                    <i className="fas fa-gauge-high text-4xl mb-3"></i>
-                                    <p>Your dashboard is empty. Add widgets to get started.</p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    
-                    {activeTab === 'automations' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2">
+                            </div>
+                        )}
+                        
+                        {activeTab === 'dashboard' && (
+                            <div>
                                 <div className="flex justify-between items-center mb-4">
                                     <h2 className="text-xl font-semibold text-gray-800">
-                                        <i className="fas fa-robot mr-2"></i>Automation Rules <span className="premium-badge">PREmium</span>
+                                        <i className="fas fa-gauge-high mr-2"></i>Dashboard <span className="premium-badge">PREMIUM</span>
                                     </h2>
-                                    <button className="btn btn-premium" onClick={() => setShowAutomationModal(true)}>
-                                        <i className="fas fa-plus mr-1"></i>New Automation
-                                    </button>
+                                    <div className="flex space-x-2">
+                                        <select 
+                                            value={activeDashboard} 
+                                            onChange={(e) => setActiveDashboard(e.target.value)}
+                                            className="p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            {dashboards.map(d => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                        <button className="btn btn-premium" onClick={addNewDashboard}>
+                                            <i className="fas fa-plus mr-1"></i>New Dashboard
+                                        </button>
+                                    </div>
                                 </div>
                                 
-                                {automationRules.length > 0 ? (
-                                    <div className="space-y-4">
-                                        {automationRules.map((rule, index) => (
-                                            <div key={index} className="automation-card">
-                                                <div className="flex justify-between items-start">
-                                                    <div>
-                                                        <h4 className="font-medium">{rule.trigger} → {rule.action}</h4>
-                                                        <p className="text-sm text-gray-600">When: {rule.condition}</p>
-                                                        <p className="text-xs text-gray-500">Table: {rule.table}</p>
-                                                    </div>
-                                                    <div className="flex space-x-2">
-                                                        <button className="text-blue-500 hover:text-blue-700">
-                                                            <i className="fas fa-edit"></i>
-                                                        </button>
-                                                        <button className="text-red-500 hover:text-red-700">
-                                                            <i className="fas fa-trash"></i>
-                                                        </button>
-                                                    </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                                    <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('summary')}>
+                                        <i className="fas fa-chart-pie text-3xl text-blue-500 mb-2"></i>
+                                        <h3 className="font-medium">Summary Widget</h3>
+                                        <p className="text-sm text-gray-500">Add key metrics</p>
+                                    </div>
+                                    <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('chart')}>
+                                        <i className="fas fa-chart-line text-3xl text-green-500 mb-2"></i>
+                                        <h3 className="font-medium">Chart Widget</h3>
+                                        <p className="text-sm text-gray-500">Visualize your data</p>
+                                    </div>
+                                    <div className="card cursor-pointer hover:bg-gray-50 text-center py-6" onClick={() => addDashboardWidget('table')}>
+                                        <i className="fas fa-table text-3xl text-purple-500 mb-2"></i>
+                                        <h3 className="font-medium">Table Widget</h3>
+                                        <p className="text-sm text-gray-500">Show data in table format</p>
+                                    </div>
+                                </div>
+                                
+                                <h3 className="text-lg font-semibold text-gray-700 mb-4">Your Dashboard Widgets</h3>
+                                
+                                {dashboardWidgets.length > 0 ? (
+                                    <div className="dashboard-grid">
+                                        {dashboardWidgets.map(widget => (
+                                            <div key={widget.id} className="dashboard-widget">
+                                                <div className="widget-actions flex space-x-2">
+                                                    <button className="text-red-500 hover:text-red-700" onClick={() => deleteDashboardWidget(widget.id)}>
+                                                        <i className="fas fa-times"></i>
+                                                    </button>
+                                                </div>
+                                                <h4 className="font-medium mb-2">{widget.title}</h4>
+                                                <div className="bg-gray-100 rounded-lg p-4 text-center">
+                                                    <i className="fas fa-cog text-2xl text-gray-400 mb-2"></i>
+                                                    <p className="text-sm text-gray-500">Configure your {widget.type} widget</p>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
                                     <div className="card text-center py-10 text-gray-500">
-                                        <i className="fas fa-robot text-4xl mb-3"></i>
-                                        <p>No automation rules yet. Create one to get started.</p>
+                                        <i className="fas fa-gauge-high text-4xl mb-3"></i>
+                                        <p>Your dashboard is empty. Add widgets to get started.</p>
                                     </div>
                                 )}
                             </div>
-                            
-                            <div className="lg:col-span-1">
-                                <div className="card">
-                                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Collaborators</h3>
-                                    <div className="space-y-3 mb-4">
-                                        {collaborators.map((collab, index) => (
-                                            <div key={index} className="flex items-center">
-                                                <div className="collaborator-avatar">
-                                                    {collab.email.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <div className="font-medium">{collab.email}</div>
-                                                    <div className="text-xs text-gray-500">{collab.role}</div>
-                                                </div>
-                                            </div>
-                                        ))}
+                        )}
+                        
+                        {activeTab === 'automations' && (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div className="lg:col-span-2">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-xl font-semibold text-gray-800">
+                                            <i className="fas fa-robot mr-2"></i>Automation Rules <span className="premium-badge">PREMIUM</span>
+                                        </h2>
+                                        <button className="btn btn-premium" onClick={() => setShowAutomationModal(true)}>
+                                            <i className="fas fa-plus mr-1"></i>New Automation
+                                        </button>
                                     </div>
-                                    <button 
-                                        className="btn btn-primary w-full"
-                                        onClick={() => setShowCollaboratorModal(true)}
-                                    >
-                                        <i className="fas fa-plus mr-1"></i>Add Collaborator
-                                    </button>
+                                    
+                                    {automationRules.length > 0 ? (
+                                        <div className="space-y-4">
+                                            {automationRules.map((rule) => (
+                                                <div key={rule.id} className="automation-card">
+                                                    {editingAutomation && editingAutomation.id === rule.id ? (
+                                                        <div>
+                                                            <div className="space-y-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
+                                                                    <select 
+                                                                        value={editingAutomation.trigger} 
+                                                                        onChange={(e) => handleAutomationChange('trigger', e.target.value)}
+                                                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                                                                    >
+                                                                        <option value="">Select Trigger</option>
+                                                                        <option value="New Record">New Record Created</option>
+                                                                        <option value="Record Updated">Record Updated</option>
+                                                                        <option value="Field Changed">Field Value Changed</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+                                                                    <input 
+                                                                        type="text" 
+                                                                        value={editingAutomation.condition} 
+                                                                        onChange={(e) => handleAutomationChange('condition', e.target.value)}
+                                                                        placeholder="e.g., Status == 'Completed'"
+                                                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
+                                                                    <select 
+                                                                        value={editingAutomation.action} 
+                                                                        onChange={(e) => handleAutomationChange('action', e.target.value)}
+                                                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                                                                    >
+                                                                        <option value="">Select Action</option>
+                                                                        <option value="Send Email">Send Email</option>
+                                                                        <option value="Send Notification">Send Notification</option>
+                                                                        <option value="Update Record">Update Record</option>
+                                                                        <option value="Create Task">Create Task</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex space-x-2 mt-4">
+                                                                <button className="btn btn-success" onClick={saveEditedAutomation}>
+                                                                    <i className="fas fa-save mr-1"></i>Save
+                                                                </button>
+                                                                <button className="btn btn-danger" onClick={() => setEditingAutomation(null)}>
+                                                                    <i className="fas fa-times mr-1"></i>Cancel
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex justify-between items-start">
+                                                            <div>
+                                                                <h4 className="font-medium">{rule.trigger} → {rule.action}</h4>
+                                                                <p className="text-sm text-gray-600">When: {rule.condition}</p>
+                                                                <p className="text-xs text-gray-500">Table: {rule.table}</p>
+                                                            </div>
+                                                            <div className="flex space-x-2">
+                                                                <button className="text-blue-500 hover:text-blue-700" onClick={() => setEditingAutomation(rule)}>
+                                                                    <i className="fas fa-edit"></i>
+                                                                </button>
+                                                                <button className="text-red-500 hover:text-red-700" onClick={() => deleteAutomationRule(rule.id)}>
+                                                                    <i className="fas fa-trash"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="card text-center py-10 text-gray-500">
+                                            <i className="fas fa-robot text-4xl mb-3"></i>
+                                            <p>No automation rules yet. Create one to get started.</p>
+                                        </div>
+                                    )}
                                 </div>
                                 
-                                <div className="card mt-6">
-                                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Automation Ideas</h3>
-                                    <ul className="space-y-2 text-sm text-gray-600">
-                                        <li>• Send email when a new record is added</li>
-                                        <li>• Create Slack notification when field value changes</li>
-                                        <li>• Update related record when condition is met</li>
-                                        <li>• Generate PDF report on schedule</li>
-                                        <li>• Send SMS alert for important changes</li>
-                                    </ul>
+                                <div className="lg:col-span-1">
+                                    <div className="card">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3">Collaborators</h3>
+                                        <div className="space-y-3 mb-4">
+                                            {collaborators.map((collab) => (
+                                                <div key={collab.id} className="flex items-center justify-between">
+                                                    <div className="flex items-center">
+                                                        <div className="collaborator-avatar">
+                                                            {collab.email.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <div className="font-medium">{collab.email}</div>
+                                                            <div className="text-xs text-gray-500">{collab.role}</div>
+                                                        </div>
+                                                    </div>
+                                                    <button 
+                                                        className="text-red-500 hover:text-red-700"
+                                                        onClick={() => deleteCollaborator(collab.id)}
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button 
+                                            className="btn btn-primary w-full"
+                                            onClick={() => setShowCollaboratorModal(true)}
+                                        >
+                                            <i className="fas fa-plus mr-1"></i>Add Collaborator
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="card mt-6">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3">Automation Ideas</h3>
+                                        <ul className="space-y-2 text-sm text-gray-600">
+                                            <li>• Send email when a new record is added</li>
+                                            <li>• Create Slack notification when field value changes</li>
+                                            <li>• Update related record when condition is met</li>
+                                            <li>• Generate PDF report on schedule</li>
+                                            <li>• Send SMS alert for important changes</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Folder Modal */}
+                    {showFolderModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Create New Folder</h3>
+                                <input 
+                                    id="newFolder" 
+                                    type="text" 
+                                    placeholder="Folder Name" 
+                                    className="w-full p-2 border rounded mb-4 focus:ring-2 focus:ring-blue-500" 
+                                />
+                                <div className="flex justify-end space-x-2">
+                                    <button className="btn btn-danger" onClick={() => setShowFolderModal(false)}>
+                                        Cancel
+                                    </button>
+                                    <button className="btn btn-primary" onClick={addNewFolder}>
+                                        Create Folder
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Automation Modal */}
+                    {showAutomationModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Create New Automation</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
+                                        <select 
+                                            value={newAutomation.trigger} 
+                                            onChange={(e) => setNewAutomation({...newAutomation, trigger: e.target.value})}
+                                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">Select Trigger</option>
+                                            <option value="New Record">New Record Created</option>
+                                            <option value="Record Updated">Record Updated</option>
+                                            <option value="Field Changed">Field Value Changed</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+                                        <input 
+                                            type="text" 
+                                            value={newAutomation.condition} 
+                                            onChange={(e) => setNewAutomation({...newAutomation, condition: e.target.value})}
+                                            placeholder="e.g., Status == 'Completed'"
+                                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
+                                        <select 
+                                            value={newAutomation.action} 
+                                            onChange={(e) => setNewAutomation({...newAutomation, action: e.target.value})}
+                                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">Select Action</option>
+                                            <option value="Send Email">Send Email</option>
+                                            <option value="Send Notification">Send Notification</option>
+                                            <option value="Update Record">Update Record</option>
+                                            <option value="Create Task">Create Task</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end space-x-2 mt-6">
+                                    <button className="btn btn-danger" onClick={() => setShowAutomationModal(false)}>
+                                        Cancel
+                                    </button>
+                                    <button className="btn btn-primary" onClick={addAutomationRule}>
+                                        Create Automation
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Collaborator Modal */}
+                    {showCollaboratorModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Collaborator</h3>
+                                <input 
+                                    type="email" 
+                                    value={newCollaborator} 
+                                    onChange={(e) => setNewCollaborator(e.target.value)}
+                                    placeholder="Email address" 
+                                    className="w-full p-2 border rounded mb-4 focus:ring-2 focus:ring-blue-500" 
+                                />
+                                <div className="flex justify-end space-x-2">
+                                    <button className="btn btn-danger" onClick={() => setShowCollaboratorModal(false)}>
+                                        Cancel
+                                    </button>
+                                    <button className="btn btn-primary" onClick={addCollaborator}>
+                                        Add Collaborator
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Template Modal */}
+                    {showTemplateModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Apply Template</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+                                    {templates.length > 0 ? (
+                                        templates.map(template => (
+                                            <div key={template.id || template.name} className="template-card" onClick={() => applyTemplate(template)}>
+                                                <div className="template-thumb">
+                                                    <i className="fas fa-layer-group"></i>
+                                                </div>
+                                                <div className="template-content">
+                                                    <h4 className="font-medium">{template.name}</h4>
+                                                    <p className="text-sm text-gray-600">{template.description}</p>
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="col-span-2 text-center py-6 text-gray-500">
+                                            <i className="fas fa-file-alt text-3xl mb-3"></i>
+                                            <p>No templates available yet.</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex justify-end mt-6">
+                                    <button className="btn btn-danger" onClick={() => setShowTemplateModal(false)}>
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Export Modal */}
+                    {showExportModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Export Data</h3>
+                                <div className="space-y-3">
+                                    <div 
+                                        className={`export-option ${exportFormat === 'csv' ? 'border-blue-500 bg-blue-50' : ''}`}
+                                        onClick={() => setExportFormat('csv')}
+                                    >
+                                        <div className="flex items-center">
+                                            <i className="fas fa-file-csv text-2xl text-green-500 mr-3"></i>
+                                            <div>
+                                                <h4 className="font-medium">CSV Format</h4>
+                                                <p className="text-sm text-gray-600">Comma-separated values, ideal for spreadsheets</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div 
+                                        className={`export-option ${exportFormat === 'json' ? 'border-blue-500 bg-blue-50' : ''}`}
+                                        onClick={() => setExportFormat('json')}
+                                    >
+                                        <div className="flex items-center">
+                                            <i className="fas fa-file-code text-2xl text-yellow-500 mr-3"></i>
+                                            <div>
+                                                <h4 className="font-medium">JSON Format</h4>
+                                                <p className="text-sm text-gray-600">JavaScript Object Notation, ideal for developers</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end space-x-2 mt-6">
+                                    <button className="btn btn-danger" onClick={() => setShowExportModal(false)}>
+                                        Cancel
+                                    </button>
+                                    <button className="btn btn-primary" onClick={exportData}>
+                                        Export
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* API Modal */}
+                    {showApiModal && (
+                        <div className="modal active">
+                            <div className="modal-content">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">API Endpoint</h3>
+                                <p className="text-sm text-gray-600 mb-4">
+                                    Use this endpoint to access your {currentTable} data via API:
+                                </p>
+                                <div className="bg-gray-100 p-3 rounded-lg mb-4">
+                                    <code className="break-all">{apiEndpoint}</code>
+                                </div>
+                                <div className="flex justify-end">
+                                    <button className="btn btn-primary" onClick={() => setShowApiModal(false)}>
+                                        Close
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     )}
                 </div>
-                
-                {/* Folder Modal */}
-                {showFolderModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Create New Folder</h3>
-                            <input 
-                                id="newFolder" 
-                                type="text" 
-                                placeholder="Folder Name" 
-                                className="w-full p-2 border rounded mb-4 focus:ring-2 focus:ring-blue-500" 
-                            />
-                            <div className="flex justify-end space-x-2">
-                                <button className="btn btn-danger" onClick={() => setShowFolderModal(false)}>
-                                    Cancel
-                                </button>
-                                <button className="btn btn-primary" onClick={addNewFolder}>
-                                    Create Folder
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {/* Automation Modal */}
-                {showAutomationModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Create New Automation</h3>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
-                                    <select 
-                                        value={newAutomation.trigger} 
-                                        onChange={(e) => setNewAutomation({...newAutomation, trigger: e.target.value})}
-                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        <option value="">Select Trigger</option>
-                                        <option value="New Record">New Record Created</option>
-                                        <option value="Record Updated">Record Updated</option>
-                                        <option value="Field Changed">Field Value Changed</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
-                                    <input 
-                                        type="text" 
-                                        value={newAutomation.condition} 
-                                        onChange={(e) => setNewAutomation({...newAutomation, condition: e.target.value})}
-                                        placeholder="e.g., Status == 'Completed'"
-                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
-                                    <select 
-                                        value={newAutomation.action} 
-                                        onChange={(e) => setNewAutomation({...newAutomation, action: e.target.value})}
-                                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        <option value="">Select Action</option>
-                                        <option value="Send Email">Send Email</option>
-                                        <option value="Send Notification">Send Notification</option>
-                                        <option value="Update Record">Update Record</option>
-                                        <option value="Create Task">Create Task</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="flex justify-end space-x-2 mt-6">
-                                <button className="btn btn-danger" onClick={() => setShowAutomationModal(false)}>
-                                    Cancel
-                                </button>
-                                <button className="btn btn-primary" onClick={addAutomationRule}>
-                                    Create Automation
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {/* Collaborator Modal */}
-                {showCollaboratorModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Collaborator</h3>
-                            <input 
-                                type="email" 
-                                value={newCollaborator} 
-                                onChange={(e) => setNewCollaborator(e.target.value)}
-                                placeholder="Email address" 
-                                className="w-full p-2 border rounded mb-4 focus:ring-2 focus:ring-blue-500" 
-                            />
-                            <div className="flex justify-end space-x-2">
-                                <button className="btn btn-danger" onClick={() => setShowCollaboratorModal(false)}>
-                                    Cancel
-                                </button>
-                                <button className="btn btn-primary" onClick={addCollaborator}>
-                                    Add Collaborator
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {/* Template Modal */}
-                {showTemplateModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Apply Template</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
-                                {templates.length > 0 ? (
-                                    templates.map(template => (
-                                        <div key={template.id} className="template-card" onClick={() => applyTemplate(template)}>
-                                            <div className="template-thumb">
-                                                <i className="fas fa-layer-group"></i>
-                                            </div>
-                                            <div className="template-content">
-                                                <h4 className="font-medium">{template.name}</h4>
-                                                <p className="text-sm text-gray-600">{template.description}</p>
-                                            </div>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="col-span-2 text-center py-6 text-gray-500">
-                                        <i className="fas fa-file-alt text-3xl mb-3"></i>
-                                        <p>No templates available yet.</p>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex justify-end mt-6">
-                                <button className="btn btn-danger" onClick={() => setShowTemplateModal(false)}>
-                                    Close
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {/* Export Modal */}
-                {showExportModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Export Data</h3>
-                            <div className="space-y-3">
-                                <div 
-                                    className={`export-option ${exportFormat === 'csv' ? 'border-blue-500 bg-blue-50' : ''}`}
-                                    onClick={() => setExportFormat('csv')}
-                                >
-                                    <div className="flex items-center">
-                                        <i className="fas fa-file-csv text-2xl text-green-500 mr-3"></i>
-                                        <div>
-                                            <h4 className="font-medium">CSV Format</h4>
-                                            <p className="text-sm text-gray-600">Comma-separated values, ideal for spreadsheets</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div 
-                                    className={`export-option ${exportFormat === 'json' ? 'border-blue-500 bg-blue-50' : ''}`}
-                                    onClick={() => setExportFormat('json')}
-                                >
-                                    <div className="flex items-center">
-                                        <i className="fas fa-file-code text-2xl text-yellow-500 mr-3"></i>
-                                        <div>
-                                            <h4 className="font-medium">JSON Format</h4>
-                                            <p className="text-sm text-gray-600">JavaScript Object Notation, ideal for developers</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex justify-end space-x-2 mt-6">
-                                <button className="btn btn-danger" onClick={() => setShowExportModal(false)}>
-                                    Cancel
-                                </button>
-                                <button className="btn btn-primary" onClick={exportData}>
-                                    Export
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {/* API Modal */}
-                {showApiModal && (
-                    <div className="modal active">
-                        <div className="modal-content">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">API Endpoint</h3>
-                            <p className="text-sm text-gray-600 mb-4">
-                                Use this endpoint to access your {currentTable} data via API:
-                            </p>
-                            <div className="bg-gray-100 p-3 rounded-lg mb-4">
-                                <code className="break-all">{apiEndpoint}</code>
-                            </div>
-                            <div className="flex justify-end">
-                                <button className="btn btn-primary" onClick={() => setShowApiModal(false)}>
-                                    Close
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    }
+            );
+        }
 
-    ReactDOM.render(<App />, document.getElementById('root'));
-</script>
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
 </body>
 </html>
