@@ -492,12 +492,27 @@
       window.location.href = 'profile.html';
     }
 
-    // Load users from Firebase Authentication
+    // Sync user to Firestore
+    async function syncUserToFirestore(user) {
+      try {
+        const userRef = db.collection('users').doc(user.uid);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+          await userRef.set({
+            email: user.email,
+            displayName: user.displayName || user.email.split('@')[0],
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      } catch (error) {
+        console.error('Error syncing user to Firestore:', error);
+        showToast('Error syncing user data', 'error');
+      }
+    }
+
+    // Load users from Firestore
     async function loadUsers() {
       try {
-        // Note: Firebase Authentication does not provide a direct API to list all users
-        // in the client SDK for security reasons. Instead, we'll fetch users from the
-        // 'users' collection in Firestore, assuming user data is stored there upon signup.
         const usersSnapshot = await db.collection('users').get();
         userList.innerHTML = '';
         usersSnapshot.forEach(doc => {
@@ -612,20 +627,24 @@
       }
     }
 
-    // Check auth state
+    // Check auth state and sync user
     auth.onAuthStateChanged(user => {
       if (user) {
         currentUserId = user.uid;
         userInitials.textContent = user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase();
         
-        // Load saved theme
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-          document.documentElement.setAttribute('data-theme', savedTheme);
-          themeToggle.innerHTML = savedTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
-        }
+        // Sync current user to Firestore
+        syncUserToFirestore(user).then(() => {
+          // Load saved theme
+          const savedTheme = localStorage.getItem('theme');
+          if (savedTheme) {
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            themeToggle.innerHTML = savedTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+          }
 
-        loadUsers();
+          // Load all users
+          loadUsers();
+        });
       } else {
         window.location.href = 'index.html';
       }
