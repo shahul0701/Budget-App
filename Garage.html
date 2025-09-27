@@ -472,18 +472,47 @@
         }
 
         .service-reminder {
-            background: var(--warning);
-            color: white;
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
             display: flex;
             align-items: center;
             gap: 10px;
+            font-weight: 600;
         }
         
         .service-reminder i {
             font-size: 1.2rem;
+        }
+        
+        .service-reminder.green {
+            background-color: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .service-reminder.light-green {
+            background-color: #ecfdf5;
+            color: #047857;
+            border: 1px solid #6ee7b7;
+        }
+        
+        .service-reminder.yellow {
+            background-color: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+        }
+        
+        .service-reminder.orange {
+            background-color: #ffedd5;
+            color: #9a3412;
+            border: 1px solid #fdba74;
+        }
+        
+        .service-reminder.red {
+            background-color: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
         }
     </style>
 </head>
@@ -709,14 +738,6 @@
                                     <input type="number" id="trip-end-odometer" step="0.1" required>
                                 </div>
                                 <div class="input-group">
-                                    <label for="trip-fuel-amount">Fuel Amount (L)</label>
-                                    <input type="number" id="trip-fuel-amount" step="0.01">
-                                </div>
-                                <div class="input-group">
-                                    <label for="trip-fuel-cost">Fuel Cost</label>
-                                    <input type="number" id="trip-fuel-cost" step="0.01">
-                                </div>
-                                <div class="input-group">
                                     <label for="trip-start">Start Location</label>
                                     <input type="text" id="trip-start" required>
                                 </div>
@@ -742,7 +763,6 @@
                                         <th>Date</th>
                                         <th>Route</th>
                                         <th>Distance</th>
-                                        <th>Mileage (km/L)</th>
                                         <th>Purpose</th>
                                         <th>Actions</th>
                                     </tr>
@@ -1202,15 +1222,7 @@
                 fuelAmount: e.fuelVolume,
                 cost: e.amount
             }));
-            const tripFills = trips.filter(t => t.fuelAmount && t.endOdometer).map(t => ({
-                type: 'trip',
-                id: t.id,
-                date: t.date,
-                odometer: t.endOdometer,
-                fuelAmount: t.fuelAmount,
-                cost: t.fuelCost
-            }));
-            const allFills = [...fuelExpenses, ...tripFills].sort((a, b) => a.odometer - b.odometer);
+            const allFills = [...fuelExpenses].sort((a, b) => a.odometer - b.odometer);
             mileageRecords = [];
             for (let i = 1; i < allFills.length; i++) {
                 const prevFill = allFills[i - 1];
@@ -1270,24 +1282,100 @@
                 document.getElementById('avg-mileage').textContent = '0.0';
             }
             
+            // Update next service display
+            updateNextServiceDisplay();
+        }
+
+        function updateNextServiceDisplay() {
+            const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+            if (!vehicle) return;
+
+            let maxOdometer = vehicle.odometer;
+            expenses.forEach(expense => {
+                if (expense.odometer > maxOdometer) {
+                    maxOdometer = expense.odometer;
+                }
+            });
+            services.forEach(service => {
+                if (service.odometer > maxOdometer) {
+                    maxOdometer = service.odometer;
+                }
+            });
+            trips.forEach(trip => {
+                if (trip.endOdometer && trip.endOdometer > maxOdometer) {
+                    maxOdometer = trip.endOdometer;
+                }
+            });
+
             let nextServiceText = '-';
+            let nextServiceColor = '';
+
             if (services.length > 0) {
                 const latestService = services[0];
-                let dueByDate = '';
-                let dueByKm = '';
+                let daysRemaining = null;
+                let kmRemaining = null;
 
                 if (latestService.nextServiceDays) {
                     const serviceDate = new Date(latestService.date);
-                    const nextServiceDate = new Date(serviceDate.getTime() + latestService.nextServiceDays * 24 * 60 * 60 * 1000);
-                    dueByDate = `Due by ${formatDate(nextServiceDate)}`;
+                    const today = new Date();
+                    const daysSince = Math.floor((today - serviceDate) / (1000 * 60 * 60 * 24));
+                    daysRemaining = latestService.nextServiceDays - daysSince;
                 }
+
                 if (latestService.nextServiceKm) {
-                    const nextServiceKm = latestService.odometer + latestService.nextServiceKm;
-                    dueByKm = ` or ${nextServiceKm} km`;
+                    const kmDriven = maxOdometer - latestService.odometer;
+                    kmRemaining = latestService.nextServiceKm - kmDriven;
                 }
-                nextServiceText = dueByDate + dueByKm;
+
+                // Determine which reminder to show (prioritize the one that's closer to due)
+                if (daysRemaining !== null && kmRemaining !== null) {
+                    // Convert km to equivalent days based on average daily driving (50 km/day)
+                    const kmAsDays = kmRemaining / 50;
+                    if (daysRemaining < kmAsDays) {
+                        nextServiceText = `${daysRemaining} days remaining`;
+                        nextServiceColor = getServiceReminderColor(daysRemaining, true);
+                    } else {
+                        nextServiceText = `${kmRemaining} km remaining`;
+                        nextServiceColor = getServiceReminderColor(kmRemaining / 50, true);
+                    }
+                } else if (daysRemaining !== null) {
+                    nextServiceText = `${daysRemaining} days remaining`;
+                    nextServiceColor = getServiceReminderColor(daysRemaining, true);
+                } else if (kmRemaining !== null) {
+                    nextServiceText = `${kmRemaining} km remaining`;
+                    nextServiceColor = getServiceReminderColor(kmRemaining / 50, true);
+                } else {
+                    nextServiceText = '-';
+                }
             }
+
             document.getElementById('next-service').textContent = nextServiceText;
+            // Apply color to the stat card
+            const nextServiceCard = document.querySelector('.stat-card:nth-child(4)');
+            if (nextServiceColor) {
+                nextServiceCard.style.borderColor = nextServiceColor;
+                nextServiceCard.style.background = nextServiceColor + '20'; // Add transparency
+            } else {
+                nextServiceCard.style.borderColor = '';
+                nextServiceCard.style.background = '';
+            }
+        }
+
+        function getServiceReminderColor(value, isRemaining = true) {
+            // If value is negative (overdue), it's red
+            if (value < 0) return '#ef4444'; // red
+            
+            // For remaining values, use a gradient from green to red
+            if (isRemaining) {
+                if (value > 20) return '#10b981'; // green
+                if (value > 15) return '#34d399'; // light green
+                if (value > 10) return '#f59e0b'; // yellow
+                if (value > 5) return '#f97316'; // orange
+                return '#ef4444'; // red
+            }
+            
+            // For overdue values (negative)
+            return '#ef4444'; // red
         }
 
         function checkServiceReminders() {
@@ -1320,29 +1408,57 @@
             const today = new Date();
             let reminderText = '';
             let isDue = false;
+            let reminderColor = '';
 
             if (latestService.nextServiceDays) {
                 const serviceDate = new Date(latestService.date);
                 const daysSince = Math.floor((today - serviceDate) / (1000 * 60 * 60 * 24));
-                if (daysSince >= latestService.nextServiceDays) {
-                    reminderText += `Service due: ${daysSince - latestService.nextServiceDays} days overdue. `;
+                const daysRemaining = latestService.nextServiceDays - daysSince;
+                
+                if (daysRemaining <= 0) {
+                    reminderText += `Service overdue by ${Math.abs(daysRemaining)} days. `;
                     isDue = true;
+                    reminderColor = 'red';
+                } else {
+                    reminderText += `Service due in ${daysRemaining} days. `;
+                    reminderColor = getServiceReminderColor(daysRemaining, true);
                 }
             }
 
             if (latestService.nextServiceKm) {
                 const kmDriven = maxOdometer - latestService.odometer;
-                if (kmDriven >= latestService.nextServiceKm) {
-                    reminderText += `Service due: ${kmDriven - latestService.nextServiceKm} km over limit.`;
+                const kmRemaining = latestService.nextServiceKm - kmDriven;
+                
+                if (kmRemaining <= 0) {
+                    reminderText += `Service overdue by ${Math.abs(kmRemaining)} km.`;
                     isDue = true;
+                    reminderColor = 'red';
+                } else {
+                    reminderText += `Service due in ${kmRemaining} km.`;
+                    // If we don't have a color from days, or if km is more urgent
+                    if (!reminderColor || kmRemaining/50 < (latestService.nextServiceDays ? (latestService.nextServiceDays - Math.floor((today - new Date(latestService.date)) / (1000 * 60 * 60 * 24))) : Infinity)) {
+                        reminderColor = getServiceReminderColor(kmRemaining/50, true);
+                    }
                 }
             }
 
-            if (isDue) {
+            if (reminderText) {
                 serviceReminderText.textContent = reminderText;
+                serviceReminder.className = 'service-reminder ' + getServiceReminderClass(reminderColor);
                 serviceReminder.style.display = 'flex';
             } else {
                 serviceReminder.style.display = 'none';
+            }
+        }
+
+        function getServiceReminderClass(color) {
+            switch(color) {
+                case '#10b981': return 'green';
+                case '#34d399': return 'light-green';
+                case '#f59e0b': return 'yellow';
+                case '#f97316': return 'orange';
+                case '#ef4444': return 'red';
+                default: return 'yellow';
             }
         }
         
@@ -1437,18 +1553,16 @@
             tripHistory.innerHTML = '';
             
             if (trips.length === 0) {
-                tripHistory.innerHTML = '<tr><td colspan="6" style="text-align: center;">No trips recorded yet</td></tr>';
+                tripHistory.innerHTML = '<tr><td colspan="5" style="text-align: center;">No trips recorded yet</td></tr>';
                 return;
             }
             
             trips.forEach(trip => {
-                const mileage = trip.fuelAmount && trip.distance ? (trip.distance / trip.fuelAmount).toFixed(1) : '-';
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${formatDate(trip.date)}</td>
                     <td>${trip.startLocation} to ${trip.endLocation}</td>
                     <td>${trip.distance} km</td>
-                    <td>${mileage}</td>
                     <td>${trip.purpose || '-'}</td>
                     <td>
                         <button class="action-btn" onclick="editTrip('${trip.id}')"><i class="fas fa-edit"></i></button>
@@ -1938,7 +2052,7 @@
                 })
                 .catch(error => {
                     console.error('Error adding expense: ', error);
-                    alert('Error adding expense: ' + error.message);
+                                        alert('Error adding expense: ' + error.message);
                 });
         }
         
@@ -2077,8 +2191,6 @@
             const inputType = document.getElementById('trip-input-type').value;
             const startOdometer = parseFloat(document.getElementById('trip-start-odometer').value);
             const endOdometerInput = parseFloat(document.getElementById('trip-end-odometer').value);
-            const fuelAmount = parseFloat(document.getElementById('trip-fuel-amount').value) || null;
-            const fuelCost = parseFloat(document.getElementById('trip-fuel-cost').value) || null;
             const startLocation = document.getElementById('trip-start').value;
             const endLocation = document.getElementById('trip-end').value;
             const purpose = document.getElementById('trip-purpose').value;
@@ -2104,8 +2216,6 @@
                 startOdometer,
                 endOdometer,
                 distance,
-                fuelAmount,
-                fuelCost,
                 startLocation,
                 endLocation,
                 purpose,
@@ -2135,8 +2245,6 @@
             const inputType = document.getElementById('trip-input-type').value;
             const startOdometer = parseFloat(document.getElementById('trip-start-odometer').value);
             const endOdometerInput = parseFloat(document.getElementById('trip-end-odometer').value);
-            const fuelAmount = parseFloat(document.getElementById('trip-fuel-amount').value) || null;
-            const fuelCost = parseFloat(document.getElementById('trip-fuel-cost').value) || null;
             const startLocation = document.getElementById('trip-start').value;
             const endLocation = document.getElementById('trip-end').value;
             const purpose = document.getElementById('trip-purpose').value;
@@ -2162,8 +2270,6 @@
                 startOdometer,
                 endOdometer,
                 distance,
-                fuelAmount,
-                fuelCost,
                 startLocation,
                 endLocation,
                 purpose,
@@ -2302,8 +2408,6 @@
             document.getElementById('trip-input-type').value = 'odometer'; // Default to odometer for edit
             document.getElementById('trip-start-odometer').value = trip.startOdometer;
             document.getElementById('trip-end-odometer').value = trip.endOdometer;
-            document.getElementById('trip-fuel-amount').value = trip.fuelAmount || '';
-            document.getElementById('trip-fuel-cost').value = trip.fuelCost || '';
             document.getElementById('trip-start').value = trip.startLocation;
             document.getElementById('trip-end').value = trip.endLocation;
             document.getElementById('trip-purpose').value = trip.purpose || '';
