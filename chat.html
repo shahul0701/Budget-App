@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BudgetFlow - Chat System</title>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-light: #6366f1;
+      --primary-dark: #4338ca;
+      --secondary: #6a5acd;
+      --secondary-light: #7c73e6;
+      --secondary-dark: #5649b4;
+      --success: #16a34a;
+      --success-light: #22c55e;
+      --success-dark: #15803d;
+      --danger: #ef4444;
+      --danger-light: #f87171;
+      --danger-dark: #dc2626;
+      --warning: #f59e0b;
+      --warning-light: #fbbf24;
+      --warning-dark: #d97706;
+      --info: #06b6d4;
+      --info-light: #22d3ee;
+      --info-dark: #0891b2;
+      --dark: #1f2937;
+      --dark-light: #374151;
+      --dark-lighter: #4b5563;
+      --light: #f4f6f9;
+      --light-dark: #e5e7eb;
+      --text: #333;
+      --text-light: #6b7280;
+      --card-bg: #fff;
+      --card-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+      --card-border: 1px solid #e5e7eb;
+      
+      /* 3D effect variables */
+      --card-depth: 10px;
+      --card-3d-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 5px 10px rgba(0, 0, 0, 0.05);
+      
+      /* Dark mode variables */
+      --bg-dark: #0f172a;
+      --card-bg-dark: #1e293b;
+      --text-dark: #e2e8f0;
+      --text-muted-dark: #94a3b8;
+      --border-dark: #334155;
+    }
+
+    /* Dark mode */
+    [data-theme="dark"] {
+      --primary: #6366f1;
+      --secondary: #818cf8;
+      --success: #22c55e;
+      --danger: #f87171;
+      --warning: #fbbf24;
+      --info: #22d3ee;
+      --dark: #1e293b;
+      --light: #0f172a;
+      --text: #e2e8f0;
+      --card-bg: #1e293b;
+      --card-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+      --card-border: 1px solid #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--light);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Dashboard */
+    .dashboard {
+      display: none;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      background: var(--dark);
+      color: #fff;
+      height: 100vh;
+      position: fixed;
+      top: 0;
+      left: 0;
+      padding-top: 60px;
+      z-index: 999;
+      transform: translateX(-240px);
+      transition: transform 0.3s;
+      overflow-y: auto;
+      box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .sidebar.visible {
+      transform: translateX(0);
+    }
+
+    .sidebar ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .sidebar ul li {
+      padding: 15px 20px;
+      cursor: pointer;
+      transition: 0.2s;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .sidebar ul li i {
+      margin-right: 10px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .sidebar ul li:hover {
+      background: var(--dark-light);
+    }
+
+    /* Header */
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: var(--card-bg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      box-shadow: var(--card-shadow);
+      z-index: 900;
+      transition: left 0.3s, background-color 0.3s;
+      border-bottom: var(--card-border);
+    }
+
+    header.sidebar-visible {
+      left: 240px;
+    }
+
+    #menuToggle {
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    /* Date and time display */
+    .datetime-display {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      font-size: 14px;
+    }
+
+    .current-date {
+      font-weight: 600;
+    }
+
+    .current-time {
+      color: var(--text-light);
+      font-size: 12px;
+    }
+
+    [data-theme="dark"] .current-time {
+      color: var(--text-muted-dark);
+    }
+
+    /* Theme toggle */
+    .theme-toggle {
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 5px;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .theme-toggle:hover {
+      background: var(--light-dark);
+    }
+
+    [data-theme="dark"] .theme-toggle:hover {
+      background: var(--dark-light);
+    }
+
+    /* Profile */
+    .profile {
+      display: flex;
+      align-items: center;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .profile-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      transition: background-color 0.3s;
+    }
+
+    .dropdown {
+      position: absolute;
+      top: 50px;
+      right: 0;
+      background: var(--card-bg);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+      border-radius: 8px;
+      display: none;
+      min-width: 150px;
+      overflow: hidden;
+      z-index: 1000;
+      border: var(--card-border);
+    }
+
+    .dropdown a {
+      display: block;
+      padding: 12px 15px;
+      text-decoration: none;
+      color: var(--text);
+      transition: background-color 0.2s;
+    }
+
+    .dropdown a:hover {
+      background: var(--light-dark);
+    }
+
+    [data-theme="dark"] .dropdown a:hover {
+      background: var(--dark-light);
+    }
+
+    .profile.active .dropdown {
+      display: block;
+    }
+
+    /* Main */
+    .main {
+      margin-left: 0;
+      margin-top: 70px;
+      padding: 20px;
+      transition: margin-left 0.3s;
+    }
+
+    .main.sidebar-visible {
+      margin-left: 240px;
+    }
+
+    /* Chat Container */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 140px);
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: 16px;
+      box-shadow: var(--card-3d-shadow);
+      border: var(--card-border);
+      overflow: hidden;
+    }
+
+    /* Chat Header */
+    .chat-header {
+      padding: 20px;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+
+    .admin-badge {
+      background: var(--success);
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+
+    .user-badge {
+      background: var(--info);
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+
+    /* Chat Body */
+    .chat-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Users Panel */
+    .users-panel {
+      width: 300px;
+      border-right: var(--card-border);
+      background: var(--light-dark);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    [data-theme="dark"] .users-panel {
+      background: var(--dark-light);
+    }
+
+    .users-panel-header {
+      padding: 15px;
+      background: var(--dark);
+      color: white;
+      font-weight: bold;
+    }
+
+    .users-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .user-item {
+      padding: 15px;
+      border-bottom: 1px solid var(--light-dark);
+      cursor: pointer;
+      transition: background-color 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    [data-theme="dark"] .user-item {
+      border-bottom: 1px solid var(--dark-light);
+    }
+
+    .user-item:hover {
+      background: var(--light);
+    }
+
+    [data-theme="dark"] .user-item:hover {
+      background: var(--dark);
+    }
+
+    .user-item.active {
+      background: var(--primary-light);
+      color: white;
+    }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+
+    .user-info {
+      flex: 1;
+    }
+
+    .user-name {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .user-email {
+      font-size: 0.8rem;
+      color: var(--text-light);
+    }
+
+    [data-theme="dark"] .user-email {
+      color: var(--text-muted-dark);
+    }
+
+    .user-status {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    /* Messages Panel */
+    .messages-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .messages-header {
+      padding: 15px;
+      border-bottom: var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .selected-user-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .selected-user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+
+    .admin-controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    .admin-controls button {
+      padding: 8px 15px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .broadcast-btn {
+      background: var(--warning);
+      color: white;
+    }
+
+    .clear-chat-btn {
+      background: var(--danger);
+      color: white;
+    }
+
+    .messages-container {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .message {
+      max-width: 70%;
+      padding: 12px 15px;
+      border-radius: 18px;
+      position: relative;
+      word-wrap: break-word;
+    }
+
+    .message.sent {
+      align-self: flex-end;
+      background: var(--primary);
+      color: white;
+      border-bottom-right-radius: 5px;
+    }
+
+    .message.received {
+      align-self: flex-start;
+      background: var(--light-dark);
+      color: var(--text);
+      border-bottom-left-radius: 5px;
+    }
+
+    [data-theme="dark"] .message.received {
+      background: var(--dark-light);
+      color: var(--text-dark);
+    }
+
+    .message.admin {
+      border-left: 3px solid var(--warning);
+    }
+
+    .message-time {
+      font-size: 0.7rem;
+      margin-top: 5px;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    .message-sender {
+      font-weight: bold;
+      margin-bottom: 5px;
+      font-size: 0.8rem;
+    }
+
+    /* Message Input */
+    .message-input-container {
+      padding: 15px;
+      border-top: var(--card-border);
+      display: flex;
+      gap: 10px;
+    }
+
+    .message-input {
+      flex: 1;
+      padding: 12px 15px;
+      border: var(--card-border);
+      border-radius: 25px;
+      outline: none;
+      font-family: inherit;
+      background: var(--card-bg);
+      color: var(--text);
+      transition: all 0.2s;
+    }
+
+    .message-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+    }
+
+    .send-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 45px;
+      height: 45px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .send-btn:hover {
+      background: var(--primary-dark);
+      transform: scale(1.05);
+    }
+
+    .send-btn:disabled {
+      background: var(--text-light);
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* No Chat Selected */
+    .no-chat-selected {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .no-chat-icon {
+      font-size: 4rem;
+      color: var(--text-light);
+      margin-bottom: 20px;
+    }
+
+    [data-theme="dark"] .no-chat-icon {
+      color: var(--text-muted-dark);
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--card-bg);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+      z-index: 2000;
+      opacity: 0;
+      transition: transform 0.3s, opacity 0.3s;
+      border: var(--card-border);
+    }
+    
+    .toast.active {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+    
+    .toast.success {
+      border-left: 4px solid var(--success);
+    }
+    
+    .toast.error {
+      border-left: 4px solid var(--danger);
+    }
+    
+    .toast.warning {
+      border-left: 4px solid var(--warning);
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .chat-body {
+        flex-direction: column;
+      }
+      
+      .users-panel {
+        width: 100%;
+        height: 200px;
+        border-right: none;
+        border-bottom: var(--card-border);
+      }
+      
+      .sidebar.visible {
+        transform: translateX(0);
+        z-index: 1000;
+      }
+
+      header.sidebar-visible {
+        left: 0;
+      }
+
+      .main.sidebar-visible {
+        margin-left: 0;
+      }
+      
+      .datetime-display {
+        display: none;
+      }
+      
+      .admin-controls {
+        flex-direction: column;
+        gap: 5px;
+      }
+      
+      .admin-controls button {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .main {
+        padding: 10px;
+      }
+      
+      .chat-container {
+        height: calc(100vh - 120px);
+      }
+      
+      .chat-header {
+        padding: 15px;
+      }
+      
+      .chat-header h2 {
+        font-size: 1.2rem;
+      }
+      
+      .message {
+        max-width: 85%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Dashboard -->
+  <div class="dashboard" id="dashboard">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <ul>
+        <li onclick="location.href='home.html'"><i class="fa fa-home"></i> Home</li>
+        <li onclick="location.href='exp.html'"><i class="fa fa-wallet"></i> Expense Tracker</li>
+        <li onclick="location.href='coa.html'"><i class="fa fa-book"></i> COA</li>
+        <li onclick="location.href='calculate.html'"><i class="fa fa-calculator"></i> Calculate</li>
+        <li onclick="location.href='Assets Tracker.html'"><i class="fa fa-chart-line"></i> Asset Tracker</li>
+        <li onclick="location.href='Section.html'"><i class="fa fa-file"></i> Reports</li>
+        <li onclick="location.href='Genrate Invoice.html'"><i class="fa fa-file-invoice"></i> INVOICE</li>
+        <li onclick="location.href='chart.html'"><i class="fa fa-chart-pie"></i> Chart</li>
+        <li onclick="location.href='Garage.html'"><i class="fa fa-motor"></i> Vehicle Management</li>
+        <li onclick="location.href='Appsheet.html'"><i class="fa fa-work"></i> App Sheet</li>
+        <li onclick="location.href='chat.html'"><i class="fa fa-comments"></i> Chat</li>
+      </ul>
+    </div>
+
+    <!-- Header -->
+    <header id="header">
+      <i id="menuToggle" class="fa fa-bars"></i>
+      <div class="datetime-display">
+        <div class="current-date" id="currentDate">Monday, January 1, 2023</div>
+        <div class="current-time" id="currentTime">12:00:00 PM</div>
+      </div>
+      <div class="header-controls">
+        <button class="theme-toggle" id="themeToggle">
+          <i class="fa fa-moon"></i>
+        </button>
+        <div class="profile" id="profileMenu">
+          <div class="profile-circle" id="userInitials">U</div>
+          <div class="dropdown">
+            <a href="#" onclick="openProfile()"><i class="fa fa-user"></i> Profile</a>
+            <a href="#" onclick="logout()"><i class="fa fa-sign-out"></i> Logout</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <div class="main" id="main">
+      <div class="chat-container">
+        <div class="chat-header">
+          <h2><i class="fa fa-comments"></i> BudgetFlow Chat</h2>
+          <div id="userRoleBadge" class="user-badge">User</div>
+        </div>
+        
+        <div class="chat-body">
+          <!-- Users Panel (Visible to Admin) -->
+          <div class="users-panel" id="usersPanel">
+            <div class="users-panel-header">
+              <i class="fa fa-users"></i> Users
+            </div>
+            <div class="users-list" id="usersList">
+              <!-- Users will be populated here -->
+            </div>
+          </div>
+          
+          <!-- Messages Panel -->
+          <div class="messages-panel">
+            <div class="messages-header">
+              <div class="selected-user-info" id="selectedUserInfo">
+                <!-- Selected user info will be shown here -->
+              </div>
+              <div class="admin-controls" id="adminControls">
+                <!-- Admin controls will be shown here -->
+              </div>
+            </div>
+            
+            <div class="messages-container" id="messagesContainer">
+              <!-- Messages will be populated here -->
+              <div class="no-chat-selected" id="noChatSelected">
+                <div class="no-chat-icon">
+                  <i class="fa fa-comment-slash"></i>
+                </div>
+                <h3>No Chat Selected</h3>
+                <p>Select a user from the list to start chatting</p>
+              </div>
+            </div>
+            
+            <div class="message-input-container" id="messageInputContainer">
+              <input type="text" class="message-input" id="messageInput" placeholder="Type your message..." disabled>
+              <button class="send-btn" id="sendBtn" disabled>
+                <i class="fa fa-paper-plane"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.firebasestorage.app",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // DOM Elements
+    const dashboard = document.getElementById("dashboard");
+    const sidebar = document.getElementById("sidebar");
+    const menuToggle = document.getElementById("menuToggle");
+    const header = document.getElementById("header");
+    const main = document.getElementById("main");
+    const profileMenu = document.getElementById("profileMenu");
+    const userInitials = document.getElementById("userInitials");
+    const themeToggle = document.getElementById("themeToggle");
+    const currentDateEl = document.getElementById("currentDate");
+    const currentTimeEl = document.getElementById("currentTime");
+    const userRoleBadge = document.getElementById("userRoleBadge");
+    const usersPanel = document.getElementById("usersPanel");
+    const usersList = document.getElementById("usersList");
+    const selectedUserInfo = document.getElementById("selectedUserInfo");
+    const adminControls = document.getElementById("adminControls");
+    const messagesContainer = document.getElementById("messagesContainer");
+    const noChatSelected = document.getElementById("noChatSelected");
+    const messageInputContainer = document.getElementById("messageInputContainer");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const toast = document.getElementById("toast");
+
+    // Chat state variables
+    let currentUser = null;
+    let isAdmin = false;
+    let selectedUserId = null;
+    let users = [];
+    let messages = [];
+    let messagesListener = null;
+
+    // Update date and time
+    function updateDateTime() {
+      const now = new Date();
+      
+      // Format date
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      currentDateEl.textContent = now.toLocaleDateString('en-US', options);
+      
+      // Format time
+      currentTimeEl.textContent = now.toLocaleTimeString('en-US');
+    }
+
+    // Update date and time immediately and then every second
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    // Show toast notification
+    function showToast(message, type = '') {
+      toast.textContent = message;
+      toast.className = 'toast';
+      if (type) toast.classList.add(type);
+      toast.classList.add('active');
+      
+      // Remove active class after animation completes
+      setTimeout(() => {
+        toast.classList.remove('active');
+      }, 3000);
+    }
+
+    // Toggle theme
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      
+      document.documentElement.setAttribute('data-theme', newTheme);
+      themeToggle.innerHTML = newTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+      localStorage.setItem('theme', newTheme);
+    }
+
+    // Check if user is admin
+    function checkIfAdmin(email) {
+      return email === 'shahulsha254@gmail.com';
+    }
+
+    // Load all users (admin only)
+    async function loadUsers() {
+      if (!isAdmin) return;
+      
+      try {
+        // In a real app, you would query all users from your user collection
+        // For this demo, we'll simulate by storing user data in Firestore
+        const usersRef = db.collection('chatUsers');
+        const snapshot = await usersRef.get();
+        
+        users = [];
+        snapshot.forEach(doc => {
+          if (doc.id !== currentUser.uid) { // Exclude current user
+            users.push({
+              id: doc.id,
+              ...doc.data()
+            });
+          }
+        });
+        
+        renderUsersList();
+      } catch (error) {
+        console.error('Error loading users:', error);
+        showToast('Error loading users', 'error');
+      }
+    }
+
+    // Render users list
+    function renderUsersList() {
+      if (!isAdmin) {
+        usersPanel.style.display = 'none';
+        return;
+      }
+      
+      usersList.innerHTML = '';
+      
+      if (users.length === 0) {
+        usersList.innerHTML = '<div class="user-item">No other users found</div>';
+        return;
+      }
+      
+      users.forEach(user => {
+        const userItem = document.createElement('div');
+        userItem.className = 'user-item';
+        userItem.dataset.userId = user.id;
+        
+        userItem.innerHTML = `
+          <div class="user-avatar">${user.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
+          <div class="user-info">
+            <div class="user-name">${user.name || 'Unknown User'}</div>
+            <div class="user-email">${user.email}</div>
+          </div>
+          <div class="user-status"></div>
+        `;
+        
+        userItem.addEventListener('click', () => selectUser(user.id));
+        usersList.appendChild(userItem);
+      });
+    }
+
+    // Select a user to chat with
+    function selectUser(userId) {
+      // Update UI
+      const userItems = document.querySelectorAll('.user-item');
+      userItems.forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.userId === userId) {
+          item.classList.add('active');
+        }
+      });
+      
+      selectedUserId = userId;
+      const selectedUser = users.find(u => u.id === userId);
+      
+      // Update selected user info
+      selectedUserInfo.innerHTML = `
+        <div class="selected-user-avatar">${selectedUser.name ? selectedUser.name.charAt(0).toUpperCase() : 'U'}</div>
+        <div>
+          <div class="user-name">${selectedUser.name || 'Unknown User'}</div>
+          <div class="user-email">${selectedUser.email}</div>
+        </div>
+      `;
+      
+      // Hide no chat selected message
+      noChatSelected.style.display = 'none';
+      
+      // Enable message input
+      messageInput.disabled = false;
+      sendBtn.disabled = false;
+      
+      // Load messages for this user
+      loadMessages(userId);
+    }
+
+    // Load messages for a specific user
+    function loadMessages(userId) {
+      // Clear existing messages
+      messagesContainer.innerHTML = '';
+      messages = [];
+      
+      // Remove previous listener if exists
+      if (messagesListener) {
+        messagesListener();
+      }
+      
+      // Determine the chat ID (for admin-user chats)
+      const chatId = isAdmin ? 
+        `admin_${userId}` : 
+        `admin_${currentUser.uid}`;
+      
+      // Listen for real-time messages
+      messagesListener = db.collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', 'asc')
+        .onSnapshot(snapshot => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              const message = {
+                id: change.doc.id,
+                ...change.doc.data()
+              };
+              
+              // Only add if not already in messages
+              if (!messages.find(m => m.id === message.id)) {
+                messages.push(message);
+                renderMessage(message);
+              }
+            }
+          });
+          
+          // Scroll to bottom
+          scrollToBottom();
+        }, error => {
+          console.error('Error loading messages:', error);
+          showToast('Error loading messages', 'error');
+        });
+    }
+
+    // Render a message
+    function renderMessage(message) {
+      const messageDiv = document.createElement('div');
+      const isSentByMe = message.senderId === currentUser.uid;
+      
+      messageDiv.className = `message ${isSentByMe ? 'sent' : 'received'} ${message.isAdmin ? 'admin' : ''}`;
+      
+      // Format timestamp
+      const timestamp = message.timestamp ? 
+        message.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      messageDiv.innerHTML = `
+        ${!isSentByMe ? `<div class="message-sender">${message.senderName || 'Unknown'}</div>` : ''}
+        <div class="message-text">${message.text}</div>
+        <div class="message-time">${timestamp}</div>
+      `;
+      
+      messagesContainer.appendChild(messageDiv);
+    }
+
+    // Scroll to bottom of messages
+    function scrollToBottom() {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Send a message
+    async function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !selectedUserId) return;
+      
+      try {
+        // Determine the chat ID
+        const chatId = isAdmin ? 
+          `admin_${selectedUserId}` : 
+          `admin_${currentUser.uid}`;
+        
+        // Create message object
+        const message = {
+          text: text,
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || currentUser.email.split('@')[0],
+          isAdmin: isAdmin,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // Add message to Firestore
+        await db.collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add(message);
+        
+        // Clear input
+        messageInput.value = '';
+        
+        // Scroll to bottom
+        scrollToBottom();
+      } catch (error) {
+        console.error('Error sending message:', error);
+        showToast('Error sending message', 'error');
+      }
+    }
+
+    // Broadcast message to all users (admin only)
+    async function broadcastMessage() {
+      if (!isAdmin) return;
+      
+      const text = prompt('Enter broadcast message:');
+      if (!text) return;
+      
+      try {
+        showToast('Sending broadcast...', 'warning');
+        
+        // Send to each user
+        for (const user of users) {
+          const chatId = `admin_${user.id}`;
+          
+          const message = {
+            text: `[BROADCAST] ${text}`,
+            senderId: currentUser.uid,
+            senderName: 'Admin',
+            isAdmin: true,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          
+          await db.collection('chats')
+            .doc(chatId)
+            .collection('messages')
+            .add(message);
+        }
+        
+        showToast('Broadcast sent successfully', 'success');
+      } catch (error) {
+        console.error('Error broadcasting message:', error);
+        showToast('Error sending broadcast', 'error');
+      }
+    }
+
+    // Clear chat with selected user
+    async function clearChat() {
+      if (!isAdmin || !selectedUserId) return;
+      
+      if (!confirm('Are you sure you want to clear this chat? This action cannot be undone.')) {
+        return;
+      }
+      
+      try {
+        const chatId = `admin_${selectedUserId}`;
+        const messagesRef = db.collection('chats').doc(chatId).collection('messages');
+        const snapshot = await messagesRef.get();
+        
+        const batch = db.batch();
+        snapshot.docs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        showToast('Chat cleared successfully', 'success');
+      } catch (error) {
+        console.error('Error clearing chat:', error);
+        showToast('Error clearing chat', 'error');
+      }
+    }
+
+    // Setup admin controls
+    function setupAdminControls() {
+      if (!isAdmin) {
+        adminControls.style.display = 'none';
+        return;
+      }
+      
+      adminControls.innerHTML = `
+        <button class="broadcast-btn" onclick="broadcastMessage()">
+          <i class="fa fa-bullhorn"></i> Broadcast
+        </button>
+        <button class="clear-chat-btn" onclick="clearChat()">
+          <i class="fa fa-trash"></i> Clear Chat
+        </button>
+      `;
+    }
+
+    // Setup for regular users
+    function setupUserChat() {
+      if (isAdmin) return;
+      
+      // For regular users, automatically select admin chat
+      selectedUserInfo.innerHTML = `
+        <div class="selected-user-avatar">A</div>
+        <div>
+          <div class="user-name">Admin</div>
+          <div class="user-email">shahulsha254@gmail.com</div>
+        </div>
+      `;
+      
+      // Hide no chat selected message
+      noChatSelected.style.display = 'none';
+      
+      // Enable message input
+      messageInput.disabled = false;
+      sendBtn.disabled = false;
+      
+      // Load messages with admin
+      loadMessages('admin');
+    }
+
+    // Initialize chat
+    function initializeChat() {
+      if (isAdmin) {
+        userRoleBadge.textContent = 'Admin';
+        userRoleBadge.className = 'admin-badge';
+        loadUsers();
+        setupAdminControls();
+      } else {
+        userRoleBadge.textContent = 'User';
+        userRoleBadge.className = 'user-badge';
+        setupUserChat();
+      }
+    }
+
+    // Check if user is logged in
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        // User is signed in
+        dashboard.style.display = "block";
+        userInitials.textContent = user.displayName ? 
+          user.displayName.charAt(0).toUpperCase() : 
+          user.email.charAt(0).toUpperCase();
+        
+        currentUser = user;
+        isAdmin = checkIfAdmin(user.email);
+        
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+          themeToggle.innerHTML = savedTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+        }
+        
+        // Initialize chat
+        initializeChat();
+        
+        // Ensure user exists in chatUsers collection
+        db.collection('chatUsers').doc(user.uid).set({
+          name: user.displayName || '',
+          email: user.email,
+          lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } else {
+        // User is signed out - redirect to login
+        window.location.href = "index.html";
+      }
+    });
+
+    function logout() {
+      auth.signOut().then(() => {
+        console.log("User signed out");
+        window.location.href = "index.html";
+      }).catch((error) => {
+        showToast("Logout error: " + error.message, 'error');
+      });
+    }
+
+    function openProfile() {
+      window.location.href = "profile.html";
+    }
+
+    // Sidebar toggle
+    menuToggle.addEventListener("click", () => {
+      sidebar.classList.toggle("visible");
+      header.classList.toggle("sidebar-visible");
+      main.classList.toggle("sidebar-visible");
+    });
+
+    // Profile dropdown
+    profileMenu.addEventListener("click", (e) => {
+      e.stopPropagation();
+      profileMenu.classList.toggle("active");
+    });
+
+    // Close dropdown when clicking elsewhere
+    document.addEventListener("click", () => {
+      profileMenu.classList.remove("active");
+    });
+
+    // Theme toggle
+    themeToggle.addEventListener("click", toggleTheme);
+
+    // Send message on button click
+    sendBtn.addEventListener("click", sendMessage);
+
+    // Send message on Enter key
+    messageInput.addEventListener("keypress", (e) => {
+      if (e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+</html>
