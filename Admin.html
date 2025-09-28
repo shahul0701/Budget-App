@@ -6,7 +6,6 @@
   <title>Admin Dashboard - Budget App</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    /* Your existing CSS styles remain the same */
     * {
       margin: 0;
       padding: 0;
@@ -596,9 +595,6 @@
       orderBy,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-    import { 
-      connectFunctionsEmulator 
-    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -689,7 +685,7 @@
         // DYNAMICALLY GET AUTHENTICATION USERS
         let authUsers = [];
         try {
-          // Option 1: If you have Cloud Function
+          // Try to call Cloud Function if available
           const getAllAuthUsers = httpsCallable(functions, 'getAllAuthUsers');
           const result = await getAllAuthUsers();
           authUsers = result.data.users.map(user => ({
@@ -704,8 +700,8 @@
             displayName: user.displayName || 'No display name'
           }));
         } catch (error) {
-          console.warn('Cloud Function not available, using fallback data');
-          // Option 2: Fallback - Show current user only
+          console.warn('Cloud Function not available, using current session data');
+          // Fallback: Use current session user data
           const currentUser = auth.currentUser;
           if (currentUser) {
             authUsers = [{
@@ -803,37 +799,513 @@
       }
     }
 
-    // ... rest of your existing functions (loadMessages, selectConversation, sendMessage, etc.)
-    // These remain the same as in your previous code
-
     async function loadMessages() {
-      // Your existing loadMessages function
+      try {
+        const conversationsList = document.getElementById('conversationsList');
+        conversationsList.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading conversations...</p></div>';
+        
+        // Get conversations from Firestore
+        const conversationsSnapshot = await getDocs(collection(db, 'conversations'));
+        const conversations = [];
+        
+        conversationsSnapshot.forEach(doc => {
+          const conversation = doc.data();
+          conversations.push({
+            id: doc.id,
+            ...conversation
+          });
+        });
+        
+        // Sort conversations by last message time
+        conversations.sort((a, b) => {
+          const timeA = a.lastMessageTime ? a.lastMessageTime.toDate() : new Date(0);
+          const timeB = b.lastMessageTime ? b.lastMessageTime.toDate() : new Date(0);
+          return timeB - timeA;
+        });
+        
+        // Render conversations list
+        conversationsList.innerHTML = '';
+        
+        if (conversations.length === 0) {
+          conversationsList.innerHTML = '<div class="no-conversation"><i class="fas fa-comments"></i><p>No conversations yet</p></div>';
+          return;
+        }
+        
+        conversations.forEach(conversation => {
+          const conversationItem = document.createElement('div');
+          conversationItem.className = 'conversation-item';
+          conversationItem.dataset.conversationId = conversation.id;
+          
+          const lastMessageTime = conversation.lastMessageTime ? 
+            conversation.lastMessageTime.toDate().toLocaleDateString() : 'No messages';
+          
+          const unreadCount = conversation.unreadAdminMessages || 0;
+          
+          conversationItem.innerHTML = `
+            <div class="conversation-header">
+              <div class="conversation-name">${conversation.userName || conversation.userEmail}</div>
+              <div class="conversation-time">${lastMessageTime}</div>
+            </div>
+            <div class="conversation-preview">${conversation.lastMessage || 'No messages yet'}</div>
+            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+          `;
+          
+          conversationItem.addEventListener('click', () => {
+            selectConversation(conversation.id);
+          });
+          
+          conversationsList.appendChild(conversationItem);
+        });
+        
+        // If there's a current conversation, select it
+        if (currentConversationId) {
+          selectConversation(currentConversationId);
+        }
+        
+      } catch (error) {
+        console.error('Error loading messages:', error);
+        document.getElementById('conversationsList').innerHTML = 
+          '<p style="color: var(--danger);">Error loading conversations: ' + error.message + '</p>';
+      }
     }
 
     async function selectConversation(conversationId) {
-      // Your existing selectConversation function
+      // Update active state in conversations list
+      document.querySelectorAll('.conversation-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.conversationId === conversationId) {
+          item.classList.add('active');
+        }
+      });
+      
+      currentConversationId = conversationId;
+      
+      // Unsubscribe from previous conversation
+      if (unsubscribeMessages) {
+        unsubscribeMessages();
+      }
+      
+      // Get conversation data
+      const conversationDoc = await getDoc(doc(db, 'conversations', conversationId));
+      const conversation = conversationDoc.data();
+      
+      // Mark messages as read
+      if (conversation.unreadAdminMessages > 0) {
+        await updateDoc(doc(db, 'conversations', conversationId), {
+          unreadAdminMessages: 0
+        });
+      }
+      
+      // Render chat header
+      const chatContainer = document.getElementById('chatContainer');
+      chatContainer.innerHTML = `
+        <div class="chat-header">
+          <h3>${conversation.userName || conversation.userEmail}</h3>
+          <p>Conversation started: ${conversation.createdAt.toDate().toLocaleDateString()}</p>
+        </div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-input">
+          <textarea id="messageInput" placeholder="Type your reply here..."></textarea>
+          <button class="btn btn-small" id="sendMessageBtn"><i class="fas fa-paper-plane"></i> Send</button>
+        </div>
+      `;
+      
+      // Load messages for this conversation
+      const messagesQuery = query(
+        collection(db, 'conversations', conversationId, 'messages'),
+        orderBy('timestamp', 'asc')
+      );
+      
+      unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+        const chatMessages = document.getElementById('chatMessages');
+        chatMessages.innerHTML = '';
+        
+        snapshot.forEach(doc => {
+          const message = doc.data();
+          const messageElement = document.createElement('div');
+          messageElement.className = `message ${message.sender === 'admin' ? 'admin' : 'user'}`;
+          
+          const messageTime = message.timestamp ? 
+            message.timestamp.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Just now';
+          
+          messageElement.innerHTML = `
+            <div class="message-bubble">${message.text}</div>
+            <div class="message-time">${messageTime}</div>
+            ${message.sender === 'admin' ? 
+              `<div class="message-status ${message.status === 'sent' ? 'status-sent' : 'status-pending'}">
+                <i class="fas ${message.status === 'sent' ? 'fa-check' : 'fa-clock'}"></i>
+                ${message.status === 'sent' ? 'Sent' : 'Pending'}
+              </div>` : ''}
+          `;
+          
+          chatMessages.appendChild(messageElement);
+        });
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      });
+      
+      // Add event listener for send button
+      document.getElementById('sendMessageBtn').addEventListener('click', sendMessage);
+      document.getElementById('messageInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+      
+      // Refresh conversations list to update unread counts
+      loadMessages();
     }
 
     async function sendMessage() {
-      // Your existing sendMessage function
+      const messageInput = document.getElementById('messageInput');
+      const messageText = messageInput.value.trim();
+      
+      if (!messageText) return;
+      
+      try {
+        // Add message to Firestore
+        await addDoc(collection(db, 'conversations', currentConversationId, 'messages'), {
+          text: messageText,
+          sender: 'admin',
+          timestamp: serverTimestamp(),
+          status: 'sent'
+        });
+        
+        // Update conversation last message and timestamp
+        await updateDoc(doc(db, 'conversations', currentConversationId), {
+          lastMessage: messageText,
+          lastMessageTime: serverTimestamp(),
+          unreadUserMessages: (await getDoc(doc(db, 'conversations', currentConversationId))).data().unreadUserMessages + 1 || 1
+        });
+        
+        // Clear input
+        messageInput.value = '';
+        
+      } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Error sending message: ' + error.message);
+      }
     }
 
     async function markAllMessagesAsRead() {
-      // Your existing markAllMessagesAsRead function
+      try {
+        const conversationsSnapshot = await getDocs(collection(db, 'conversations'));
+        
+        const updatePromises = [];
+        conversationsSnapshot.forEach(doc => {
+          updatePromises.push(
+            updateDoc(doc.ref, {
+              unreadAdminMessages: 0
+            })
+          );
+        });
+        
+        await Promise.all(updatePromises);
+        loadMessages();
+        
+      } catch (error) {
+        console.error('Error marking messages as read:', error);
+        alert('Error: ' + error.message);
+      }
     }
 
     async function loadStorageUsage() {
-      // Your existing loadStorageUsage function
+      try {
+        // Get counts from all major collections
+        const collections = ['users', 'transactions', 'categories', 'bankAccounts', 'vehicles', 'conversations'];
+        let totalSize = 0;
+        const storageData = [];
+        
+        for (const collName of collections) {
+          try {
+            const coll = collection(db, collName);
+            const snapshot = await getCountFromServer(coll);
+            const count = snapshot.data().count;
+            
+            // Estimate size (rough calculation)
+            let estimatedSizeKB = 0;
+            switch(collName) {
+              case 'users': estimatedSizeKB = count * 2; break;
+              case 'transactions': estimatedSizeKB = count * 0.5; break;
+              case 'categories': estimatedSizeKB = count * 0.1; break;
+              case 'bankAccounts': estimatedSizeKB = count * 1; break;
+              case 'vehicles': estimatedSizeKB = count * 3; break;
+              case 'conversations': estimatedSizeKB = count * 5; break;
+              default: estimatedSizeKB = count * 0.5;
+            }
+            
+            totalSize += estimatedSizeKB;
+            storageData.push({
+              name: collName,
+              count: count,
+              size: (estimatedSizeKB / 1024).toFixed(2) + ' MB'
+            });
+          } catch (error) {
+            console.warn(`Could not access ${collName}:`, error);
+          }
+        }
+        
+        const totalSizeMB = totalSize / 1024;
+        const maxStorage = 1024; // 1GB for Spark plan
+        const percentage = (totalSizeMB / maxStorage) * 100;
+        
+        // Update UI
+        document.getElementById('storageUsed').textContent = totalSizeMB.toFixed(2) + ' MB';
+        document.getElementById('usedStorage').textContent = totalSizeMB.toFixed(2) + ' MB';
+        document.getElementById('availableStorage').textContent = (maxStorage - totalSizeMB).toFixed(2) + ' MB';
+        document.getElementById('storagePercentage').textContent = percentage.toFixed(1) + '%';
+        document.getElementById('storageProgress').style.width = percentage + '%';
+        
+        // Populate storage table
+        const storageTable = document.getElementById('storageTable');
+        storageTable.innerHTML = '';
+        
+        storageData.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${item.name}</td>
+            <td>${item.count}</td>
+            <td>${item.size}</td>
+          `;
+          storageTable.appendChild(row);
+        });
+        
+      } catch (error) {
+        console.error('Error loading storage usage:', error);
+      }
     }
 
-    // Global functions
+    // Global functions for user actions
     window.viewUserDetails = (userId, source) => {
       alert(`Viewing user: ${userId}\nSource: ${source}\n\nIn production, this would show detailed user analytics.`);
     };
 
-    window.startConversation = async (userId, userEmail) => {
-      // Your existing startConversation function
+        window.startConversation = async (userId, userEmail) => {
+      try {
+        // Check if conversation already exists
+        const conversationsQuery = query(
+          collection(db, 'conversations'),
+          where('userId', '==', userId)
+        );
+        
+        const existingConversations = await getDocs(conversationsQuery);
+        let conversationId;
+        
+        if (!existingConversations.empty) {
+          // Use existing conversation
+          conversationId = existingConversations.docs[0].id;
+        } else {
+          // Create new conversation
+          const newConversation = {
+            userId: userId,
+            userEmail: userEmail,
+            userName: userEmail.split('@')[0], // Simple username from email
+            createdAt: serverTimestamp(),
+            lastMessage: 'Conversation started by admin',
+            lastMessageTime: serverTimestamp(),
+            unreadAdminMessages: 0,
+            unreadUserMessages: 0
+          };
+          
+          const docRef = await addDoc(collection(db, 'conversations'), newConversation);
+          conversationId = docRef.id;
+          
+          // Add initial admin message
+          await addDoc(collection(db, 'conversations', conversationId, 'messages'), {
+            text: 'Hello! How can I help you today?',
+            sender: 'admin',
+            timestamp: serverTimestamp(),
+            status: 'sent'
+          });
+        }
+        
+        // Select the conversation
+        await loadMessages();
+        selectConversation(conversationId);
+        
+        // Scroll to messages section
+        document.querySelector('.messages-container').scrollIntoView({ behavior: 'smooth' });
+        
+      } catch (error) {
+        console.error('Error starting conversation:', error);
+        alert('Error starting conversation: ' + error.message);
+      }
     };
+
+    // Initialize admin dashboard
+    document.addEventListener('DOMContentLoaded', () => {
+      // Check if user is authenticated and has admin privileges
+      onAuthStateChanged(auth, (user) => {
+        if (user && ADMIN_EMAILS.includes(user.email)) {
+          loadAdminData();
+          
+          // Set up real-time listeners for updates
+          setInterval(() => {
+            loadUsersList();
+            loadMessages();
+          }, 30000); // Refresh every 30 seconds
+        }
+      });
+    });
+
+    // Additional utility functions
+    window.exportUserData = async (userId) => {
+      try {
+        alert(`Exporting data for user: ${userId}\n\nIn production, this would generate a CSV/JSON export of all user data.`);
+        
+        // Simulate export process
+        const exportBtn = event.target;
+        const originalText = exportBtn.innerHTML;
+        exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+        exportBtn.disabled = true;
+        
+        // Simulate API call delay
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+        alert('Export completed successfully!');
+        
+      } catch (error) {
+        console.error('Error exporting data:', error);
+        alert('Export failed: ' + error.message);
+      }
+    };
+
+    window.impersonateUser = (userId) => {
+      if (!confirm('Are you sure you want to impersonate this user? This action should only be used for debugging purposes.')) {
+        return;
+      }
+      
+      alert(`Impersonating user: ${userId}\n\nIn production, this would switch to the user's view with appropriate security measures.`);
+      
+      // Note: In a real implementation, this would require a secure server-side function
+      // to generate an impersonation token
+    };
+
+    // Search and filter functionality
+    function setupSearchAndFilter() {
+      // Add search input to the page
+      const userManagementSection = document.querySelector('.table-container h3').parentElement;
+      const searchInput = document.createElement('input');
+      searchInput.type = 'text';
+      searchInput.placeholder = 'Search users by email or name...';
+      searchInput.style.padding = '10px';
+      searchInput.style.border = '1px solid #ddd';
+      searchInput.style.borderRadius = '5px';
+      searchInput.style.marginRight = '10px';
+      searchInput.style.width = '300px';
+      
+      userManagementSection.appendChild(searchInput);
+      
+      searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const rows = document.querySelectorAll('#usersTableBody tr');
+        
+        rows.forEach(row => {
+          const text = row.textContent.toLowerCase();
+          row.style.display = text.includes(searchTerm) ? '' : 'none';
+        });
+      });
+    }
+
+    // Enhanced storage visualization
+    function enhanceStorageVisualization() {
+      const storageProgress = document.getElementById('storageProgress');
+      const usedStorage = parseFloat(document.getElementById('usedStorage').textContent);
+      
+      // Change color based on usage
+      if (usedStorage > 800) {
+        storageProgress.style.background = 'var(--danger)';
+      } else if (usedStorage > 500) {
+        storageProgress.style.background = 'var(--warning)';
+      } else {
+        storageProgress.style.background = 'var(--primary)';
+      }
+    }
+
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + R to refresh
+      if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        loadAdminData();
+      }
+      
+      // Escape to clear search or close modals
+      if (e.key === 'Escape') {
+        const searchInputs = document.querySelectorAll('input[type="text"]');
+        searchInputs.forEach(input => input.value = '');
+        
+        // Trigger search update
+        searchInputs.forEach(input => input.dispatchEvent(new Event('input')));
+      }
+    });
+
+    // Add responsive improvements
+    function setupResponsiveBehavior() {
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        if (window.innerWidth < 768) {
+          document.body.classList.add('mobile-view');
+        } else {
+          document.body.classList.remove('mobile-view');
+        }
+      });
+      
+      // Add mobile menu toggle if needed
+      const navContainer = document.querySelector('.nav-container');
+      if (window.innerWidth < 768) {
+        const menuToggle = document.createElement('button');
+        menuToggle.className = 'btn btn-small';
+        menuToggle.innerHTML = '<i class="fas fa-bars"></i>';
+        menuToggle.style.marginLeft = 'auto';
+        
+        menuToggle.addEventListener('click', () => {
+          const navLinks = document.querySelector('.nav-links');
+          navLinks.style.display = navLinks.style.display === 'flex' ? 'none' : 'flex';
+        });
+        
+        navContainer.appendChild(menuToggle);
+      }
+    }
+
+    // Initialize enhanced features
+    setTimeout(() => {
+      setupSearchAndFilter();
+      enhanceStorageVisualization();
+      setupResponsiveBehavior();
+    }, 1000);
+
+    // Error handling for Firebase permissions
+    function handleFirebaseError(error) {
+      console.error('Firebase Error:', error);
+      
+      if (error.code === 'permission-denied') {
+        alert('Permission denied. Please check your Firebase security rules.');
+      } else if (error.code === 'unavailable') {
+        alert('Network error. Please check your internet connection.');
+      } else {
+        alert('An error occurred: ' + error.message);
+      }
+    }
+
+    // Global error handler
+    window.addEventListener('error', (event) => {
+      console.error('Global error:', event.error);
+      handleFirebaseError(event.error);
+    });
+
+    // Add loading states for better UX
+    function showLoading(element) {
+      element.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
+    }
+
+    function hideLoading(element, content) {
+      element.innerHTML = content;
+    }
 
   </script>
 </body>
