@@ -70,6 +70,22 @@
       border: 2px solid var(--primary);
     }
     
+    .btn-danger {
+      background: var(--danger);
+    }
+    
+    .btn-danger:hover {
+      background: #d32f2f;
+    }
+    
+    .btn-success {
+      background: var(--success);
+    }
+    
+    .btn-success:hover {
+      background: #388e3c;
+    }
+    
     nav {
       background: var(--light);
       box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -203,6 +219,7 @@
     .status-active { color: var(--success); font-weight: bold; }
     .status-inactive { color: var(--danger); font-weight: bold; }
     .status-auth-only { color: var(--warning); font-weight: bold; }
+    .status-suspended { color: var(--danger); font-weight: bold; }
     
     .loading {
       text-align: center;
@@ -409,12 +426,46 @@
       color: var(--success);
     }
     
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .health-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    
+    .health-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    
+    .health-healthy {
+      background: var(--success);
+    }
+    
+    .health-warning {
+      background: var(--warning);
+    }
+    
+    .health-error {
+      background: var(--danger);
+    }
+    
     @media (max-width: 768px) {
       .nav-container { flex-direction: column; }
       .nav-links { margin-top: 15px; flex-wrap: wrap; justify-content: center; }
       .nav-links li { margin: 5px 10px; }
       .dashboard-grid { grid-template-columns: 1fr; }
       .messages-container { grid-template-columns: 1fr; }
+      .action-buttons { flex-direction: column; }
     }
     
     @keyframes spin {
@@ -443,6 +494,10 @@
       <div class="section-title">
         <h2>Admin Dashboard</h2>
         <p>Monitor user activity and system performance</p>
+        <div class="health-status" id="systemHealthStatus">
+          <span class="health-dot health-healthy"></span>
+          <span>All systems operational</span>
+        </div>
       </div>
       
       <div class="dashboard-grid">
@@ -481,6 +536,16 @@
           <h3>All Users (Authentication + Firestore Data)</h3>
           <button class="btn btn-small" id="refreshUsers"><i class="fas fa-sync-alt"></i> Refresh</button>
         </div>
+        
+        <div class="action-buttons">
+          <button class="btn btn-small btn-success" onclick="exportUserData()">
+            <i class="fas fa-download"></i> Export Data
+          </button>
+          <button class="btn btn-small" onclick="checkSystemHealth()">
+            <i class="fas fa-heartbeat"></i> System Health
+          </button>
+        </div>
+        
         <div id="usersLoading" class="loading">
           <div class="spinner"></div>
           <p>Loading users...</p>
@@ -610,6 +675,40 @@
     // Admin emails - UPDATE WITH YOUR EMAIL
     const ADMIN_EMAILS = ['shahulsha254@gmail.com'];
 
+    // Rate limiting for admin actions
+    const adminActions = {};
+    const RATE_LIMIT_MS = 2000; // 2 seconds between actions
+
+    function checkRateLimit(action) {
+      const now = Date.now();
+      if (adminActions[action] && (now - adminActions[action] < RATE_LIMIT_MS)) {
+        throw new Error('Please wait before performing this action again');
+      }
+      adminActions[action] = now;
+      return true;
+    }
+
+    // Session Management
+    let sessionTimer;
+    const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+    function resetSessionTimer() {
+      clearTimeout(sessionTimer);
+      sessionTimer = setTimeout(() => {
+        alert('Session expired due to inactivity');
+        signOut(auth).then(() => {
+          window.location.href = 'index.html';
+        });
+      }, SESSION_TIMEOUT);
+    }
+
+    function setupActivityListeners() {
+      ['click', 'keypress', 'scroll', 'mousemove'].forEach(event => {
+        document.addEventListener(event, resetSessionTimer, { passive: true });
+      });
+      resetSessionTimer();
+    }
+
     // Check authentication and admin status
     onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -627,6 +726,11 @@
       
       // Load admin data
       loadAdminData();
+      
+      // Setup additional functionality
+      setupRealTimeListeners();
+      setupActivityListeners();
+      checkSystemHealth();
     });
 
     // Event listeners
@@ -705,7 +809,8 @@
             lastLogin: new Date(),
             emailVerified: true,
             username: 'user1@example.com',
-            displayName: 'Demo User 1'
+            displayName: 'Demo User 1',
+            status: 'active'
           },
           {
             id: 'auth2',
@@ -716,7 +821,8 @@
             lastLogin: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
             emailVerified: true,
             username: 'user2@example.com',
-            displayName: 'Demo User 2'
+            displayName: 'Demo User 2',
+            status: 'active'
           },
           {
             id: 'auth3',
@@ -727,7 +833,8 @@
             lastLogin: null,
             emailVerified: false,
             username: 'user3@example.com',
-            displayName: 'New User'
+            displayName: 'New User',
+            status: 'suspended'
           }
         ];
 
@@ -785,12 +892,17 @@
           let statusClass = 'status-inactive';
           let statusText = 'Unverified';
           
-          if (user.emailVerified) {
+          if (user.emailVerified && user.status !== 'suspended') {
             statusClass = 'status-active';
             statusText = 'Verified';
           } else if (user.source === 'authentication') {
             statusClass = 'status-auth-only';
             statusText = 'Auth Only';
+          }
+          
+          if (user.status === 'suspended') {
+            statusClass = 'status-suspended';
+            statusText = 'Suspended';
           }
           
           row.innerHTML = `
@@ -815,6 +927,11 @@
               </button>
               <button class="btn btn-small" onclick="startConversation('${user.id}', '${user.email}')" style="margin-left: 5px;">
                 <i class="fas fa-envelope"></i> Message
+              </button>
+              <button class="btn btn-small ${user.status === 'suspended' ? 'btn-success' : 'btn-danger'}" 
+                      onclick="toggleUserStatus('${user.id}', '${user.status || 'active'}')" style="margin-left: 5px;">
+                <i class="fas ${user.status === 'suspended' ? 'fa-user-check' : 'fa-user-slash'}"></i> 
+                ${user.status === 'suspended' ? 'Activate' : 'Suspend'}
               </button>
             </td>
           `;
@@ -1154,6 +1271,189 @@
       }
     }
 
+    // 1. User Management Functions
+    async function deleteUser(userId, source) {
+      if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
+      
+      try {
+        checkRateLimit('deleteUser');
+        
+        // In production, you would:
+        // - Delete from Authentication
+        // - Delete user data from Firestore
+        // - Clean up related records
+        
+        console.log(`Would delete user: ${userId} from ${source}`);
+        alert('User deletion functionality would be implemented in production');
+        
+        // Refresh the users list
+        loadUsersList();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+
+    async function toggleUserStatus(userId, currentStatus) {
+      try {
+        checkRateLimit('toggleUserStatus');
+        
+        const newStatus = currentStatus === 'active' ? 'suspended' : 'active';
+        
+        // In production, update user status in Firestore/Auth
+        console.log(`Would set user ${userId} status to: ${newStatus}`);
+        
+        alert(`User status would be changed to: ${newStatus}`);
+        loadUsersList();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+
+    // 2. Data Export Function
+    async function exportUserData() {
+      try {
+        checkRateLimit('exportData');
+        
+        // Create a CSV export of user data
+        const users = []; // You would get this from your actual data
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "Email,Username,Status,Created At,Last Login\n";
+        
+        // Demo data for export
+        const demoUsers = [
+          { email: 'user1@example.com', username: 'user1', status: 'active', createdAt: '2024-01-01', lastLogin: '2024-12-19' },
+          { email: 'user2@example.com', username: 'user2', status: 'active', createdAt: '2024-01-02', lastLogin: '2024-12-18' },
+          { email: 'user3@example.com', username: 'user3', status: 'suspended', createdAt: '2024-01-03', lastLogin: '2024-12-17' }
+        ];
+        
+        demoUsers.forEach(user => {
+          const row = [
+            user.email,
+            user.username,
+            user.status,
+            user.createdAt,
+            user.lastLogin
+          ].join(",");
+          csvContent += row + "\n";
+        });
+        
+        // Create download link
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "users_export.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+      } catch (error) {
+        alert('Error exporting data: ' + error.message);
+      }
+    }
+
+    // 3. System Health Monitoring
+    async function checkSystemHealth() {
+      try {
+        const healthStatus = document.getElementById('systemHealthStatus');
+        const healthDot = healthStatus.querySelector('.health-dot');
+        const healthText = healthStatus.querySelector('span:last-child');
+        
+        healthDot.className = 'health-dot health-warning';
+        healthText.textContent = 'Checking system health...';
+        
+        const healthChecks = {
+          firestore: await testFirestoreConnection(),
+          auth: await testAuthConnection(),
+          storage: await testStorageConnection()
+        };
+        
+        const allHealthy = Object.values(healthChecks).every(check => check);
+        
+        if (allHealthy) {
+          healthDot.className = 'health-dot health-healthy';
+          healthText.textContent = 'All systems operational';
+        } else {
+          healthDot.className = 'health-dot health-error';
+          healthText.textContent = 'System issues detected';
+          console.warn('System health issues detected:', healthChecks);
+        }
+        
+        return healthChecks;
+      } catch (error) {
+        console.error('Health check failed:', error);
+        const healthStatus = document.getElementById('systemHealthStatus');
+        healthStatus.querySelector('.health-dot').className = 'health-dot health-error';
+        healthStatus.querySelector('span:last-child').textContent = 'Health check failed';
+        return false;
+      }
+    }
+
+    async function testFirestoreConnection() {
+      try {
+        // Try to read a document to test connection
+        await getDocs(collection(db, 'users'));
+        return true;
+      } catch (error) {
+        console.error('Firestore connection test failed:', error);
+        return false;
+      }
+    }
+
+    async function testAuthConnection() {
+      return new Promise((resolve) => {
+        const auth = getAuth();
+        // If we have a current user, auth is working
+        resolve(!!auth.currentUser);
+      });
+    }
+
+    async function testStorageConnection() {
+      // Basic storage connection test
+      // In a real implementation, you would test storage bucket access
+      return true;
+    }
+
+    // 4. Real-time Dashboard Updates
+    function setupRealTimeListeners() {
+      // Listen for new users in real-time
+      const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+      onSnapshot(usersQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            console.log('New user added:', change.doc.data());
+            // Update dashboard counters in real-time
+            loadUsersList();
+          }
+        });
+      });
+      
+      // Listen for new messages in real-time
+      const messagesQuery = query(collection(db, 'conversations'), orderBy('lastMessageTime', 'desc'));
+      onSnapshot(messagesQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added' || change.type === 'modified') {
+            loadMessages();
+          }
+        });
+      });
+    }
+
+    // 5. Error Handling and Logging
+    function logAdminAction(action, details) {
+      const logEntry = {
+        action,
+        details,
+        adminEmail: auth.currentUser?.email,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent
+      };
+      
+      // Store in Firestore for audit trail
+      addDoc(collection(db, 'adminLogs'), logEntry).catch(console.error);
+      
+      console.log('Admin Action:', logEntry);
+    }
+
     // Global functions for user actions
     window.viewUserDetails = (userId, source) => {
       alert(`Viewing user: ${userId}\nSource: ${source}\n\nIn production, this would show detailed user analytics.`);
@@ -1183,6 +1483,11 @@
         alert('Error starting conversation: ' + error.message);
       }
     };
+
+    window.deleteUser = deleteUser;
+    window.toggleUserStatus = toggleUserStatus;
+    window.exportUserData = exportUserData;
+    window.checkSystemHealth = checkSystemHealth;
 
     // Initialize the dashboard
     console.log('Admin dashboard initialized');
