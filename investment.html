@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WealthWise - All-in-One Finance App</title>
+    <title>WealthTrack - Investment Portfolio Manager</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -114,6 +115,16 @@
             background-color: transparent;
             border: 1px solid var(--primary);
             color: var(--primary);
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            color: white;
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+            color: white;
         }
 
         .btn:hover {
@@ -230,6 +241,7 @@
             flex-direction: column;
             gap: 10px;
             transition: all 0.3s ease;
+            position: relative;
         }
 
         .investment-card:hover {
@@ -245,6 +257,29 @@
 
         .investment-icon {
             font-size: 24px;
+        }
+
+        .investment-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .investment-actions button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .investment-actions button:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .investment-amount {
@@ -316,6 +351,8 @@
             width: 90%;
             max-width: 500px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            max-height: 90vh;
+            overflow-y: auto;
         }
 
         .modal-header {
@@ -369,6 +406,56 @@
             margin-top: 20px;
         }
 
+        .investment-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .investment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .investment-item-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .investment-item-icon {
+            font-size: 24px;
+            color: var(--primary);
+        }
+
+        .investment-item-details h4 {
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        .investment-item-details p {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        .investment-item-value {
+            text-align: right;
+        }
+
+        .investment-item-value .amount {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .investment-item-value .growth {
+            font-size: 14px;
+        }
+
         footer {
             text-align: center;
             padding: 20px 0;
@@ -376,6 +463,19 @@
             border-top: 1px solid var(--border);
             color: var(--text);
             opacity: 0.7;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text);
+            opacity: 0.7;
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
         }
 
         @media (max-width: 768px) {
@@ -398,7 +498,7 @@
         <header>
             <div class="logo">
                 <i class="fas fa-chart-line"></i>
-                <h1>WealthWise</h1>
+                <h1>WealthTrack</h1>
             </div>
             <div class="nav-controls">
                 <button class="theme-toggle" id="themeToggle">
@@ -414,84 +514,133 @@
         <div class="dashboard">
             <div class="sidebar">
                 <ul class="sidebar-menu">
-                    <li><a href="#" class="active"><i class="fas fa-home"></i> Dashboard</a></li>
-                    <li><a href="#"><i class="fas fa-wallet"></i> Budget</a></li>
-                    <li><a href="#"><i class="fas fa-chart-pie"></i> Investments</a></li>
-                    <li><a href="#"><i class="fas fa-piggy-bank"></i> Savings</a></li>
-                    <li><a href="#"><i class="fas fa-chart-bar"></i> Analytics</a></li>
-                    <li><a href="#"><i class="fas fa-cog"></i> Settings</a></li>
+                    <li><a href="#" class="active" data-tab="dashboard"><i class="fas fa-home"></i> Dashboard</a></li>
+                    <li><a href="#" data-tab="investments"><i class="fas fa-chart-pie"></i> All Investments</a></li>
+                    <li><a href="#" data-tab="performance"><i class="fas fa-chart-line"></i> Performance</a></li>
+                    <li><a href="#" data-tab="analytics"><i class="fas fa-chart-bar"></i> Analytics</a></li>
+                    <li><a href="#" data-tab="settings"><i class="fas fa-cog"></i> Settings</a></li>
                 </ul>
             </div>
 
             <div class="main-content">
-                <div class="stats-cards">
-                    <div class="stat-card">
-                        <i class="fas fa-wallet"></i>
-                        <div class="stat-value">$12,450</div>
-                        <div class="stat-label">Total Balance</div>
+                <!-- Dashboard Tab -->
+                <div class="tab-content active" id="dashboardTab">
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <i class="fas fa-wallet"></i>
+                            <div class="stat-value" id="totalBalance">$0</div>
+                            <div class="stat-label">Total Portfolio Value</div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-chart-line"></i>
+                            <div class="stat-value" id="totalInvested">$0</div>
+                            <div class="stat-label">Total Invested</div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-arrow-up"></i>
+                            <div class="stat-value" id="totalGrowth">0%</div>
+                            <div class="stat-label">Overall Growth</div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-coins"></i>
+                            <div class="stat-value" id="investmentCount">0</div>
+                            <div class="stat-label">Active Investments</div>
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <i class="fas fa-chart-line"></i>
-                        <div class="stat-value">$8,230</div>
-                        <div class="stat-label">Investments</div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">My Investments</div>
+                            <button class="btn btn-primary" id="addInvestmentBtn">
+                                <i class="fas fa-plus"></i> Add Investment
+                            </button>
+                        </div>
+                        <div class="investments-grid" id="investmentsGrid">
+                            <!-- Investment cards will be dynamically added here -->
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <i class="fas fa-piggy-bank"></i>
-                        <div class="stat-value">$2,540</div>
-                        <div class="stat-label">Savings</div>
-                    </div>
-                    <div class="stat-card">
-                        <i class="fas fa-arrow-up"></i>
-                        <div class="stat-value">+12.5%</div>
-                        <div class="stat-label">This Month</div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Portfolio Allocation</div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="allocationChart"></canvas>
+                        </div>
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">My Investments</div>
-                        <button class="btn btn-primary" id="addInvestmentBtn">
-                            <i class="fas fa-plus"></i> Add Investment
-                        </button>
-                    </div>
-                    <div class="investments-grid" id="investmentsGrid">
-                        <!-- Investment cards will be dynamically added here -->
+                <!-- All Investments Tab -->
+                <div class="tab-content" id="investmentsTab">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">All Investments</div>
+                            <button class="btn btn-primary" id="addInvestmentBtn2">
+                                <i class="fas fa-plus"></i> Add Investment
+                            </button>
+                        </div>
+                        <div class="investment-list" id="investmentList">
+                            <!-- Investment list will be dynamically added here -->
+                        </div>
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Financial Overview</div>
-                    </div>
-                    <div class="tabs">
-                        <div class="tab active" data-tab="overview">Overview</div>
-                        <div class="tab" data-tab="performance">Performance</div>
-                        <div class="tab" data-tab="allocation">Allocation</div>
-                    </div>
-                    <div class="tab-content active" id="overviewTab">
-                        <p>Your financial health is excellent! You're on track to meet your savings goals.</p>
-                        <div class="chart-container" id="overviewChart">
-                            <!-- Chart will be rendered here -->
+                <!-- Performance Tab -->
+                <div class="tab-content" id="performanceTab">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Investment Performance</div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="performanceChart"></canvas>
                         </div>
                     </div>
-                    <div class="tab-content" id="performanceTab">
-                        <p>Your investments have grown by 12.5% in the last month.</p>
-                        <div class="chart-container" id="performanceChart">
-                            <!-- Chart will be rendered here -->
+                </div>
+
+                <!-- Analytics Tab -->
+                <div class="tab-content" id="analyticsTab">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Investment Analytics</div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="analyticsChart"></canvas>
                         </div>
                     </div>
-                    <div class="tab-content" id="allocationTab">
-                        <p>Here's how your investments are allocated across different asset classes.</p>
-                        <div class="chart-container" id="allocationChart">
-                            <!-- Chart will be rendered here -->
+                </div>
+
+                <!-- Settings Tab -->
+                <div class="tab-content" id="settingsTab">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Account Settings</div>
                         </div>
+                        <div class="form-group">
+                            <label class="form-label" for="currency">Default Currency</label>
+                            <select class="form-control" id="currency">
+                                <option value="USD">US Dollar (USD)</option>
+                                <option value="EUR">Euro (EUR)</option>
+                                <option value="GBP">British Pound (GBP)</option>
+                                <option value="INR">Indian Rupee (INR)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="notifications">Email Notifications</label>
+                            <select class="form-control" id="notifications">
+                                <option value="daily">Daily</option>
+                                <option value="weekly" selected>Weekly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="none">None</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary">Save Settings</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <footer>
-            <p>WealthWise &copy; 2023 - Your All-in-One Financial Companion</p>
+            <p>WealthTrack &copy; 2023 - Your Investment Portfolio Manager</p>
         </footer>
     </div>
 
@@ -527,17 +676,76 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="investmentAmount">Amount Invested ($)</label>
-                    <input type="number" class="form-control" id="investmentAmount" placeholder="1000" required>
+                    <input type="number" class="form-control" id="investmentAmount" placeholder="1000" step="0.01" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="currentValue">Current Value ($)</label>
-                    <input type="number" class="form-control" id="currentValue" placeholder="1050" required>
+                    <input type="number" class="form-control" id="currentValue" placeholder="1050" step="0.01" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="investmentDate">Investment Date</label>
                     <input type="date" class="form-control" id="investmentDate" required>
                 </div>
+                <div class="form-group">
+                    <label class="form-label" for="investmentNotes">Notes (Optional)</label>
+                    <textarea class="form-control" id="investmentNotes" rows="3" placeholder="Add any additional notes..."></textarea>
+                </div>
                 <button type="submit" class="btn btn-primary" style="width: 100%;">Add Investment</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Investment Modal -->
+    <div class="modal" id="editInvestmentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Edit Investment</div>
+                <button class="close-modal" id="closeEditModal">&times;</button>
+            </div>
+            <form id="editInvestmentForm">
+                <input type="hidden" id="editInvestmentId">
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentType">Investment Type</label>
+                    <select class="form-control" id="editInvestmentType" required>
+                        <option value="">Select Type</option>
+                        <option value="digital_gold">Digital Gold</option>
+                        <option value="stocks">Stocks</option>
+                        <option value="mutual_funds">Mutual Funds</option>
+                        <option value="crypto">Cryptocurrency</option>
+                        <option value="bonds">Bonds</option>
+                        <option value="real_estate">Real Estate</option>
+                        <option value="savings">Savings Account</option>
+                        <option value="fd">Fixed Deposit</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentName">Investment Name</label>
+                    <input type="text" class="form-control" id="editInvestmentName" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentPlatform">Platform</label>
+                    <input type="text" class="form-control" id="editInvestmentPlatform" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentAmount">Amount Invested ($)</label>
+                    <input type="number" class="form-control" id="editInvestmentAmount" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editCurrentValue">Current Value ($)</label>
+                    <input type="number" class="form-control" id="editCurrentValue" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentDate">Investment Date</label>
+                    <input type="date" class="form-control" id="editInvestmentDate" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="editInvestmentNotes">Notes (Optional)</label>
+                    <textarea class="form-control" id="editInvestmentNotes" rows="3"></textarea>
+                </div>
+                <div class="form-group" style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success" style="flex: 1;">Update Investment</button>
+                    <button type="button" class="btn btn-danger" id="deleteInvestmentBtn" style="flex: 1;">Delete Investment</button>
+                </div>
             </form>
         </div>
     </div>
@@ -562,78 +770,397 @@
         // DOM Elements
         const themeToggle = document.getElementById('themeToggle');
         const addInvestmentBtn = document.getElementById('addInvestmentBtn');
+        const addInvestmentBtn2 = document.getElementById('addInvestmentBtn2');
         const addInvestmentModal = document.getElementById('addInvestmentModal');
+        const editInvestmentModal = document.getElementById('editInvestmentModal');
         const closeModal = document.getElementById('closeModal');
+        const closeEditModal = document.getElementById('closeEditModal');
         const investmentForm = document.getElementById('investmentForm');
+        const editInvestmentForm = document.getElementById('editInvestmentForm');
+        const deleteInvestmentBtn = document.getElementById('deleteInvestmentBtn');
         const investmentsGrid = document.getElementById('investmentsGrid');
-        const tabs = document.querySelectorAll('.tab');
+        const investmentList = document.getElementById('investmentList');
+        const sidebarMenu = document.querySelectorAll('.sidebar-menu a');
         const tabContents = document.querySelectorAll('.tab-content');
 
-        // Sample investment data
-        const sampleInvestments = [
-            {
-                id: 1,
-                type: 'digital_gold',
-                name: 'Jar App Gold',
-                platform: 'Jar App',
-                amount: 1500,
-                currentValue: 1620,
-                growth: 8.0,
-                icon: 'fas fa-coins'
-            },
-            {
-                id: 2,
-                type: 'stocks',
-                name: 'Tech Stocks',
-                platform: 'Zerodha',
-                amount: 5000,
-                currentValue: 5420,
-                growth: 8.4,
-                icon: 'fas fa-chart-line'
-            },
-            {
-                id: 3,
-                type: 'mutual_funds',
-                name: 'Index Fund',
-                platform: 'Groww',
-                amount: 3000,
-                currentValue: 3120,
-                growth: 4.0,
-                icon: 'fas fa-chart-pie'
-            },
-            {
-                id: 4,
-                type: 'crypto',
-                name: 'Bitcoin',
-                platform: 'WazirX',
-                amount: 2000,
-                currentValue: 2150,
-                growth: 7.5,
-                icon: 'fab fa-bitcoin'
-            },
-            {
-                id: 5,
-                type: 'savings',
-                name: 'Emergency Fund',
-                platform: 'HDFC Bank',
-                amount: 8000,
-                currentValue: 8000,
-                growth: 0.0,
-                icon: 'fas fa-piggy-bank'
-            },
-            {
-                id: 6,
-                type: 'fd',
-                name: 'Fixed Deposit',
-                platform: 'SBI',
-                amount: 10000,
-                currentValue: 10200,
-                growth: 2.0,
-                icon: 'fas fa-file-invoice-dollar'
-            }
-        ];
+        // Chart instances
+        let allocationChart, performanceChart, analyticsChart;
 
-        // Theme Toggle
+        // Investment data
+        let investments = [];
+
+        // Get icon based on investment type
+        function getInvestmentIcon(type) {
+            switch(type) {
+                case 'digital_gold': return 'fas fa-coins';
+                case 'stocks': return 'fas fa-chart-line';
+                case 'mutual_funds': return 'fas fa-chart-pie';
+                case 'crypto': return 'fab fa-bitcoin';
+                case 'bonds': return 'fas fa-file-contract';
+                case 'real_estate': return 'fas fa-home';
+                case 'savings': return 'fas fa-piggy-bank';
+                case 'fd': return 'fas fa-file-invoice-dollar';
+                default: return 'fas fa-chart-line';
+            }
+        }
+
+        // Format currency
+        function formatCurrency(amount) {
+            return '$' + amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        // Calculate growth percentage
+        function calculateGrowth(invested, current) {
+            return ((current - invested) / invested * 100).toFixed(2);
+        }
+
+        // Update dashboard stats
+        function updateDashboardStats() {
+            const totalInvested = investments.reduce((sum, inv) => sum + parseFloat(inv.amount), 0);
+            const totalValue = investments.reduce((sum, inv) => sum + parseFloat(inv.currentValue), 0);
+            const totalGrowth = totalInvested > 0 ? ((totalValue - totalInvested) / totalInvested * 100).toFixed(2) : 0;
+            
+            document.getElementById('totalBalance').textContent = formatCurrency(totalValue);
+            document.getElementById('totalInvested').textContent = formatCurrency(totalInvested);
+            document.getElementById('totalGrowth').textContent = `${totalGrowth}%`;
+            document.getElementById('investmentCount').textContent = investments.length;
+            
+            // Update growth color
+            const growthElement = document.getElementById('totalGrowth');
+            growthElement.className = `stat-value ${parseFloat(totalGrowth) >= 0 ? 'growth-positive' : 'growth-negative'}`;
+        }
+
+        // Render investment cards for dashboard
+        function renderInvestmentCards() {
+            investmentsGrid.innerHTML = '';
+            
+            if (investments.length === 0) {
+                investmentsGrid.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <i class="fas fa-coins"></i>
+                        <h3>No Investments Yet</h3>
+                        <p>Add your first investment to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Show only the first 6 investments on dashboard
+            const displayInvestments = investments.slice(0, 6);
+            
+            displayInvestments.forEach(investment => {
+                const growth = calculateGrowth(investment.amount, investment.currentValue);
+                const growthClass = parseFloat(growth) >= 0 ? 'growth-positive' : 'growth-negative';
+                const growthIcon = parseFloat(growth) >= 0 ? 'fas fa-arrow-up' : 'fas fa-arrow-down';
+                
+                const investmentCard = document.createElement('div');
+                investmentCard.className = 'investment-card';
+                investmentCard.innerHTML = `
+                    <div class="investment-header">
+                        <div class="investment-icon">
+                            <i class="${getInvestmentIcon(investment.type)}"></i>
+                        </div>
+                        <div class="investment-actions">
+                            <button class="edit-investment" data-id="${investment.id}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="investment-amount">${formatCurrency(investment.currentValue)}</div>
+                    <div class="investment-name">${investment.name}</div>
+                    <div class="investment-platform">${investment.platform}</div>
+                    <div class="investment-growth ${growthClass}">
+                        <i class="${growthIcon}"></i>
+                        ${growth}%
+                    </div>
+                `;
+                
+                investmentsGrid.appendChild(investmentCard);
+            });
+            
+            // Add event listeners to edit buttons
+            document.querySelectorAll('.edit-investment').forEach(button => {
+                button.addEventListener('click', function() {
+                    const investmentId = this.getAttribute('data-id');
+                    openEditInvestmentModal(investmentId);
+                });
+            });
+        }
+
+        // Render investment list for All Investments tab
+        function renderInvestmentList() {
+            investmentList.innerHTML = '';
+            
+            if (investments.length === 0) {
+                investmentList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-coins"></i>
+                        <h3>No Investments Yet</h3>
+                        <p>Add your first investment to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            investments.forEach(investment => {
+                const growth = calculateGrowth(investment.amount, investment.currentValue);
+                const growthClass = parseFloat(growth) >= 0 ? 'growth-positive' : 'growth-negative';
+                
+                const investmentItem = document.createElement('div');
+                investmentItem.className = 'investment-item';
+                investmentItem.innerHTML = `
+                    <div class="investment-item-info">
+                        <div class="investment-item-icon">
+                            <i class="${getInvestmentIcon(investment.type)}"></i>
+                        </div>
+                        <div class="investment-item-details">
+                            <h4>${investment.name}</h4>
+                            <p>${investment.platform} • ${investment.type.replace('_', ' ')}</p>
+                        </div>
+                    </div>
+                    <div class="investment-item-value">
+                        <div class="amount">${formatCurrency(investment.currentValue)}</div>
+                        <div class="growth ${growthClass}">${growth}%</div>
+                    </div>
+                    <div class="investment-actions">
+                        <button class="edit-investment" data-id="${investment.id}">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                    </div>
+                `;
+                
+                investmentList.appendChild(investmentItem);
+            });
+            
+            // Add event listeners to edit buttons
+            document.querySelectorAll('.edit-investment').forEach(button => {
+                button.addEventListener('click', function() {
+                    const investmentId = this.getAttribute('data-id');
+                    openEditInvestmentModal(investmentId);
+                });
+            });
+        }
+
+        // Open edit investment modal
+        function openEditInvestmentModal(investmentId) {
+            const investment = investments.find(inv => inv.id === investmentId);
+            if (!investment) return;
+            
+            document.getElementById('editInvestmentId').value = investment.id;
+            document.getElementById('editInvestmentType').value = investment.type;
+            document.getElementById('editInvestmentName').value = investment.name;
+            document.getElementById('editInvestmentPlatform').value = investment.platform;
+            document.getElementById('editInvestmentAmount').value = investment.amount;
+            document.getElementById('editCurrentValue').value = investment.currentValue;
+            document.getElementById('editInvestmentDate').value = investment.date;
+            document.getElementById('editInvestmentNotes').value = investment.notes || '';
+            
+            editInvestmentModal.style.display = 'flex';
+        }
+
+        // Update charts
+        function updateCharts() {
+            // Portfolio Allocation Chart
+            const typeCounts = {};
+            investments.forEach(inv => {
+                typeCounts[inv.type] = (typeCounts[inv.type] || 0) + parseFloat(inv.currentValue);
+            });
+            
+            const allocationCtx = document.getElementById('allocationChart').getContext('2d');
+            if (allocationChart) allocationChart.destroy();
+            
+            if (Object.keys(typeCounts).length > 0) {
+                allocationChart = new Chart(allocationCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(typeCounts).map(type => type.replace('_', ' ')),
+                        datasets: [{
+                            data: Object.values(typeCounts),
+                            backgroundColor: [
+                                '#4361ee', '#3a0ca3', '#4cc9f0', '#f72585', 
+                                '#f8961e', '#4895ef', '#7209b7', '#06d6a0'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Performance Chart
+            const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+            if (performanceChart) performanceChart.destroy();
+            
+            // For demo purposes, we'll create sample performance data
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+            const performanceData = months.map(() => Math.random() * 5000 + 10000);
+            
+            performanceChart = new Chart(performanceCtx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [{
+                        label: 'Portfolio Value',
+                        data: performanceData,
+                        borderColor: '#4361ee',
+                        backgroundColor: 'rgba(67, 97, 238, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+            
+            // Analytics Chart
+            const analyticsCtx = document.getElementById('analyticsChart').getContext('2d');
+            if (analyticsChart) analyticsChart.destroy();
+            
+            const growthByType = {};
+            investments.forEach(inv => {
+                const growth = calculateGrowth(inv.amount, inv.currentValue);
+                if (!growthByType[inv.type]) {
+                    growthByType[inv.type] = [];
+                }
+                growthByType[inv.type].push(parseFloat(growth));
+            });
+            
+            const avgGrowthByType = {};
+            Object.keys(growthByType).forEach(type => {
+                const avg = growthByType[type].reduce((a, b) => a + b, 0) / growthByType[type].length;
+                avgGrowthByType[type] = avg;
+            });
+            
+            analyticsChart = new Chart(analyticsCtx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(avgGrowthByType).map(type => type.replace('_', ' ')),
+                    datasets: [{
+                        label: 'Average Growth (%)',
+                        data: Object.values(avgGrowthByType),
+                        backgroundColor: '#4361ee'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load investments from Firebase
+        function loadInvestments() {
+            // In a real app, you would load from Firestore
+            // For demo purposes, we'll use sample data
+            investments = [
+                {
+                    id: '1',
+                    type: 'digital_gold',
+                    name: 'Jar App Gold',
+                    platform: 'Jar App',
+                    amount: 1500,
+                    currentValue: 1620,
+                    date: '2023-05-15',
+                    notes: 'Monthly gold investment'
+                },
+                {
+                    id: '2',
+                    type: 'stocks',
+                    name: 'Tech Stocks',
+                    platform: 'Zerodha',
+                    amount: 5000,
+                    currentValue: 5420,
+                    date: '2023-03-10',
+                    notes: 'Diversified tech portfolio'
+                },
+                {
+                    id: '3',
+                    type: 'mutual_funds',
+                    name: 'Index Fund',
+                    platform: 'Groww',
+                    amount: 3000,
+                    currentValue: 3120,
+                    date: '2023-04-22',
+                    notes: 'Nifty 50 index fund'
+                },
+                {
+                    id: '4',
+                    type: 'crypto',
+                    name: 'Bitcoin',
+                    platform: 'WazirX',
+                    amount: 2000,
+                    currentValue: 2150,
+                    date: '2023-06-05',
+                    notes: 'Long term hold'
+                }
+            ];
+            
+            updateDashboardStats();
+            renderInvestmentCards();
+            renderInvestmentList();
+            updateCharts();
+        }
+
+        // Save investment to Firebase
+        function saveInvestment(investment) {
+            // In a real app, you would save to Firestore
+            // For demo purposes, we'll add to the local array
+            investment.id = Date.now().toString();
+            investments.push(investment);
+            
+            updateDashboardStats();
+            renderInvestmentCards();
+            renderInvestmentList();
+            updateCharts();
+        }
+
+        // Update investment in Firebase
+        function updateInvestment(updatedInvestment) {
+            // In a real app, you would update in Firestore
+            // For demo purposes, we'll update the local array
+            const index = investments.findIndex(inv => inv.id === updatedInvestment.id);
+            if (index !== -1) {
+                investments[index] = updatedInvestment;
+                
+                updateDashboardStats();
+                renderInvestmentCards();
+                renderInvestmentList();
+                updateCharts();
+            }
+        }
+
+        // Delete investment from Firebase
+        function deleteInvestment(investmentId) {
+            // In a real app, you would delete from Firestore
+            // For demo purposes, we'll remove from the local array
+            investments = investments.filter(inv => inv.id !== investmentId);
+            
+            updateDashboardStats();
+            renderInvestmentCards();
+            renderInvestmentList();
+            updateCharts();
+        }
+
+        // Event Listeners
         themeToggle.addEventListener('click', () => {
             document.body.classList.toggle('dark-mode');
             const icon = themeToggle.querySelector('i');
@@ -651,59 +1178,42 @@
             addInvestmentModal.style.display = 'flex';
         });
 
+        addInvestmentBtn2.addEventListener('click', () => {
+            addInvestmentModal.style.display = 'flex';
+        });
+
         closeModal.addEventListener('click', () => {
             addInvestmentModal.style.display = 'none';
+        });
+
+        closeEditModal.addEventListener('click', () => {
+            editInvestmentModal.style.display = 'none';
         });
 
         window.addEventListener('click', (e) => {
             if (e.target === addInvestmentModal) {
                 addInvestmentModal.style.display = 'none';
             }
+            if (e.target === editInvestmentModal) {
+                editInvestmentModal.style.display = 'none';
+            }
         });
 
-        // Tab Controls
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabId = tab.getAttribute('data-tab');
+        // Tab Navigation
+        sidebarMenu.forEach(menuItem => {
+            menuItem.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabId = menuItem.getAttribute('data-tab');
                 
-                tabs.forEach(t => t.classList.remove('active'));
+                sidebarMenu.forEach(item => item.classList.remove('active'));
                 tabContents.forEach(content => content.classList.remove('active'));
                 
-                tab.classList.add('active');
+                menuItem.classList.add('active');
                 document.getElementById(`${tabId}Tab`).classList.add('active');
             });
         });
 
-        // Render Investment Cards
-        function renderInvestments() {
-            investmentsGrid.innerHTML = '';
-            
-            sampleInvestments.forEach(investment => {
-                const growthClass = investment.growth >= 0 ? 'growth-positive' : 'growth-negative';
-                const growthIcon = investment.growth >= 0 ? 'fas fa-arrow-up' : 'fas fa-arrow-down';
-                
-                const investmentCard = document.createElement('div');
-                investmentCard.className = 'investment-card';
-                investmentCard.innerHTML = `
-                    <div class="investment-header">
-                        <div class="investment-icon">
-                            <i class="${investment.icon}"></i>
-                        </div>
-                        <div class="investment-amount">$${investment.currentValue.toLocaleString()}</div>
-                    </div>
-                    <div class="investment-name">${investment.name}</div>
-                    <div class="investment-platform">${investment.platform}</div>
-                    <div class="investment-growth ${growthClass}">
-                        <i class="${growthIcon}"></i>
-                        ${investment.growth}%
-                    </div>
-                `;
-                
-                investmentsGrid.appendChild(investmentCard);
-            });
-        }
-
-        // Form Submission
+        // Form Submission - Add Investment
         investmentForm.addEventListener('submit', (e) => {
             e.preventDefault();
             
@@ -713,69 +1223,77 @@
             const amount = parseFloat(document.getElementById('investmentAmount').value);
             const currentValue = parseFloat(document.getElementById('currentValue').value);
             const date = document.getElementById('investmentDate').value;
+            const notes = document.getElementById('investmentNotes').value;
             
-            // Calculate growth percentage
-            const growth = ((currentValue - amount) / amount * 100).toFixed(2);
-            
-            // Get icon based on type
-            let icon = 'fas fa-chart-line';
-            switch(type) {
-                case 'digital_gold':
-                    icon = 'fas fa-coins';
-                    break;
-                case 'stocks':
-                    icon = 'fas fa-chart-line';
-                    break;
-                case 'mutual_funds':
-                    icon = 'fas fa-chart-pie';
-                    break;
-                case 'crypto':
-                    icon = 'fab fa-bitcoin';
-                    break;
-                case 'bonds':
-                    icon = 'fas fa-file-contract';
-                    break;
-                case 'real_estate':
-                    icon = 'fas fa-home';
-                    break;
-                case 'savings':
-                    icon = 'fas fa-piggy-bank';
-                    break;
-                case 'fd':
-                    icon = 'fas fa-file-invoice-dollar';
-                    break;
-            }
-            
-            // Add to sample investments (in a real app, this would be saved to Firebase)
             const newInvestment = {
-                id: sampleInvestments.length + 1,
                 type,
                 name,
                 platform,
                 amount,
                 currentValue,
-                growth: parseFloat(growth),
-                icon
+                date,
+                notes
             };
             
-            sampleInvestments.push(newInvestment);
-            renderInvestments();
+            saveInvestment(newInvestment);
             
             // Reset form and close modal
             investmentForm.reset();
+            document.getElementById('investmentDate').value = new Date().toISOString().split('T')[0];
             addInvestmentModal.style.display = 'none';
             
             // Show success message
             alert('Investment added successfully!');
         });
 
+        // Form Submission - Edit Investment
+        editInvestmentForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const id = document.getElementById('editInvestmentId').value;
+            const type = document.getElementById('editInvestmentType').value;
+            const name = document.getElementById('editInvestmentName').value;
+            const platform = document.getElementById('editInvestmentPlatform').value;
+            const amount = parseFloat(document.getElementById('editInvestmentAmount').value);
+            const currentValue = parseFloat(document.getElementById('editCurrentValue').value);
+            const date = document.getElementById('editInvestmentDate').value;
+            const notes = document.getElementById('editInvestmentNotes').value;
+            
+            const updatedInvestment = {
+                id,
+                type,
+                name,
+                platform,
+                amount,
+                currentValue,
+                date,
+                notes
+            };
+            
+            updateInvestment(updatedInvestment);
+            editInvestmentModal.style.display = 'none';
+            
+            // Show success message
+            alert('Investment updated successfully!');
+        });
+
+        // Delete Investment
+        deleteInvestmentBtn.addEventListener('click', () => {
+            const investmentId = document.getElementById('editInvestmentId').value;
+            if (confirm('Are you sure you want to delete this investment?')) {
+                deleteInvestment(investmentId);
+                editInvestmentModal.style.display = 'none';
+                alert('Investment deleted successfully!');
+            }
+        });
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', () => {
-            renderInvestments();
-            
             // Set today's date as default for the investment date
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('investmentDate').value = today;
+            document.getElementById('investmentDate').value = new Date().toISOString().split('T')[0];
+            
+            // Load investments
+            loadInvestments();
         });
     </script>
 </body>
