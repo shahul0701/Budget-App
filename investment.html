@@ -478,6 +478,39 @@
             opacity: 0.5;
         }
 
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .user-info h3 {
+            font-size: 16px;
+            margin-bottom: 2px;
+        }
+
+        .user-info p {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
         @media (max-width: 768px) {
             .dashboard {
                 grid-template-columns: 1fr;
@@ -513,6 +546,15 @@
 
         <div class="dashboard">
             <div class="sidebar">
+                <!-- User Profile Section -->
+                <div class="user-profile" id="userProfile">
+                    <div class="user-avatar" id="userAvatar">U</div>
+                    <div class="user-info">
+                        <h3 id="userName">User Name</h3>
+                        <p id="userEmail">user@example.com</p>
+                    </div>
+                </div>
+                
                 <ul class="sidebar-menu">
                     <li><a href="#" class="active" data-tab="dashboard"><i class="fas fa-home"></i> Dashboard</a></li>
                     <li><a href="#" data-tab="investments"><i class="fas fa-chart-pie"></i> All Investments</a></li>
@@ -782,12 +824,19 @@
         const investmentList = document.getElementById('investmentList');
         const sidebarMenu = document.querySelectorAll('.sidebar-menu a');
         const tabContents = document.querySelectorAll('.tab-content');
+        
+        // User Profile Elements
+        const userProfile = document.getElementById('userProfile');
+        const userAvatar = document.getElementById('userAvatar');
+        const userName = document.getElementById('userName');
+        const userEmail = document.getElementById('userEmail');
 
         // Chart instances
         let allocationChart, performanceChart, analyticsChart;
 
         // Investment data
         let investments = [];
+        let currentUser = null;
 
         // Get icon based on investment type
         function getInvestmentIcon(type) {
@@ -1069,6 +1118,8 @@
 
         // Load investments from Firebase
         function loadInvestments() {
+            if (!currentUser) return;
+            
             // In a real app, you would load from Firestore
             // For demo purposes, we'll use sample data
             investments = [
@@ -1122,6 +1173,8 @@
 
         // Save investment to Firebase
         function saveInvestment(investment) {
+            if (!currentUser) return;
+            
             // In a real app, you would save to Firestore
             // For demo purposes, we'll add to the local array
             investment.id = Date.now().toString();
@@ -1158,6 +1211,25 @@
             renderInvestmentCards();
             renderInvestmentList();
             updateCharts();
+        }
+
+        // Update user profile display
+        function updateUserProfile(user) {
+            if (user) {
+                const displayName = user.displayName || 'User Name';
+                const email = user.email || 'user@example.com';
+                const initial = displayName.charAt(0).toUpperCase();
+                
+                userName.textContent = displayName;
+                userEmail.textContent = email;
+                userAvatar.textContent = initial;
+                
+                // Show user profile
+                userProfile.style.display = 'flex';
+            } else {
+                // Hide user profile if not logged in
+                userProfile.style.display = 'none';
+            }
         }
 
         // Event Listeners
@@ -1287,13 +1359,97 @@
             }
         });
 
+        // Authentication state observer
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                // User is signed in
+                currentUser = user;
+                updateUserProfile(user);
+                loadInvestments();
+                
+                // Update login/signup buttons
+                document.getElementById('loginBtn').style.display = 'none';
+                document.getElementById('signupBtn').style.display = 'none';
+            } else {
+                // User is signed out
+                currentUser = null;
+                updateUserProfile(null);
+                
+                // Show login/signup buttons
+                document.getElementById('loginBtn').style.display = 'block';
+                document.getElementById('signupBtn').style.display = 'block';
+                
+                // Clear investments
+                investments = [];
+                updateDashboardStats();
+                renderInvestmentCards();
+                renderInvestmentList();
+            }
+        });
+
+        // Login button handler
+        document.getElementById('loginBtn').addEventListener('click', () => {
+            // In a real app, you would show a login modal or redirect to login page
+            // For demo purposes, we'll simulate a login
+            const email = prompt('Enter your email:');
+            const password = prompt('Enter your password:');
+            
+            if (email && password) {
+                auth.signInWithEmailAndPassword(email, password)
+                    .then((userCredential) => {
+                        // Signed in
+                        currentUser = userCredential.user;
+                        updateUserProfile(currentUser);
+                        loadInvestments();
+                        alert('Login successful!');
+                    })
+                    .catch((error) => {
+                        alert('Login failed: ' + error.message);
+                    });
+            }
+        });
+
+        // Signup button handler
+        document.getElementById('signupBtn').addEventListener('click', () => {
+            // In a real app, you would show a signup modal or redirect to signup page
+            // For demo purposes, we'll simulate a signup
+            const email = prompt('Enter your email:');
+            const password = prompt('Enter your password:');
+            const displayName = prompt('Enter your name:');
+            
+            if (email && password && displayName) {
+                auth.createUserWithEmailAndPassword(email, password)
+                    .then((userCredential) => {
+                        // Signed up
+                        currentUser = userCredential.user;
+                        
+                        // Update profile with display name
+                        return currentUser.updateProfile({
+                            displayName: displayName
+                        });
+                    })
+                    .then(() => {
+                        updateUserProfile(currentUser);
+                        loadInvestments();
+                        alert('Signup successful!');
+                    })
+                    .catch((error) => {
+                        alert('Signup failed: ' + error.message);
+                    });
+            }
+        });
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', () => {
             // Set today's date as default for the investment date
             document.getElementById('investmentDate').value = new Date().toISOString().split('T')[0];
             
-            // Load investments
-            loadInvestments();
+            // Check if user is already logged in
+            if (auth.currentUser) {
+                currentUser = auth.currentUser;
+                updateUserProfile(currentUser);
+                loadInvestments();
+            }
         });
     </script>
 </body>
