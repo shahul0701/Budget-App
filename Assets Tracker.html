@@ -603,6 +603,11 @@
             font-weight: 600;
         }
         
+        .transaction-amount.journal {
+            color: var(--primary);
+            font-weight: 600;
+        }
+        
         .sync-controls {
             display: flex;
             gap: 10px;
@@ -861,6 +866,7 @@
                             <option value="all">All Types</option>
                             <option value="income">Income</option>
                             <option value="expense">Expense</option>
+                            <option value="journal">Journal</option>
                         </select>
                         <select id="transaction-category-filter" class="form-input" style="width: 200px;">
                             <option value="all">All Categories</option>
@@ -1245,6 +1251,7 @@
                         <option value="">Select Type</option>
                         <option value="income">Income</option>
                         <option value="expense">Expense</option>
+                        <option value="journal">Journal (Asset Transfer)</option>
                     </select>
                 </div>
                 
@@ -1288,6 +1295,24 @@
                         <option value="">Select Asset (if applicable)</option>
                         <!-- Options will be populated dynamically -->
                     </select>
+                </div>
+                
+                <!-- Journal Asset Section (Hidden by default) -->
+                <div id="journal-asset-section" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">Asset Impact Type</label>
+                        <select class="form-input" id="asset-impact-type">
+                            <option value="expense">Asset Expense</option>
+                            <option value="income">Asset Income</option>
+                            <option value="purchase">Asset Purchase</option>
+                            <option value="disposal">Asset Disposal</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Asset Value Adjustment</label>
+                        <input type="number" class="form-input" id="asset-value-adjustment" step="0.01" placeholder="Enter value adjustment">
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -1336,6 +1361,7 @@
                         <option value="">Select Type</option>
                         <option value="income">Income</option>
                         <option value="expense">Expense</option>
+                        <option value="journal">Journal (Asset Transfer)</option>
                     </select>
                 </div>
                 
@@ -1378,6 +1404,24 @@
                     <select class="form-input" id="edit-transaction-asset">
                         <option value="">No asset associated</option>
                     </select>
+                </div>
+                
+                <!-- Journal Asset Section for Edit (Hidden by default) -->
+                <div id="edit-journal-asset-section" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">Asset Impact Type</label>
+                        <select class="form-input" id="edit-asset-impact-type">
+                            <option value="expense">Asset Expense</option>
+                            <option value="income">Asset Income</option>
+                            <option value="purchase">Asset Purchase</option>
+                            <option value="disposal">Asset Disposal</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Asset Value Adjustment</label>
+                        <input type="number" class="form-input" id="edit-asset-value-adjustment" step="0.01" placeholder="Enter value adjustment">
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -1672,6 +1716,10 @@
         const transactionDateTo = document.getElementById('transaction-date-to');
         const applyFiltersBtn = document.getElementById('apply-filters');
 
+        // Journal elements
+        const journalAssetSection = document.getElementById('journal-asset-section');
+        const editJournalAssetSection = document.getElementById('edit-journal-asset-section');
+
         // State variables
         let currentUser = null;
         let currentAssetId = null;
@@ -1947,6 +1995,24 @@
             loadTransactions();
         });
 
+        // Journal transaction type handler
+        document.getElementById('transaction-type').addEventListener('change', function() {
+            if (this.value === 'journal') {
+                journalAssetSection.style.display = 'block';
+            } else {
+                journalAssetSection.style.display = 'none';
+            }
+        });
+
+        // Edit journal transaction type handler
+        document.getElementById('edit-transaction-type').addEventListener('change', function() {
+            if (this.value === 'journal') {
+                editJournalAssetSection.style.display = 'block';
+            } else {
+                editJournalAssetSection.style.display = 'none';
+            }
+        });
+
         // Form submissions
         assetForm.addEventListener('submit', e => {
             e.preventDefault();
@@ -2061,21 +2127,43 @@
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
+            // Add journal-specific data
+            if (type === 'journal' && assetId) {
+                transactionData.assetImpactType = document.getElementById('asset-impact-type').value;
+                transactionData.assetValueAdjustment = parseFloat(document.getElementById('asset-value-adjustment').value) || 0;
+                transactionData.isAssetJournal = true;
+            }
+            
             // Save to Firestore
             db.collection('users').doc(currentUser.uid).collection('transactions')
                 .add(transactionData)
+                .then((docRef) => {
+                    // If this is a journal entry with asset impact, update the asset
+                    if (type === 'journal' && assetId && transactionData.assetValueAdjustment !== 0) {
+                        transactionData.id = docRef.id;
+                        return updateAssetFromJournal(assetId, transactionData);
+                    }
+                })
                 .then(() => {
                     showNotification('Transaction added successfully!', 'success');
                     addTransactionModal.style.display = 'none';
                     transactionForm.reset();
                     
-                    // Reload transactions
+                    // Reload transactions and assets
                     loadTransactions();
                     loadDashboardData();
+                    loadAssets();
                     
-                    // If we're viewing an asset, reload its transactions
+                    // If we're viewing an asset, reload its details
                     if (currentAssetId) {
                         loadAssetTransactions(currentAssetId);
+                        db.collection('users').doc(currentUser.uid).collection('assets')
+                            .doc(currentAssetId).get()
+                            .then(doc => {
+                                if (doc.exists) {
+                                    loadAssetDetails(currentAssetId, doc.data());
+                                }
+                            });
                     }
                 })
                 .catch(error => {
@@ -2114,16 +2202,31 @@
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
+            // Add journal-specific data
+            if (type === 'journal' && assetId) {
+                transactionData.assetImpactType = document.getElementById('edit-asset-impact-type').value;
+                transactionData.assetValueAdjustment = parseFloat(document.getElementById('edit-asset-value-adjustment').value) || 0;
+                transactionData.isAssetJournal = true;
+            }
+            
             // Update in Firestore
             db.collection('users').doc(currentUser.uid).collection('transactions')
                 .doc(transactionId).update(transactionData)
                 .then(() => {
+                    // If this is a journal entry with asset impact, update the asset
+                    if (type === 'journal' && assetId && transactionData.assetValueAdjustment !== 0) {
+                        transactionData.id = transactionId;
+                        return updateAssetFromJournal(assetId, transactionData);
+                    }
+                })
+                .then(() => {
                     showNotification('Transaction updated successfully!', 'success');
                     editTransactionModal.style.display = 'none';
                     
-                    // Reload transactions
+                    // Reload transactions and assets
                     loadTransactions();
                     loadDashboardData();
+                    loadAssets();
                     
                     // If we're viewing an asset, reload its transactions
                     if (currentAssetId) {
@@ -2646,15 +2749,32 @@
                         const transactionDate = new Date(transaction.date);
                         const formattedDate = transactionDate.toLocaleDateString();
                         
+                        // Determine display class and sign based on type
+                        let amountClass = '';
+                        let sign = '';
+
+                        if (transaction.type === 'income') {
+                            amountClass = 'income';
+                            sign = '+';
+                        } else if (transaction.type === 'expense') {
+                            amountClass = 'expense';
+                            sign = '-';
+                        } else if (transaction.type === 'journal') {
+                            amountClass = transaction.assetImpactType === 'income' ? 'income' : 
+                                          transaction.assetImpactType === 'expense' ? 'expense' : 'journal';
+                            sign = transaction.assetImpactType === 'income' ? '+' : 
+                                   transaction.assetImpactType === 'expense' ? '-' : '±';
+                        }
+                        
                         const transactionElement = document.createElement('div');
                         transactionElement.className = 'transaction-item';
                         transactionElement.innerHTML = `
                             <div class="transaction-details">
                                 <strong>${formattedDate}</strong> - ${transaction.description}
-                                <div class="transaction-category">${transaction.category} • ${transaction.paymentMethod}</div>
+                                <div class="transaction-category">${transaction.category} • ${transaction.type} ${transaction.assetImpactType ? `• ${transaction.assetImpactType}` : ''}</div>
                             </div>
-                            <div class="transaction-amount ${transaction.type}">
-                                ${transaction.type === 'income' ? '+' : '-'}$${(transaction.amount || 0).toFixed(2)}
+                            <div class="transaction-amount ${amountClass}">
+                                ${sign}$${(transaction.amount || 0).toFixed(2)}
                             </div>
                             <div class="action-buttons">
                                 <button class="btn btn-sm btn-success edit-transaction" data-id="${transactionId}"><i class="fas fa-edit"></i></button>
@@ -2688,6 +2808,15 @@
                                         
                                         // Load assets for selection
                                         loadAssetsForEditTransaction(transaction.assetId);
+                                        
+                                        // Set journal-specific fields if applicable
+                                        if (transaction.type === 'journal') {
+                                            document.getElementById('edit-asset-impact-type').value = transaction.assetImpactType || 'expense';
+                                            document.getElementById('edit-asset-value-adjustment').value = transaction.assetValueAdjustment || 0;
+                                            editJournalAssetSection.style.display = 'block';
+                                        } else {
+                                            editJournalAssetSection.style.display = 'none';
+                                        }
                                         
                                         editTransactionModal.style.display = 'flex';
                                     }
@@ -2776,6 +2905,34 @@
             // Update asset detail name
             document.getElementById('asset-detail-name').textContent = asset.name;
             
+            // Add journal history section
+            const journalHistory = asset.journalHistory || [];
+            
+            let journalHtml = `
+                <div class="form-group">
+                    <label class="form-label">Journal History</label>
+                    <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e9ecef; padding: 10px; border-radius: 6px;">
+            `;
+            
+            if (journalHistory.length === 0) {
+                journalHtml += '<p class="no-association">No journal entries</p>';
+            } else {
+                journalHistory.forEach(entry => {
+                    const entryDate = new Date(entry.date).toLocaleDateString();
+                    const amountClass = entry.type === 'income' ? 'income' : (entry.type === 'expense' ? 'expense' : '');
+                    const sign = entry.type === 'income' ? '+' : (entry.type === 'expense' ? '-' : '');
+                    
+                    journalHtml += `
+                        <div class="asset-association" style="margin-bottom: 10px;">
+                            <p><strong>${entryDate}</strong> - ${entry.description}</p>
+                            <p>Type: ${entry.type} | Amount: <span class="${amountClass}">${sign}$${entry.amount.toFixed(2)}</span></p>
+                        </div>
+                    `;
+                });
+            }
+            
+            journalHtml += `</div></div>`;
+            
             // Populate asset details
             assetDetailsContent.innerHTML = `
                 <div class="form-row">
@@ -2826,6 +2983,8 @@
                         Remaining Value: $${currentValue.toFixed(2)}
                     </div>
                 </div>
+                
+                ${journalHtml}
             `;
         }
 
@@ -2866,10 +3025,27 @@
                         const transactionDate = new Date(transaction.date);
                         const formattedDate = transactionDate.toLocaleDateString();
                         
+                        // Determine display class and sign based on type
+                        let amountClass = '';
+                        let sign = '';
+
+                        if (transaction.type === 'income') {
+                            amountClass = 'income';
+                            sign = '+';
+                        } else if (transaction.type === 'expense') {
+                            amountClass = 'expense';
+                            sign = '-';
+                        } else if (transaction.type === 'journal') {
+                            amountClass = transaction.assetImpactType === 'income' ? 'income' : 
+                                          transaction.assetImpactType === 'expense' ? 'expense' : 'journal';
+                            sign = transaction.assetImpactType === 'income' ? '+' : 
+                                   transaction.assetImpactType === 'expense' ? '-' : '±';
+                        }
+                        
                         transactionElement.innerHTML = `
                             <p><strong>${formattedDate}</strong> - ${transaction.description}</p>
-                            <p>Amount: <span class="${transaction.type === 'income' ? 'income' : 'expense'}">${transaction.type === 'income' ? '+' : '-'}$${(transaction.amount || 0).toFixed(2)}</span></p>
-                            <p>Type: ${transaction.type} | Category: ${transaction.category}</p>
+                            <p>Amount: <span class="${amountClass}">${sign}$${(transaction.amount || 0).toFixed(2)}</span></p>
+                            <p>Type: ${transaction.type} ${transaction.assetImpactType ? `• ${transaction.assetImpactType}` : ''} | Category: ${transaction.category}</p>
                             <p>Payment Method: ${transaction.paymentMethod} | Reference: ${transaction.reference || 'N/A'}</p>
                             <div class="action-buttons">
                                 <button class="btn btn-sm btn-success edit-transaction" data-id="${transactionId}"><i class="fas fa-edit"></i></button>
@@ -2900,6 +3076,15 @@
                                         
                                         // Load assets for selection
                                         loadAssetsForEditTransaction(transaction.assetId);
+                                        
+                                        // Set journal-specific fields if applicable
+                                        if (transaction.type === 'journal') {
+                                            document.getElementById('edit-asset-impact-type').value = transaction.assetImpactType || 'expense';
+                                            document.getElementById('edit-asset-value-adjustment').value = transaction.assetValueAdjustment || 0;
+                                            editJournalAssetSection.style.display = 'block';
+                                        } else {
+                                            editJournalAssetSection.style.display = 'none';
+                                        }
                                         
                                         editTransactionModal.style.display = 'flex';
                                     }
@@ -3341,6 +3526,66 @@
             });
         }
 
+        // Update asset from journal entry
+        function updateAssetFromJournal(assetId, journalData) {
+            return db.collection('users').doc(currentUser.uid).collection('assets')
+                .doc(assetId).get()
+                .then(doc => {
+                    if (!doc.exists) {
+                        throw new Error('Asset not found');
+                    }
+                    
+                    const asset = doc.data();
+                    let updateData = {
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    
+                    const adjustment = journalData.assetValueAdjustment;
+                    const impactType = journalData.assetImpactType;
+                    
+                    switch (impactType) {
+                        case 'purchase':
+                            // Increase asset value (purchase)
+                            updateData.value = (asset.value || 0) + adjustment;
+                            break;
+                            
+                        case 'disposal':
+                            // Decrease asset value (disposal/sale)
+                            updateData.value = Math.max(0, (asset.value || 0) - adjustment);
+                            break;
+                            
+                        case 'income':
+                            // Asset generated income (like rental income)
+                            // You might want to track this separately from the asset value
+                            updateData.lastIncomeDate = journalData.date;
+                            updateData.totalIncome = (asset.totalIncome || 0) + adjustment;
+                            break;
+                            
+                        case 'expense':
+                            // Asset maintenance/expense
+                            updateData.lastExpenseDate = journalData.date;
+                            updateData.totalExpenses = (asset.totalExpenses || 0) + adjustment;
+                            break;
+                    }
+                    
+                    // Add journal entry to asset's history
+                    const journalHistory = asset.journalHistory || [];
+                    journalHistory.push({
+                        transactionId: journalData.id,
+                        date: journalData.date,
+                        type: impactType,
+                        amount: adjustment,
+                        description: journalData.description,
+                        createdAt: new Date()
+                    });
+                    
+                    updateData.journalHistory = journalHistory;
+                    
+                    return db.collection('users').doc(currentUser.uid).collection('assets')
+                        .doc(assetId).update(updateData);
+                });
+        }
+
         // Load recent transactions from Transaction Manager
         function loadRecentTransactions() {
             if (!currentUser) return;
@@ -3371,13 +3616,30 @@
                         const transactionDate = new Date(transaction.date);
                         const formattedDate = transactionDate.toLocaleDateString();
                         
+                        // Determine display class and sign based on type
+                        let amountClass = '';
+                        let sign = '';
+
+                        if (transaction.type === 'income') {
+                            amountClass = 'income';
+                            sign = '+';
+                        } else if (transaction.type === 'expense') {
+                            amountClass = 'expense';
+                            sign = '-';
+                        } else if (transaction.type === 'journal') {
+                            amountClass = transaction.assetImpactType === 'income' ? 'income' : 
+                                          transaction.assetImpactType === 'expense' ? 'expense' : 'journal';
+                            sign = transaction.assetImpactType === 'income' ? '+' : 
+                                   transaction.assetImpactType === 'expense' ? '-' : '±';
+                        }
+                        
                         transactionElement.innerHTML = `
                             <div class="transaction-details">
                                 <strong>${formattedDate}</strong> - ${transaction.description || 'No description'}
-                                <div>${transaction.category} • ${transaction.type}</div>
+                                <div>${transaction.category} • ${transaction.type} ${transaction.assetImpactType ? `• ${transaction.assetImpactType}` : ''}</div>
                             </div>
-                            <div class="transaction-amount ${transaction.type}">
-                                ${transaction.type === 'income' ? '+' : '-'}$${(transaction.amount || 0).toFixed(2)}
+                            <div class="transaction-amount ${amountClass}">
+                                ${sign}$${(transaction.amount || 0).toFixed(2)}
                             </div>
                         `;
                         
@@ -3732,4 +3994,4 @@
         window.addEventListener('load', initApp);
     </script>
 </body>
-</html>
+    </html>
