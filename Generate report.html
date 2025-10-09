@@ -213,6 +213,14 @@
     .transaction-item:last-child {
       border-bottom: none;
     }
+    
+    /* Modal export buttons */
+    .modal-export-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+      justify-content: flex-end;
+    }
   </style>
 </head>
 <body>
@@ -375,6 +383,14 @@
           <!-- Transaction details will be populated here -->
         </div>
         <div class="modal-footer">
+          <div class="modal-export-buttons">
+            <button id="modalExportPDFBtn" class="btn btn-outline-danger btn-sm">
+              <i class="fa fa-file-pdf me-1"></i> Export PDF
+            </button>
+            <button id="modalExportExcelBtn" class="btn btn-outline-success btn-sm">
+              <i class="fa fa-file-excel me-1"></i> Export Excel
+            </button>
+          </div>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
@@ -439,6 +455,10 @@
     const transactionDetailsModal = new bootstrap.Modal(document.getElementById('transactionDetailsModal'));
     const detailsModalTitle = document.getElementById('detailsModalTitle');
     const transactionDetailsBody = document.getElementById('transactionDetailsBody');
+    
+    // Modal export buttons
+    const modalExportPDFBtn = document.getElementById("modalExportPDFBtn");
+    const modalExportExcelBtn = document.getElementById("modalExportExcelBtn");
 
     // Stats
     const statIncome = document.getElementById("statIncome");
@@ -456,6 +476,7 @@
     const rowsPerPage = 10;
     let balanceVisible = false;
     let currentReportType = 'bank';
+    let currentModalTransactions = []; // Store transactions shown in modal
 
     // Navigation button handlers
     backBtn.addEventListener("click", () => {
@@ -545,6 +566,15 @@
     
     printReportBtn.addEventListener("click", () => {
       window.print();
+    });
+    
+    // Modal export buttons
+    modalExportPDFBtn.addEventListener("click", () => {
+      exportModalToPDF();
+    });
+    
+    modalExportExcelBtn.addEventListener("click", () => {
+      exportModalToExcel();
     });
 
     // Load COA data
@@ -921,33 +951,33 @@
 
     // View bank details
     function viewBankDetails(bankName) {
-      const bankTransactions = filteredTransactions.filter(tx => 
+      currentModalTransactions = filteredTransactions.filter(tx => 
         (tx.BANK_NAME || tx.MODE || "") === bankName
       );
       
-      showTransactionDetails(bankTransactions, `Transactions for ${bankName}`);
+      showTransactionDetails(currentModalTransactions, `Transactions for ${bankName}`);
     }
 
     // View category details
     function viewCategoryDetails(category) {
-      const categoryTransactions = filteredTransactions.filter(tx => 
+      currentModalTransactions = filteredTransactions.filter(tx => 
         (tx.ACCOUNT_HEADER || "") === category
       );
       
-      showTransactionDetails(categoryTransactions, `Transactions for ${category}`);
+      showTransactionDetails(currentModalTransactions, `Transactions for ${category}`);
     }
 
     // View month details
     function viewMonthDetails(monthYear) {
       const [month, year] = monthYear.split(' ');
-      const monthTransactions = filteredTransactions.filter(tx => {
+      currentModalTransactions = filteredTransactions.filter(tx => {
         if (!tx.DATE) return false;
         const date = new Date(tx.DATE);
         return date.toLocaleString('default', { month: 'long' }) === month && 
                date.getFullYear().toString() === year;
       });
       
-      showTransactionDetails(monthTransactions, `Transactions for ${monthYear}`);
+      showTransactionDetails(currentModalTransactions, `Transactions for ${monthYear}`);
     }
 
     // Show transaction details in modal
@@ -983,6 +1013,99 @@
       }
       
       transactionDetailsModal.show();
+    }
+
+    // Export modal transactions to PDF
+    function exportModalToPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      // Add title
+      doc.setFontSize(18);
+      doc.text(detailsModalTitle.textContent, 14, 22);
+      
+      // Add date
+      doc.setFontSize(12);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+      
+      // Add summary
+      const totalIncome = currentModalTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
+      const totalExpense = currentModalTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
+      const balance = totalIncome - totalExpense;
+      
+      doc.text(`Total Income: $${totalIncome.toFixed(2)}`, 14, 40);
+      doc.text(`Total Expenses: $${totalExpense.toFixed(2)}`, 14, 48);
+      doc.text(`Net Balance: $${balance.toFixed(2)}`, 14, 56);
+      doc.text(`Total Transactions: ${currentModalTransactions.length}`, 14, 64);
+      
+      // Prepare table data
+      const tableColumn = [['Date', 'Description', 'Bank', 'Type', 'Amount']];
+      const tableRows = [];
+      
+      currentModalTransactions.forEach(tx => {
+        const date = formatDate(tx.DATE);
+        const description = tx.DESCRIPTION || 'No description';
+        const bank = tx.BANK_NAME || tx.MODE || '';
+        const type = tx.INCOME ? 'Income' : 'Expense';
+        const amount = parseFloat(tx.INCOME) || parseFloat(tx.EXPENSE) || 0;
+        
+        tableRows.push([date, description, bank, type, `$${amount.toFixed(2)}`]);
+      });
+      
+      // Add table to PDF
+      doc.autoTable({
+        head: tableColumn,
+        body: tableRows,
+        startY: 75,
+        theme: 'grid',
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [111, 66, 193] } // Purple color
+      });
+      
+      // Save the PDF
+      doc.save(`${detailsModalTitle.textContent.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    }
+    
+    // Export modal transactions to Excel
+    function exportModalToExcel() {
+      // Create a new workbook
+      const wb = XLSX.utils.book_new();
+      
+      // Prepare data
+      const data = [
+        ['Date', 'Description', 'Bank', 'Type', 'Amount']
+      ];
+      
+      currentModalTransactions.forEach(tx => {
+        const date = formatDate(tx.DATE);
+        const description = tx.DESCRIPTION || 'No description';
+        const bank = tx.BANK_NAME || tx.MODE || '';
+        const type = tx.INCOME ? 'Income' : 'Expense';
+        const amount = parseFloat(tx.INCOME) || parseFloat(tx.EXPENSE) || 0;
+        
+        data.push([date, description, bank, type, amount]);
+      });
+      
+      // Add summary data
+      const totalIncome = currentModalTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
+      const totalExpense = currentModalTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
+      const balance = totalIncome - totalExpense;
+      
+      data.push([]);
+      data.push(['Summary', '', '', '', '']);
+      data.push(['Total Income', '', '', '', totalIncome]);
+      data.push(['Total Expenses', '', '', '', totalExpense]);
+      data.push(['Net Balance', '', '', '', balance]);
+      data.push(['Total Transactions', '', '', '', currentModalTransactions.length]);
+      
+      // Create worksheet
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "Transaction Details");
+      
+      // Generate Excel file and trigger download
+      XLSX.writeFile(wb, `${detailsModalTitle.textContent.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`);
     }
 
     // Build pagination
