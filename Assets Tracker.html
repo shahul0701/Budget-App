@@ -7,9 +7,9 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://upload-widget.cloudinary.com/global/all.js"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -687,6 +687,37 @@
             border: 1px solid var(--light-gray);
             border-radius: 6px;
         }
+        
+        /* Cloudinary Upload Widget Styles */
+        .cloudinary-upload-btn {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .cloudinary-upload-btn:hover {
+            background-color: #0d62d9;
+        }
+        
+        .uploaded-file-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid var(--success);
+        }
+        
+        .uploaded-file-info p {
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
@@ -866,7 +897,7 @@
                             <option value="all">All Types</option>
                             <option value="income">Income</option>
                             <option value="expense">Expense</option>
-                            <option value="journal">Journal</option>
+                            <option value="journal">Journal (Asset Transfer)</option>
                         </select>
                         <select id="transaction-category-filter" class="form-input" style="width: 200px;">
                             <option value="all">All Categories</option>
@@ -1333,7 +1364,14 @@
                 
                 <div class="form-group">
                     <label class="form-label">Attach Supporting Document (Optional)</label>
-                    <input type="file" class="form-input" id="transaction-document">
+                    <button type="button" id="cloudinary-upload-btn" class="cloudinary-upload-btn">
+                        <i class="fas fa-cloud-upload-alt"></i> Upload Document
+                    </button>
+                    <div id="uploaded-file-info" class="uploaded-file-info" style="display: none;">
+                        <p><strong>Uploaded File:</strong> <span id="uploaded-file-name"></span></p>
+                        <p><strong>URL:</strong> <span id="uploaded-file-url"></span></p>
+                        <input type="hidden" id="transaction-document-url">
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -1438,6 +1476,18 @@
                 <div class="form-group">
                     <label class="form-label">Reference Number</label>
                     <input type="text" class="form-input" id="edit-transaction-reference">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Attached Document</label>
+                    <div id="edit-uploaded-file-info" class="uploaded-file-info" style="display: none;">
+                        <p><strong>Uploaded File:</strong> <span id="edit-uploaded-file-name"></span></p>
+                        <p><strong>URL:</strong> <span id="edit-uploaded-file-url"></span></p>
+                        <input type="hidden" id="edit-transaction-document-url">
+                    </div>
+                    <button type="button" id="edit-cloudinary-upload-btn" class="cloudinary-upload-btn">
+                        <i class="fas fa-cloud-upload-alt"></i> Change Document
+                    </button>
                 </div>
                 
                 <div class="form-group">
@@ -1595,7 +1645,14 @@
                 
                 <div class="form-group">
                     <label class="form-label">File</label>
-                    <input type="file" class="form-input" id="document-file" required>
+                    <button type="button" id="document-cloudinary-upload-btn" class="cloudinary-upload-btn">
+                        <i class="fas fa-cloud-upload-alt"></i> Upload Document
+                    </button>
+                    <div id="document-uploaded-file-info" class="uploaded-file-info" style="display: none;">
+                        <p><strong>Uploaded File:</strong> <span id="document-uploaded-file-name"></span></p>
+                        <p><strong>URL:</strong> <span id="document-uploaded-file-url"></span></p>
+                        <input type="hidden" id="document-file-url">
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -1624,7 +1681,13 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const auth = firebase.auth();
-        const storage = firebase.storage();
+
+        // Cloudinary configuration
+        const cloudinaryConfig = {
+            cloudName: 'dpwdsyvz8',
+            uploadPreset: 'assestdoc',
+            folder: 'assestdoc'
+        };
 
         // DOM elements
         const signInBtn = document.getElementById('sign-in-btn');
@@ -1719,6 +1782,11 @@
         // Journal elements
         const journalAssetSection = document.getElementById('journal-asset-section');
         const editJournalAssetSection = document.getElementById('edit-journal-asset-section');
+
+        // Cloudinary upload buttons
+        const cloudinaryUploadBtn = document.getElementById('cloudinary-upload-btn');
+        const editCloudinaryUploadBtn = document.getElementById('edit-cloudinary-upload-btn');
+        const documentCloudinaryUploadBtn = document.getElementById('document-cloudinary-upload-btn');
 
         // State variables
         let currentUser = null;
@@ -2013,6 +2081,52 @@
             }
         });
 
+        // Cloudinary upload widget initialization
+        function initializeCloudinaryUploadWidget(buttonId, callback) {
+            const myWidget = cloudinary.createUploadWidget(
+                {
+                    cloudName: cloudinaryConfig.cloudName,
+                    uploadPreset: cloudinaryConfig.uploadPreset,
+                    folder: cloudinaryConfig.folder,
+                    sources: ['local', 'url', 'camera'],
+                    multiple: false,
+                    clientAllowedFormats: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
+                    maxFileSize: 5000000 // 5MB
+                },
+                (error, result) => {
+                    if (!error && result && result.event === 'success') {
+                        callback(result.info);
+                    }
+                }
+            );
+
+            document.getElementById(buttonId).addEventListener('click', function() {
+                myWidget.open();
+            }, false);
+        }
+
+        // Initialize Cloudinary upload widgets
+        initializeCloudinaryUploadWidget('cloudinary-upload-btn', function(result) {
+            document.getElementById('uploaded-file-name').textContent = result.original_filename + '.' + result.format;
+            document.getElementById('uploaded-file-url').textContent = result.secure_url;
+            document.getElementById('transaction-document-url').value = result.secure_url;
+            document.getElementById('uploaded-file-info').style.display = 'block';
+        });
+
+        initializeCloudinaryUploadWidget('edit-cloudinary-upload-btn', function(result) {
+            document.getElementById('edit-uploaded-file-name').textContent = result.original_filename + '.' + result.format;
+            document.getElementById('edit-uploaded-file-url').textContent = result.secure_url;
+            document.getElementById('edit-transaction-document-url').value = result.secure_url;
+            document.getElementById('edit-uploaded-file-info').style.display = 'block';
+        });
+
+        initializeCloudinaryUploadWidget('document-cloudinary-upload-btn', function(result) {
+            document.getElementById('document-uploaded-file-name').textContent = result.original_filename + '.' + result.format;
+            document.getElementById('document-uploaded-file-url').textContent = result.secure_url;
+            document.getElementById('document-file-url').value = result.secure_url;
+            document.getElementById('document-uploaded-file-info').style.display = 'block';
+        });
+
         // Form submissions
         assetForm.addEventListener('submit', e => {
             e.preventDefault();
@@ -2114,6 +2228,7 @@
             const assetId = document.getElementById('transaction-asset').value;
             const paymentMethod = document.getElementById('transaction-payment-method').value;
             const reference = document.getElementById('transaction-reference').value;
+            const documentUrl = document.getElementById('transaction-document-url').value;
             
             const transactionData = {
                 type: type,
@@ -2124,6 +2239,7 @@
                 assetId: assetId || null,
                 paymentMethod: paymentMethod,
                 reference: reference || '',
+                documentUrl: documentUrl || null,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -2148,6 +2264,7 @@
                     showNotification('Transaction added successfully!', 'success');
                     addTransactionModal.style.display = 'none';
                     transactionForm.reset();
+                    document.getElementById('uploaded-file-info').style.display = 'none';
                     
                     // Reload transactions and assets
                     loadTransactions();
@@ -2189,6 +2306,7 @@
             const assetId = document.getElementById('edit-transaction-asset').value;
             const paymentMethod = document.getElementById('edit-transaction-payment-method').value;
             const reference = document.getElementById('edit-transaction-reference').value;
+            const documentUrl = document.getElementById('edit-transaction-document-url').value;
             
             const transactionData = {
                 type: type,
@@ -2199,6 +2317,7 @@
                 assetId: assetId || null,
                 paymentMethod: paymentMethod,
                 reference: reference || '',
+                documentUrl: documentUrl || null,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -2312,9 +2431,9 @@
                 return;
             }
             
-            const file = document.getElementById('document-file').files[0];
-            if (!file) {
-                showNotification('Please select a file to upload', 'error');
+            const documentUrl = document.getElementById('document-file-url').value;
+            if (!documentUrl) {
+                showNotification('Please upload a file first', 'error');
                 return;
             }
             
@@ -2323,48 +2442,50 @@
                 type: document.getElementById('document-type').value,
                 date: document.getElementById('document-date').value,
                 description: document.getElementById('document-description').value,
+                url: documentUrl,
+                fileName: document.getElementById('document-uploaded-file-name').textContent,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            // Upload file to Firebase Storage
-            const storageRef = storage.ref();
-            const fileRef = storageRef.child(`users/${currentUser.uid}/documents/${Date.now()}_${file.name}`);
-            
-            fileRef.put(file)
-                .then(snapshot => {
-                    return snapshot.ref.getDownloadURL();
-                })
-                .then(downloadURL => {
-                    documentData.url = downloadURL;
-                    documentData.fileName = file.name;
-                    
-                    // Save document data to Firestore
-                    if (currentAssetId) {
-                        // Associate with current asset
-                        return db.collection('users').doc(currentUser.uid).collection('assets')
-                            .doc(currentAssetId).collection('documents')
-                            .add(documentData);
-                    } else {
-                        // Save as general document
-                        return db.collection('users').doc(currentUser.uid).collection('documents')
-                            .add(documentData);
-                    }
-                })
-                .then(() => {
-                    showNotification('Document uploaded successfully!', 'success');
-                    uploadDocumentModal.style.display = 'none';
-                    documentForm.reset();
-                    
-                    // Reload documents
-                    if (currentAssetId) {
-                        loadDocuments(currentAssetId);
-                    } else {
+            // Save document data to Firestore
+            if (currentAssetId) {
+                // Associate with current asset
+                db.collection('users').doc(currentUser.uid).collection('assets')
+                    .doc(currentAssetId).collection('documents')
+                    .add(documentData)
+                    .then(() => {
+                        showNotification('Document uploaded successfully!', 'success');
+                        uploadDocumentModal.style.display = 'none';
+                        documentForm.reset();
+                        document.getElementById('document-uploaded-file-info').style.display = 'none';
+                        
+                        // Reload documents
+                        if (currentAssetId) {
+                            loadDocuments(currentAssetId);
+                        } else {
+                            loadDocumentsPage();
+                        }
+                    })
+                    .catch(error => {
+                        showNotification('Error uploading document: ' + error.message, 'error');
+                    });
+            } else {
+                // Save as general document
+                db.collection('users').doc(currentUser.uid).collection('documents')
+                    .add(documentData)
+                    .then(() => {
+                        showNotification('Document uploaded successfully!', 'success');
+                        uploadDocumentModal.style.display = 'none';
+                        documentForm.reset();
+                        document.getElementById('document-uploaded-file-info').style.display = 'none';
+                        
+                        // Reload documents
                         loadDocumentsPage();
-                    }
-                })
-                .catch(error => {
-                    showNotification('Error uploading document: ' + error.message, 'error');
-                });
+                    })
+                    .catch(error => {
+                        showNotification('Error uploading document: ' + error.message, 'error');
+                    });
+            }
         });
 
         // Load dashboard data
@@ -2507,12 +2628,14 @@
                         
                         // Calculate current value
                         let currentValue = asset.value;
+                        let depreciation = 0;
+                        
                         if (asset.depreciationMethod && asset.depreciationMethod !== 'none') {
                             const purchaseDate = new Date(asset.purchaseDate);
                             const now = new Date();
                             const monthsOwned = (now.getFullYear() - purchaseDate.getFullYear()) * 12 + (now.getMonth() - purchaseDate.getMonth());
                             const annualDep = asset.value * (asset.depreciationRate / 100);
-                            const depreciation = annualDep * (monthsOwned / 12);
+                            depreciation = annualDep * (monthsOwned / 12);
                             currentValue = asset.value - depreciation;
                         }
                         
@@ -2768,6 +2891,12 @@
                         
                         const transactionElement = document.createElement('div');
                         transactionElement.className = 'transaction-item';
+                        
+                        let documentLink = '';
+                        if (transaction.documentUrl) {
+                            documentLink = `<a href="${transaction.documentUrl}" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-file"></i></a>`;
+                        }
+                        
                         transactionElement.innerHTML = `
                             <div class="transaction-details">
                                 <strong>${formattedDate}</strong> - ${transaction.description}
@@ -2777,6 +2906,7 @@
                                 ${sign}$${(transaction.amount || 0).toFixed(2)}
                             </div>
                             <div class="action-buttons">
+                                ${documentLink}
                                 <button class="btn btn-sm btn-success edit-transaction" data-id="${transactionId}"><i class="fas fa-edit"></i></button>
                                 <button class="btn btn-sm btn-danger delete-transaction" data-id="${transactionId}"><i class="fas fa-trash"></i></button>
                             </div>
@@ -2805,6 +2935,14 @@
                                         document.getElementById('edit-transaction-date').value = transaction.date || '';
                                         document.getElementById('edit-transaction-payment-method').value = transaction.paymentMethod || 'cash';
                                         document.getElementById('edit-transaction-reference').value = transaction.reference || '';
+                                        
+                                        // Set document info if exists
+                                        if (transaction.documentUrl) {
+                                            document.getElementById('edit-uploaded-file-name').textContent = 'Document';
+                                            document.getElementById('edit-uploaded-file-url').textContent = transaction.documentUrl;
+                                            document.getElementById('edit-transaction-document-url').value = transaction.documentUrl;
+                                            document.getElementById('edit-uploaded-file-info').style.display = 'block';
+                                        }
                                         
                                         // Load assets for selection
                                         loadAssetsForEditTransaction(transaction.assetId);
@@ -3042,11 +3180,17 @@
                                    transaction.assetImpactType === 'expense' ? '-' : '±';
                         }
                         
+                        let documentLink = '';
+                        if (transaction.documentUrl) {
+                            documentLink = `<a href="${transaction.documentUrl}" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-file"></i> Document</a>`;
+                        }
+                        
                         transactionElement.innerHTML = `
                             <p><strong>${formattedDate}</strong> - ${transaction.description}</p>
                             <p>Amount: <span class="${amountClass}">${sign}$${(transaction.amount || 0).toFixed(2)}</span></p>
                             <p>Type: ${transaction.type} ${transaction.assetImpactType ? `• ${transaction.assetImpactType}` : ''} | Category: ${transaction.category}</p>
                             <p>Payment Method: ${transaction.paymentMethod} | Reference: ${transaction.reference || 'N/A'}</p>
+                            ${documentLink}
                             <div class="action-buttons">
                                 <button class="btn btn-sm btn-success edit-transaction" data-id="${transactionId}"><i class="fas fa-edit"></i></button>
                                 <button class="btn btn-sm btn-danger delete-transaction" data-id="${transactionId}"><i class="fas fa-trash"></i></button>
@@ -3073,6 +3217,14 @@
                                         document.getElementById('edit-transaction-date').value = transaction.date || '';
                                         document.getElementById('edit-transaction-payment-method').value = transaction.paymentMethod || 'cash';
                                         document.getElementById('edit-transaction-reference').value = transaction.reference || '';
+                                        
+                                        // Set document info if exists
+                                        if (transaction.documentUrl) {
+                                            document.getElementById('edit-uploaded-file-name').textContent = 'Document';
+                                            document.getElementById('edit-uploaded-file-url').textContent = transaction.documentUrl;
+                                            document.getElementById('edit-transaction-document-url').value = transaction.documentUrl;
+                                            document.getElementById('edit-uploaded-file-info').style.display = 'block';
+                                        }
                                         
                                         // Load assets for selection
                                         loadAssetsForEditTransaction(transaction.assetId);
@@ -3994,4 +4146,4 @@
         window.addEventListener('load', initApp);
     </script>
 </body>
-    </html>
+                                </html>
