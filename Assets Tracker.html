@@ -3335,71 +3335,149 @@
                 });
         }
 
-        // Load documents page
+        // Load documents page - FIXED VERSION
         function loadDocumentsPage() {
             if (!currentUser) return;
             
             documentsContainer.innerHTML = '<div class="loading">Loading documents...</div>';
             
-            db.collection('users').doc(currentUser.uid).collection('documents')
-                .orderBy('createdAt', 'desc')
-                .get()
-                .then(snapshot => {
-                    if (snapshot.empty) {
-                        documentsContainer.innerHTML = '<div class="loading">No documents found</div>';
-                        return;
+            // Load both general documents and asset documents
+            Promise.all([
+                // Load general documents
+                db.collection('users').doc(currentUser.uid).collection('documents')
+                    .orderBy('createdAt', 'desc')
+                    .get(),
+                // Load asset documents
+                db.collection('users').doc(currentUser.uid).collection('assets')
+                    .get()
+                    .then(assetsSnapshot => {
+                        const assetDocsPromises = [];
+                        assetsSnapshot.forEach(assetDoc => {
+                            assetDocsPromises.push(
+                                db.collection('users').doc(currentUser.uid).collection('assets')
+                                    .doc(assetDoc.id).collection('documents')
+                                    .get()
+                                    .then(docsSnapshot => {
+                                        return docsSnapshot.docs.map(doc => {
+                                            const data = doc.data();
+                                            return {
+                                                ...data,
+                                                id: doc.id,
+                                                assetId: assetDoc.id,
+                                                assetName: assetDoc.data().name,
+                                                isAssetDocument: true
+                                            };
+                                        });
+                                    })
+                            );
+                        });
+                        return Promise.all(assetDocsPromises).then(results => {
+                            return results.flat();
+                        });
+                    })
+            ])
+            .then(([generalDocsSnapshot, assetDocuments]) => {
+                const allDocuments = [];
+                
+                // Add general documents
+                generalDocsSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    allDocuments.push({
+                        ...data,
+                        id: doc.id,
+                        isGeneralDocument: true
+                    });
+                });
+                
+                // Add asset documents
+                allDocuments.push(...assetDocuments);
+                
+                if (allDocuments.length === 0) {
+                    documentsContainer.innerHTML = '<div class="loading">No documents found</div>';
+                    return;
+                }
+                
+                // Sort by date (newest first)
+                allDocuments.sort((a, b) => {
+                    const dateA = a.createdAt ? a.createdAt.toDate() : new Date(a.date || 0);
+                    const dateB = b.createdAt ? b.createdAt.toDate() : new Date(b.date || 0);
+                    return dateB - dateA;
+                });
+                
+                documentsContainer.innerHTML = '';
+                
+                allDocuments.forEach(document => {
+                    // Format date
+                    const docDate = document.date ? new Date(document.date) : 
+                                   document.createdAt ? document.createdAt.toDate() : new Date();
+                    const formattedDate = docDate.toLocaleDateString();
+                    
+                    const docElement = document.createElement('div');
+                    docElement.className = 'document-item';
+                    
+                    let assetInfo = '';
+                    if (document.isAssetDocument) {
+                        assetInfo = `<p><strong>Asset:</strong> ${document.assetName}</p>`;
                     }
                     
-                    documentsContainer.innerHTML = '';
+                    docElement.innerHTML = `
+                        <div style="flex: 1;">
+                            <h4>${document.title}</h4>
+                            ${assetInfo}
+                            <p><strong>Type:</strong> ${document.type} | <strong>Date:</strong> ${formattedDate}</p>
+                            <p>${document.description || 'No description'}</p>
+                        </div>
+                        <div>
+                            <a href="${document.url}" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-download"></i> Download</a>
+                            <button class="btn btn-sm btn-danger delete-document" 
+                                    data-id="${document.id}" 
+                                    data-asset-id="${document.assetId || ''}" 
+                                    data-is-general="${document.isGeneralDocument || false}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
                     
-                    snapshot.forEach(doc => {
-                        const document = doc.data();
-                        const documentId = doc.id;
-                        
-                        // Format date
-                        const docDate = document.date ? new Date(document.date) : document.createdAt.toDate();
-                        const formattedDate = docDate.toLocaleDateString();
-                        
-                        const docElement = document.createElement('div');
-                        docElement.className = 'document-item';
-                        
-                        docElement.innerHTML = `
-                            <div>
-                                <h4>${document.title}</h4>
-                                <p>Type: ${document.type} | Date: ${formattedDate}</p>
-                                <p>${document.description || 'No description'}</p>
-                            </div>
-                            <div>
-                                <a href="${document.url}" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-download"></i> Download</a>
-                                <button class="btn btn-sm btn-danger delete-general-document" data-id="${documentId}"><i class="fas fa-trash"></i></button>
-                            </div>
-                        `;
-                        
-                        documentsContainer.appendChild(docElement);
-                    });
-                    
-                    // Add event listeners to delete buttons
-                    document.querySelectorAll('.delete-general-document').forEach(btn => {
-                        btn.addEventListener('click', (e) => {
-                            const documentId = e.currentTarget.dataset.id;
-                            if (confirm('Are you sure you want to delete this document?')) {
-                                db.collection('users').doc(currentUser.uid).collection('documents')
-                                    .doc(documentId).delete()
-                                    .then(() => {
-                                        showNotification('Document deleted successfully!', 'success');
-                                        loadDocumentsPage();
-                                    })
-                                    .catch(error => {
-                                        showNotification('Error deleting document: ' + error.message, 'error');
-                                    });
-                            }
-                        });
-                    });
-                })
-                .catch(error => {
-                    documentsContainer.innerHTML = '<div class="loading">Error loading documents</div>';
-                    console.error('Error loading documents:', error);
+                    documentsContainer.appendChild(docElement);
                 });
+                
+                // Add event listeners to delete buttons
+                document.querySelectorAll('.delete-document').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const documentId = e.currentTarget.dataset.id;
+                        const assetId = e.currentTarget.dataset.assetId;
+                        const isGeneral = e.currentTarget.dataset.isGeneral === 'true';
+                        
+                        if (confirm('Are you sure you want to delete this document?')) {
+                            let deletePromise;
+                            
+                            if (isGeneral) {
+                                // Delete general document
+                                deletePromise = db.collection('users').doc(currentUser.uid).collection('documents')
+                                    .doc(documentId).delete();
+                            } else {
+                                // Delete asset document
+                                deletePromise = db.collection('users').doc(currentUser.uid).collection('assets')
+                                    .doc(assetId).collection('documents')
+                                    .doc(documentId).delete();
+                            }
+                            
+                            deletePromise
+                                .then(() => {
+                                    showNotification('Document deleted successfully!', 'success');
+                                    loadDocumentsPage();
+                                })
+                                .catch(error => {
+                                    showNotification('Error deleting document: ' + error.message, 'error');
+                                });
+                        }
+                    });
+                });
+            })
+            .catch(error => {
+                documentsContainer.innerHTML = '<div class="loading">Error loading documents</div>';
+                console.error('Error loading documents:', error);
+            });
         }
 
         // Load profile
@@ -4146,4 +4224,4 @@
         window.addEventListener('load', initApp);
     </script>
 </body>
-    </html>
+                        </html>
