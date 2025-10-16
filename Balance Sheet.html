@@ -504,7 +504,6 @@
   </div>
 </div>
 
-<!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -558,11 +557,6 @@
 
   let balanceSheetChartInstance = null;
   let currentUser = null;
-  let balanceSheetData = {
-    assets: {},
-    liabilities: {},
-    equity: {}
-  };
 
   // Real-time clock
   function updateTime() {
@@ -605,7 +599,7 @@
   });
 
   backToCOABtn.addEventListener("click", () => {
-    window.location.href = "chart-of-accounts.html";
+    window.location.href = "coa.html";
   });
 
   // Initialize the application
@@ -636,9 +630,6 @@
     if (!currentUser) return;
 
     try {
-      // Reset data
-      balanceSheetData = { assets: {}, liabilities: {}, equity: {} };
-
       // Get accounts from Chart of Accounts
       const accountsQuery = query(
         collection(db, "users", currentUser.uid, "chartOfAccounts"),
@@ -651,35 +642,73 @@
         accounts.push({ id: doc.id, ...doc.data() });
       });
 
-      // Get transactions for each account and calculate balances
-      for (const account of accounts) {
-        const transactionsQuery = query(
-          collection(db, "users", currentUser.uid, "transactions"),
-          where("accountId", "==", account.id)
-        );
-        const transactionsSnapshot = await getDocs(transactionsQuery);
-        
-        let balance = 0;
-        transactionsSnapshot.forEach(doc => {
-          const transaction = doc.data();
-          balance += Number(transaction.amount || 0);
-        });
+      // Get all transactions
+      const transactionsQuery = query(
+        collection(db, "users", currentUser.uid, "transactions")
+      );
+      const transactionsSnapshot = await getDocs(transactionsQuery);
+      
+      // Calculate account balances
+      const accountBalances = {};
+      
+      // Initialize all accounts with zero balance
+      accounts.forEach(account => {
+        accountBalances[account.id] = {
+          name: account.name,
+          type: account.type,
+          category: account.category,
+          balance: 0
+        };
+      });
 
-        // Categorize by account type
-        if (account.type === "Asset") {
-          balanceSheetData.assets[account.name] = balance;
-        } else if (account.type === "Liability") {
-          balanceSheetData.liabilities[account.name] = balance;
-        } else if (account.type === "Equity") {
-          balanceSheetData.equity[account.name] = balance;
-        } else if (account.type === "Income" || account.type === "OtherIncome") {
-          // Income increases equity
-          balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
-        } else if (account.type === "Expense" || account.type === "COGS" || account.type === "OtherExpense") {
-          // Expenses decrease equity
-          balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) - balance;
+      // Calculate balances from transactions
+      transactionsSnapshot.forEach(doc => {
+        const transaction = doc.data();
+        const accountId = transaction.accountId;
+        const amount = Number(transaction.amount || 0);
+        
+        if (accountBalances[accountId]) {
+          accountBalances[accountId].balance += amount;
         }
-      }
+      });
+
+      // Categorize into balance sheet sections
+      const balanceSheetData = {
+        assets: {},
+        liabilities: {},
+        equity: {}
+      };
+
+      // Process each account based on type
+      Object.values(accountBalances).forEach(account => {
+        const balance = account.balance;
+        
+        switch(account.type) {
+          case 'Asset':
+            balanceSheetData.assets[account.name] = balance;
+            break;
+          case 'Liability':
+            balanceSheetData.liabilities[account.name] = balance;
+            break;
+          case 'Equity':
+            balanceSheetData.equity[account.name] = balance;
+            break;
+          case 'Income':
+            // Income increases equity (credit balance)
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
+            break;
+          case 'Expense':
+          case 'COGS':
+          case 'OtherExpense':
+            // Expenses decrease equity (debit balance)
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) - balance;
+            break;
+          case 'OtherIncome':
+            // Other income increases equity
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
+            break;
+        }
+      });
 
       // Calculate totals
       const totalAssets = calculateTotal(balanceSheetData.assets);
@@ -687,40 +716,45 @@
       const totalEquity = calculateTotal(balanceSheetData.equity);
       
       // Update UI
-      statAssets.textContent = `$${totalAssets.toFixed(2)}`;
-      statLiabilities.textContent = `$${totalLiabilities.toFixed(2)}`;
-      statEquity.textContent = `$${totalEquity.toFixed(2)}`;
-      
-      totalAssetsValue.textContent = `$${totalAssets.toFixed(2)}`;
-      totalLiabilitiesValue.textContent = `$${totalLiabilities.toFixed(2)}`;
-      totalEquityValue.textContent = `$${totalEquity.toFixed(2)}`;
-      
-      // Check if balance sheet balances
-      const netWorth = totalAssets - (totalLiabilities + totalEquity);
-      const isBalanced = Math.abs(netWorth) < 0.01;
-      
-      if (isBalanced) {
-        balanceValidation.className = "balance-validation balance-valid";
-        balanceStatus.textContent = "BALANCED ✓";
-        balanceStatus.style.color = "#155724";
-      } else {
-        balanceValidation.className = "balance-validation balance-invalid";
-        balanceStatus.textContent = `NOT BALANCED (Difference: $${Math.abs(netWorth).toFixed(2)}) ✗`;
-        balanceStatus.style.color = "#721c24";
-      }
-      
-      // Update breakdowns
-      updateBreakdown(balanceSheetData.assets, assetsBreakdown, "assets");
-      updateBreakdown(balanceSheetData.liabilities, liabilitiesBreakdown, "liabilities");
-      updateBreakdown(balanceSheetData.equity, equityBreakdown, "equity");
-      
-      // Update chart
-      updateChart();
+      updateBalanceSheetUI(balanceSheetData, totalAssets, totalLiabilities, totalEquity);
       
     } catch (error) {
       console.error("Error generating balance sheet:", error);
       alert("Error generating balance sheet: " + error.message);
     }
+  }
+
+  // Update balance sheet UI
+  function updateBalanceSheetUI(balanceSheetData, totalAssets, totalLiabilities, totalEquity) {
+    statAssets.textContent = `$${totalAssets.toFixed(2)}`;
+    statLiabilities.textContent = `$${totalLiabilities.toFixed(2)}`;
+    statEquity.textContent = `$${totalEquity.toFixed(2)}`;
+    
+    totalAssetsValue.textContent = `$${totalAssets.toFixed(2)}`;
+    totalLiabilitiesValue.textContent = `$${totalLiabilities.toFixed(2)}`;
+    totalEquityValue.textContent = `$${totalEquity.toFixed(2)}`;
+    
+    // Check if balance sheet balances
+    const netWorth = totalAssets - (totalLiabilities + totalEquity);
+    const isBalanced = Math.abs(netWorth) < 0.01;
+    
+    if (isBalanced) {
+      balanceValidation.className = "balance-validation balance-valid";
+      balanceStatus.textContent = "BALANCED ✓";
+      balanceStatus.style.color = "#155724";
+    } else {
+      balanceValidation.className = "balance-validation balance-invalid";
+      balanceStatus.textContent = `NOT BALANCED (Difference: $${Math.abs(netWorth).toFixed(2)}) ✗`;
+      balanceStatus.style.color = "#721c24";
+    }
+    
+    // Update breakdowns
+    updateBreakdown(balanceSheetData.assets, assetsBreakdown);
+    updateBreakdown(balanceSheetData.liabilities, liabilitiesBreakdown);
+    updateBreakdown(balanceSheetData.equity, equityBreakdown);
+    
+    // Update chart
+    updateChart(totalAssets, totalLiabilities, totalEquity);
   }
 
   // Calculate total for a category
@@ -729,7 +763,7 @@
   }
 
   // Update breakdown display
-  function updateBreakdown(accounts, container, type) {
+  function updateBreakdown(accounts, container) {
     if (Object.keys(accounts).length === 0) {
       container.innerHTML = '<div class="account-item"><div>No accounts found</div><div>$0.00</div></div>';
       return;
@@ -752,11 +786,7 @@
   }
 
   // Update chart
-  function updateChart() {
-    const totalAssets = calculateTotal(balanceSheetData.assets);
-    const totalLiabilities = calculateTotal(balanceSheetData.liabilities);
-    const totalEquity = calculateTotal(balanceSheetData.equity);
-    
+  function updateChart(totalAssets, totalLiabilities, totalEquity) {
     const ctx = document.getElementById('balanceSheetChart').getContext('2d');
     
     if (balanceSheetChartInstance) {
@@ -818,53 +848,129 @@
   }
 
   // Export to CSV
-  exportCSV.addEventListener("click", () => {
-    const totalAssets = calculateTotal(balanceSheetData.assets);
-    const totalLiabilities = calculateTotal(balanceSheetData.liabilities);
-    const totalEquity = calculateTotal(balanceSheetData.equity);
-    
-    if (totalAssets === 0 && totalLiabilities === 0 && totalEquity === 0) {
-      alert("There is no balance sheet data to export.");
-      return;
+  exportCSV.addEventListener("click", async () => {
+    if (!currentUser) return;
+
+    try {
+      // Regenerate data for export
+      const accountsQuery = query(
+        collection(db, "users", currentUser.uid, "chartOfAccounts"),
+        where("userId", "==", currentUser.uid)
+      );
+      const accountsSnapshot = await getDocs(accountsQuery);
+      
+      const accounts = [];
+      accountsSnapshot.forEach(doc => {
+        accounts.push({ id: doc.id, ...doc.data() });
+      });
+
+      const transactionsQuery = query(
+        collection(db, "users", currentUser.uid, "transactions")
+      );
+      const transactionsSnapshot = await getDocs(transactionsQuery);
+      
+      const accountBalances = {};
+      accounts.forEach(account => {
+        accountBalances[account.id] = {
+          name: account.name,
+          type: account.type,
+          balance: 0
+        };
+      });
+
+      transactionsSnapshot.forEach(doc => {
+        const transaction = doc.data();
+        const accountId = transaction.accountId;
+        const amount = Number(transaction.amount || 0);
+        
+        if (accountBalances[accountId]) {
+          accountBalances[accountId].balance += amount;
+        }
+      });
+
+      const balanceSheetData = {
+        assets: {},
+        liabilities: {},
+        equity: {}
+      };
+
+      Object.values(accountBalances).forEach(account => {
+        const balance = account.balance;
+        
+        switch(account.type) {
+          case 'Asset':
+            balanceSheetData.assets[account.name] = balance;
+            break;
+          case 'Liability':
+            balanceSheetData.liabilities[account.name] = balance;
+            break;
+          case 'Equity':
+            balanceSheetData.equity[account.name] = balance;
+            break;
+          case 'Income':
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
+            break;
+          case 'Expense':
+          case 'COGS':
+          case 'OtherExpense':
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) - balance;
+            break;
+          case 'OtherIncome':
+            balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
+            break;
+        }
+      });
+
+      const totalAssets = calculateTotal(balanceSheetData.assets);
+      const totalLiabilities = calculateTotal(balanceSheetData.liabilities);
+      const totalEquity = calculateTotal(balanceSheetData.equity);
+      
+      if (totalAssets === 0 && totalLiabilities === 0 && totalEquity === 0) {
+        alert("There is no balance sheet data to export.");
+        return;
+      }
+      
+      let csvContent = "Category,Account,Amount\n";
+      
+      // Add assets
+      csvContent += "Assets,,\n";
+      Object.entries(balanceSheetData.assets).forEach(([name, amount]) => {
+        csvContent += `,${name},${amount.toFixed(2)}\n`;
+      });
+      csvContent += `,Total Assets,${totalAssets.toFixed(2)}\n\n`;
+      
+      // Add liabilities
+      csvContent += "Liabilities,,\n";
+      Object.entries(balanceSheetData.liabilities).forEach(([name, amount]) => {
+        csvContent += `,${name},${amount.toFixed(2)}\n`;
+      });
+      csvContent += `,Total Liabilities,${totalLiabilities.toFixed(2)}\n\n`;
+      
+      // Add equity
+      csvContent += "Equity,,\n";
+      Object.entries(balanceSheetData.equity).forEach(([name, amount]) => {
+        csvContent += `,${name},${amount.toFixed(2)}\n`;
+      });
+      csvContent += `,Total Equity,${totalEquity.toFixed(2)}\n\n`;
+      
+      // Add totals
+      csvContent += `,Total Liabilities & Equity,${(totalLiabilities + totalEquity).toFixed(2)}\n`;
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `balance_sheet_${balanceSheetDateInput.value}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (error) {
+      alert("Error exporting CSV: " + error.message);
     }
-    
-    let csvContent = "Category,Account,Amount\n";
-    
-    // Add assets
-    csvContent += "Assets,,\n";
-    Object.entries(balanceSheetData.assets).forEach(([name, amount]) => {
-      csvContent += `,${name},${amount.toFixed(2)}\n`;
-    });
-    csvContent += `,Total Assets,${totalAssets.toFixed(2)}\n\n`;
-    
-    // Add liabilities
-    csvContent += "Liabilities,,\n";
-    Object.entries(balanceSheetData.liabilities).forEach(([name, amount]) => {
-      csvContent += `,${name},${amount.toFixed(2)}\n`;
-    });
-    csvContent += `,Total Liabilities,${totalLiabilities.toFixed(2)}\n\n`;
-    
-    // Add equity
-    csvContent += "Equity,,\n";
-    Object.entries(balanceSheetData.equity).forEach(([name, amount]) => {
-      csvContent += `,${name},${amount.toFixed(2)}\n`;
-    });
-    csvContent += `,Total Equity,${totalEquity.toFixed(2)}\n\n`;
-    
-    // Add totals
-    csvContent += `,Total Liabilities & Equity,${(totalLiabilities + totalEquity).toFixed(2)}\n`;
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `balance_sheet_${balanceSheetDateInput.value}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   });
 
   // Export to PDF
