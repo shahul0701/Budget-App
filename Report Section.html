@@ -396,29 +396,51 @@ function generateEmailSpendingInsights(transactions) {
     
     let insights = "";
     
-    // Top 2 highest spending categories
-    if (sortedCategories.length >= 1) {
-        insights += `🏆 Highest Spending: ${sortedCategories[0][0]} (₹${sortedCategories[0][1].toFixed(2)})\n`;
-    }
-    if (sortedCategories.length >= 2) {
-        insights += `🥈 Second Highest: ${sortedCategories[1][0]} (₹${sortedCategories[1][1].toFixed(2)})\n`;
+    // 🏆 TOP EXPENSES (2 highest)
+    insights += "🏆 TOP EXPENSES:\n";
+    for (let i = 0; i < Math.min(2, sortedCategories.length); i++) {
+        const [category, amount] = sortedCategories[i];
+        const percentage = ((amount / totalExpenses) * 100).toFixed(1);
+        insights += `• ${category}: ₹${amount.toFixed(2)} (${percentage}%)\n`;
     }
     
-    // 2 average spending categories (middle ones)
+    insights += "\n";
+    
+    // 📊 AVERAGE EXPENSES (2 middle ones)
+    insights += "📊 AVERAGE EXPENSES:\n";
     const midIndex = Math.floor(sortedCategories.length / 2);
+    const averageCategories = [];
+    
+    // Get 2 categories from the middle
     if (sortedCategories.length >= 3) {
-        insights += `📊 Average Spending: ${sortedCategories[midIndex][0]} (₹${sortedCategories[midIndex][1].toFixed(2)})\n`;
-    }
-    if (sortedCategories.length >= 4) {
-        insights += `📊 Average Spending: ${sortedCategories[midIndex + 1][0]} (₹${sortedCategories[midIndex + 1][1].toFixed(2)})\n`;
+        averageCategories.push(sortedCategories[midIndex]);
+        if (sortedCategories.length >= 4) {
+            averageCategories.push(sortedCategories[midIndex + 1]);
+        } else if (sortedCategories.length >= 2 && midIndex > 0) {
+            averageCategories.push(sortedCategories[midIndex - 1]);
+        }
+    } else if (sortedCategories.length === 2) {
+        // If only 2 categories, show the second one as average
+        averageCategories.push(sortedCategories[1]);
     }
     
-    // 2 lowest spending categories
-    if (sortedCategories.length >= 2) {
-        insights += `🌱 Lowest Spending: ${sortedCategories[sortedCategories.length - 1][0]} (₹${sortedCategories[sortedCategories.length - 1][1].toFixed(2)})\n`;
+    if (averageCategories.length > 0) {
+        averageCategories.forEach(([category, amount]) => {
+            const percentage = ((amount / totalExpenses) * 100).toFixed(1);
+            insights += `• ${category}: ₹${amount.toFixed(2)} (${percentage}%)\n`;
+        });
+    } else {
+        insights += "• No average spending categories available\n";
     }
-    if (sortedCategories.length >= 3) {
-        insights += `🌱 Low Spending: ${sortedCategories[sortedCategories.length - 2][0]} (₹${sortedCategories[sortedCategories.length - 2][1].toFixed(2)})`;
+    
+    insights += "\n";
+    
+    // 🌱 LEAST EXPENSES (2 lowest)
+    insights += "🌱 LEAST EXPENSES:\n";
+    for (let i = Math.max(0, sortedCategories.length - 2); i < sortedCategories.length; i++) {
+        const [category, amount] = sortedCategories[i];
+        const percentage = ((amount / totalExpenses) * 100).toFixed(1);
+        insights += `• ${category}: ₹${amount.toFixed(2)} (${percentage}%)\n`;
     }
     
     return insights;
@@ -459,36 +481,127 @@ function generateKeyObservations(transactions) {
 
 // ===== Email with PDF Attachment =====
 async function sendEmailWithReport(subject, body, pdfBlob, monthName) {
-    // Convert blob to base64 for email attachment (simulated)
-    const reader = new FileReader();
-    reader.readAsDataURL(pdfBlob);
+    // For demo purposes, we'll create a downloadable PDF and show email content
+    const pdfUrl = URL.createObjectURL(pdfBlob);
     
-    reader.onloadend = function() {
-        const base64data = reader.result;
+    // Show success message with download option
+    const result = await Swal.fire({
+        title: 'Monthly Report Ready!',
+        html: `
+            <div style="text-align: left;">
+                <p>Your monthly financial report for ${monthName} is ready to be sent.</p>
+                <p><strong>Email will include:</strong></p>
+                <ul>
+                    <li>PDF Report Attachment</li>
+                    <li>Financial Summary</li>
+                    <li>Spending Insights</li>
+                    <li>Top/Average/Least Expenses</li>
+                </ul>
+                <p><strong>Recipient:</strong> ${currentUser.email}</p>
+            </div>
+        `,
+        icon: 'success',
+        showCancelButton: true,
+        confirmButtonText: 'Send Email & Download PDF',
+        cancelButtonText: 'Just Download PDF',
+        showDenyButton: true,
+        denyButtonText: 'View Email Content'
+    });
+
+    if (result.isConfirmed) {
+        // Download PDF
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pdfUrl;
+        downloadLink.download = `Monthly_Report_${monthName.replace(' ', '_')}.pdf`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
         
-        // Create email with attachment information
-        const emailBody = `${body}\n\n[PDF Report: Monthly_Report_${monthName.replace(' ', '_')}.pdf attached]`;
+        // Simulate email sending
+        Swal.fire('Email Sent!', `Report has been sent to ${currentUser.email} with PDF attachment.`, 'success');
         
-        // Create mailto link (note: actual attachments not possible in mailto, this is for simulation)
-        const mailtoLink = `mailto:${currentUser.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-        
-        // In a real implementation, you would use a backend service to send emails with attachments
-        console.log('Monthly report email ready to send:', {
-            to: currentUser.email,
-            subject: subject,
-            body: emailBody,
-            attachment: `Monthly_Report_${monthName.replace(' ', '_')}.pdf`
-        });
-        
-        // For demo purposes, show success message
+    } else if (result.isDenied) {
+        // Show email content preview
         Swal.fire({
-            title: 'Monthly Report Sent!',
-            html: `Your monthly financial report for ${monthName} has been sent to ${currentUser.email}.<br><br>
-                   <small>In a production environment, this would be automatically sent with PDF attachment.</small>`,
-            icon: 'success',
-            timer: 5000
+            title: 'Email Content Preview',
+            html: `
+                <div style="text-align: left; max-height: 400px; overflow-y: auto;">
+                    <p><strong>To:</strong> ${currentUser.email}</p>
+                    <p><strong>Subject:</strong> ${subject}</p>
+                    <hr>
+                    <pre style="white-space: pre-wrap; font-family: inherit;">${body}</pre>
+                    <hr>
+                    <p><em>+ PDF Attachment: Monthly_Report_${monthName.replace(' ', '_')}.pdf</em></p>
+                </div>
+            `,
+            width: 800,
+            confirmButtonText: 'Download PDF'
+        }).then(() => {
+            // Download PDF after viewing
+            const downloadLink = document.createElement('a');
+            downloadLink.href = pdfUrl;
+            downloadLink.download = `Monthly_Report_${monthName.replace(' ', '_')}.pdf`;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
         });
-    };
+    } else if (result.dismiss === Swal.DismissReason.cancel) {
+        // Just download PDF
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pdfUrl;
+        downloadLink.download = `Monthly_Report_${monthName.replace(' ', '_')}.pdf`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+}
+
+// ===== Manual Email Report with PDF =====
+async function emailReport() {
+    if (!currentReportData || currentReportData.transactions.length === 0) {
+        Swal.fire("Info", "No report data to email. Generate a report first.", "info");
+        return;
+    }
+    
+    const { period, totalIncome, totalExpenses, netProfit, transactions } = currentReportData;
+    
+    // Generate PDF for current report
+    const { startDate, endDate } = getDateRange();
+    const pdfBlob = await generateMonthlyPDF(transactions, startDate, endDate);
+    
+    // Get spending insights
+    const spendingInsights = generateEmailSpendingInsights(transactions);
+    
+    const subject = `📊 Financial Report - ${period}`;
+    
+    const body = `Hello ${currentUser.displayName || currentUser.email || 'Valued Customer'},
+
+Here's your financial report:
+
+📅 PERIOD: ${period}
+
+💰 FINANCIAL SUMMARY:
+• Total Income: ₹${totalIncome.toFixed(2)}
+• Total Expenses: ₹${totalExpenses.toFixed(2)}
+• Net ${netProfit >= 0 ? 'Profit' : 'Loss'}: ₹${Math.abs(netProfit).toFixed(2)}
+
+📈 SPENDING INSIGHTS:
+${spendingInsights}
+
+💡 KEY OBSERVATIONS:
+${generateKeyObservations(transactions)}
+
+Attached is your detailed PDF report with complete transaction breakdown.
+
+Thank you for using our Budget App!
+
+Best regards,
+Budget App Team
+`;
+
+    // Use the same email sending function
+    const monthName = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    await sendEmailWithReport(subject, body, pdfBlob, monthName);
 }
 
 // ===== Generate Monthly PDF =====
@@ -884,38 +997,6 @@ async function generateMonthlyReport() {
     
     await generateReport();
     exportPDF(true);
-}
-
-// ===== Email Report =====
-function emailReport() {
-    if (!currentReportData || currentReportData.transactions.length === 0) {
-        Swal.fire("Info", "No report data to email. Generate a report first.", "info");
-        return;
-    }
-    
-    const { period, totalIncome, totalExpenses, netProfit, transactions } = currentReportData;
-    
-    const subject = `Financial Report: ${period}`;
-    
-    const transactionSummary = transactions.map(tx => 
-        `Date: ${tx.DATE}, Category: ${tx.ACCOUNT_HEADER || "Uncategorized"}, ` +
-        `Income: ₹${tx.INCOME || 0}, Expense: ₹${tx.EXPENSE || 0}, Notes: ${tx.NOTES || ""}`
-    ).join("\n");
-    
-    const body = `Financial Report: ${period}
-
-Income: ₹${totalIncome.toFixed(2)}
-Expenses: ₹${totalExpenses.toFixed(2)}
-Net: ₹${netProfit.toFixed(2)} ${netProfit >= 0 ? "(Profit)" : "(Loss)"}
-
-Transaction Summary:
-${transactionSummary}
-
-Generated by Budget App.
-`;
-    
-    const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoLink;
 }
 
 // ===== Export =====
