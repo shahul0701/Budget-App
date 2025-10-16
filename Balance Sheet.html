@@ -504,7 +504,36 @@
   </div>
 </div>
 
-<script>
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    getDocs,
+    query,
+    where,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import {
+    getAuth,
+    onAuthStateChanged,
+    signOut,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+    authDomain: "budget-app-1365f.firebaseapp.com",
+    projectId: "budget-app-1365f",
+    storageBucket: "budget-app-1365f.appspot.com",
+    messagingSenderId: "1036194450411",
+    appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+    measurementId: "G-YFFJL2H54X"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
   // DOM elements
   const balanceSheetDateInput = document.getElementById("balanceSheetDate");
   const generateReportBtn = document.getElementById("generateReportBtn");
@@ -528,40 +557,11 @@
   const datetimeElem = document.getElementById("datetime");
 
   let balanceSheetChartInstance = null;
+  let currentUser = null;
   let balanceSheetData = {
     assets: {},
     liabilities: {},
     equity: {}
-  };
-
-  // Original data from your screenshot
-  const originalData = {
-    assets: {
-      "Investment": 273.35,
-      "Bank charges": 222.86,
-      "BOM": 1794.00,
-      "AXIS": 69.00,
-      "Mom account": 425.00
-    },
-    liabilities: {
-      "Loan Payable": 26754.00,
-      "LOAN": 3822.00,
-      "Closing balance": 400.00,
-      "Money transfer": 42516.00
-    },
-    equity: {
-      "Other Expenses": 10316.00,
-      "Repair And Maintenance": 470.00,
-      "Own Uses": 50006.00,
-      "Utilities": 9111.36,
-      "Home Expenses": 16192.00,
-      "Travel Expenses": 5894.00,
-      "Money Transfer": 56595.00,
-      "Opening Balance": 101697.57,
-      "Medical expense": 9197.00,
-      "Uncategorized": 95.00,
-      "Opening balance": 56009.00
-    }
   };
 
   // Real-time clock
@@ -574,35 +574,53 @@
   setInterval(updateTime, 1000);
   updateTime();
 
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      currentUser = user;
+      const storedUsername = localStorage.getItem("username");
+      if (storedUsername) {
+        usernameElem.textContent = storedUsername;
+        profileCircle.textContent = storedUsername.charAt(0).toUpperCase();
+      } else {
+        const nameToStore = user.displayName || user.email;
+        usernameElem.textContent = nameToStore;
+        profileCircle.textContent = nameToStore.charAt(0).toUpperCase();
+      }
+
+      await initApp();
+    } else {
+      setTimeout(() => {
+        if (!auth.currentUser) {
+          alert("You must be logged in.");
+          window.location.href = "index.html";
+        }
+      }, 500);
+    }
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    localStorage.removeItem("username");
+    await signOut(auth);
+    window.location.href = "index.html";
+  });
+
+  backToCOABtn.addEventListener("click", () => {
+    window.location.href = "chart-of-accounts.html";
+  });
+
   // Initialize the application
-  function initApp() {
+  async function initApp() {
     // Set default date to today
     const today = new Date();
     balanceSheetDateInput.value = formatDate(today);
     
-    // Generate initial balance sheet with original data
-    generateBalanceSheet();
-    
-    // Set user info
-    usernameElem.textContent = "Demo User";
-    profileCircle.textContent = "D";
+    // Generate initial balance sheet
+    await generateBalanceSheet();
   }
 
   // Event listeners
-  logoutBtn.addEventListener("click", () => {
-    if (confirm("Are you sure you want to logout?")) {
-      alert("Logged out successfully!");
-      // In a real app, this would redirect to login page
-    }
-  });
-
-  backToCOABtn.addEventListener("click", () => {
-    alert("Redirecting to Chart of Accounts...");
-    // In a real app, this would redirect to COA page
-  });
-
-  generateReportBtn.addEventListener("click", () => {
-    generateBalanceSheet();
+  generateReportBtn.addEventListener("click", async () => {
+    await generateBalanceSheet();
   });
 
   // Format date to YYYY-MM-DD
@@ -613,46 +631,96 @@
     return `${year}-${month}-${day}`;
   }
 
-  // Generate balance sheet with original data
-  function generateBalanceSheet() {
-    // Use the original data from your screenshot
-    balanceSheetData = JSON.parse(JSON.stringify(originalData));
-    
-    // Calculate totals
-    const totalAssets = calculateTotal(balanceSheetData.assets);
-    const totalLiabilities = calculateTotal(balanceSheetData.liabilities);
-    const totalEquity = calculateTotal(balanceSheetData.equity);
-    
-    // Update UI
-    statAssets.textContent = `$${totalAssets.toFixed(2)}`;
-    statLiabilities.textContent = `$${totalLiabilities.toFixed(2)}`;
-    statEquity.textContent = `$${totalEquity.toFixed(2)}`;
-    
-    totalAssetsValue.textContent = `$${totalAssets.toFixed(2)}`;
-    totalLiabilitiesValue.textContent = `$${totalLiabilities.toFixed(2)}`;
-    totalEquityValue.textContent = `$${totalEquity.toFixed(2)}`;
-    
-    // Check if balance sheet balances
-    const netWorth = totalAssets - (totalLiabilities + totalEquity);
-    const isBalanced = Math.abs(netWorth) < 0.01; // Allow for small rounding errors
-    
-    if (isBalanced) {
-      balanceValidation.className = "balance-validation balance-valid";
-      balanceStatus.textContent = "BALANCED ✓";
-      balanceStatus.style.color = "#155724";
-    } else {
-      balanceValidation.className = "balance-validation balance-invalid";
-      balanceStatus.textContent = `NOT BALANCED (Difference: $${Math.abs(netWorth).toFixed(2)}) ✗`;
-      balanceStatus.style.color = "#721c24";
+  // Generate balance sheet from Firebase data
+  async function generateBalanceSheet() {
+    if (!currentUser) return;
+
+    try {
+      // Reset data
+      balanceSheetData = { assets: {}, liabilities: {}, equity: {} };
+
+      // Get accounts from Chart of Accounts
+      const accountsQuery = query(
+        collection(db, "users", currentUser.uid, "chartOfAccounts"),
+        where("userId", "==", currentUser.uid)
+      );
+      const accountsSnapshot = await getDocs(accountsQuery);
+      
+      const accounts = [];
+      accountsSnapshot.forEach(doc => {
+        accounts.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Get transactions for each account and calculate balances
+      for (const account of accounts) {
+        const transactionsQuery = query(
+          collection(db, "users", currentUser.uid, "transactions"),
+          where("accountId", "==", account.id)
+        );
+        const transactionsSnapshot = await getDocs(transactionsQuery);
+        
+        let balance = 0;
+        transactionsSnapshot.forEach(doc => {
+          const transaction = doc.data();
+          balance += Number(transaction.amount || 0);
+        });
+
+        // Categorize by account type
+        if (account.type === "Asset") {
+          balanceSheetData.assets[account.name] = balance;
+        } else if (account.type === "Liability") {
+          balanceSheetData.liabilities[account.name] = balance;
+        } else if (account.type === "Equity") {
+          balanceSheetData.equity[account.name] = balance;
+        } else if (account.type === "Income" || account.type === "OtherIncome") {
+          // Income increases equity
+          balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) + balance;
+        } else if (account.type === "Expense" || account.type === "COGS" || account.type === "OtherExpense") {
+          // Expenses decrease equity
+          balanceSheetData.equity[account.name] = (balanceSheetData.equity[account.name] || 0) - balance;
+        }
+      }
+
+      // Calculate totals
+      const totalAssets = calculateTotal(balanceSheetData.assets);
+      const totalLiabilities = calculateTotal(balanceSheetData.liabilities);
+      const totalEquity = calculateTotal(balanceSheetData.equity);
+      
+      // Update UI
+      statAssets.textContent = `$${totalAssets.toFixed(2)}`;
+      statLiabilities.textContent = `$${totalLiabilities.toFixed(2)}`;
+      statEquity.textContent = `$${totalEquity.toFixed(2)}`;
+      
+      totalAssetsValue.textContent = `$${totalAssets.toFixed(2)}`;
+      totalLiabilitiesValue.textContent = `$${totalLiabilities.toFixed(2)}`;
+      totalEquityValue.textContent = `$${totalEquity.toFixed(2)}`;
+      
+      // Check if balance sheet balances
+      const netWorth = totalAssets - (totalLiabilities + totalEquity);
+      const isBalanced = Math.abs(netWorth) < 0.01;
+      
+      if (isBalanced) {
+        balanceValidation.className = "balance-validation balance-valid";
+        balanceStatus.textContent = "BALANCED ✓";
+        balanceStatus.style.color = "#155724";
+      } else {
+        balanceValidation.className = "balance-validation balance-invalid";
+        balanceStatus.textContent = `NOT BALANCED (Difference: $${Math.abs(netWorth).toFixed(2)}) ✗`;
+        balanceStatus.style.color = "#721c24";
+      }
+      
+      // Update breakdowns
+      updateBreakdown(balanceSheetData.assets, assetsBreakdown, "assets");
+      updateBreakdown(balanceSheetData.liabilities, liabilitiesBreakdown, "liabilities");
+      updateBreakdown(balanceSheetData.equity, equityBreakdown, "equity");
+      
+      // Update chart
+      updateChart();
+      
+    } catch (error) {
+      console.error("Error generating balance sheet:", error);
+      alert("Error generating balance sheet: " + error.message);
     }
-    
-    // Update breakdowns
-    updateBreakdown(balanceSheetData.assets, assetsBreakdown, "assets");
-    updateBreakdown(balanceSheetData.liabilities, liabilitiesBreakdown, "liabilities");
-    updateBreakdown(balanceSheetData.equity, equityBreakdown, "equity");
-    
-    // Update chart
-    updateChart();
   }
 
   // Calculate total for a category
@@ -663,7 +731,7 @@
   // Update breakdown display
   function updateBreakdown(accounts, container, type) {
     if (Object.keys(accounts).length === 0) {
-      container.innerHTML = '<div class="account-item"><div>No data available</div><div>$0.00</div></div>';
+      container.innerHTML = '<div class="account-item"><div>No accounts found</div><div>$0.00</div></div>';
       return;
     }
     
@@ -696,6 +764,11 @@
     }
     
     if (totalAssets === 0 && totalLiabilities === 0 && totalEquity === 0) {
+      // Show empty state
+      ctx.font = "16px Arial";
+      ctx.fillStyle = "#6c757d";
+      ctx.textAlign = "center";
+      ctx.fillText("No balance sheet data available", ctx.canvas.width / 2, ctx.canvas.height / 2);
       return;
     }
     
@@ -810,9 +883,6 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
   }
-
-  // Initialize the app when the page loads
-  window.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
 </html>
