@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced General Ledger System</title>
+    <title>General Ledger System - Live Data</title>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     
     <style>
         :root {
@@ -879,370 +882,453 @@
                 width: 100%;
             }
         }
+
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: var(--bg-primary);
+        }
+
+        .login-box {
+            background: var(--bg-secondary);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-box h2 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: var(--text-primary);
+        }
+
+        .login-box .form-group {
+            margin-bottom: 20px;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .login-btn:hover {
+            background: var(--accent-secondary);
+        }
     </style>
 </head>
 <body>
-    <!-- Header -->
-    <div class="header">
-        <div class="header-left">
-            <a href="#"><i class="fas fa-book"></i> General Ledger System</a>
-        </div>
-        <div class="header-right">
-            <div class="theme-toggle" id="themeToggle">
-                <i class="fas fa-sun"></i>
-                <i class="fas fa-moon"></i>
+    <!-- Login Screen (initially visible) -->
+    <div class="login-container" id="loginScreen">
+        <div class="login-box">
+            <h2><i class="fas fa-book"></i> General Ledger System</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" placeholder="Enter your email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter your password" required>
+                </div>
+                <button type="submit" class="login-btn">Sign In</button>
+            </form>
+            <div style="text-align: center; margin-top: 20px;">
+                <p style="color: var(--text-secondary); font-size: 14px;">
+                    Demo: Use any email/password to login (auto-register)
+                </p>
             </div>
-            <div id="userInitials">U</div>
-            <div id="username">User</div>
-            <button id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
         </div>
     </div>
 
-    <!-- Main Container -->
-    <div class="container">
-        <!-- Dashboard Cards -->
-        <div class="dashboard-cards">
-            <div class="card total-income">
-                <h3><i class="fas fa-money-bill-wave"></i> Total Income</h3>
-                <div class="value" id="totalIncome">$0.00</div>
-                <div class="trend up"><i class="fas fa-arrow-up"></i> <span id="incomeTrend">0%</span> from last month</div>
+    <!-- Main Application (initially hidden) -->
+    <div id="app" style="display: none;">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <a href="#"><i class="fas fa-book"></i> General Ledger System</a>
             </div>
-            <div class="card total-expense">
-                <h3><i class="fas fa-file-invoice-dollar"></i> Total Expenses</h3>
-                <div class="value" id="totalExpense">$0.00</div>
-                <div class="trend down"><i class="fas fa-arrow-down"></i> <span id="expenseTrend">0%</span> from last month</div>
-            </div>
-            <div class="card net-income">
-                <h3><i class="fas fa-chart-line"></i> Net Income</h3>
-                <div class="value" id="netIncome">$0.00</div>
-                <div class="trend up"><i class="fas fa-arrow-up"></i> <span id="netTrend">0%</span> from last month</div>
-            </div>
-            <div class="card accounts">
-                <h3><i class="fas fa-university"></i> Active Accounts</h3>
-                <div class="value" id="activeAccounts">0</div>
-                <div class="trend up"><i class="fas fa-plus"></i> <span id="accountChange">0</span> this month</div>
+            <div class="header-right">
+                <div class="theme-toggle" id="themeToggle">
+                    <i class="fas fa-sun"></i>
+                    <i class="fas fa-moon"></i>
+                </div>
+                <div id="userInitials">U</div>
+                <div id="username">User</div>
+                <button id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
             </div>
         </div>
 
-        <!-- Controls -->
-        <div class="controls">
-            <div class="controls-left">
-                <button class="btn btn-primary" id="addTransactionBtn">
-                    <i class="fas fa-plus"></i> New Transaction
-                </button>
-                <button class="btn btn-success" id="importBtn">
-                    <i class="fas fa-file-import"></i> Import CSV
-                </button>
-                <button class="btn btn-warning" id="reportsBtn">
-                    <i class="fas fa-chart-bar"></i> Reports
-                </button>
-            </div>
-            <div class="controls-right">
-                <div class="search-box">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="searchInput" placeholder="Search transactions...">
+        <!-- Main Container -->
+        <div class="container">
+            <!-- Dashboard Cards -->
+            <div class="dashboard-cards">
+                <div class="card total-income">
+                    <h3><i class="fas fa-money-bill-wave"></i> Total Income</h3>
+                    <div class="value" id="totalIncome">$0.00</div>
+                    <div class="trend up"><i class="fas fa-arrow-up"></i> <span id="incomeTrend">0%</span> from last month</div>
                 </div>
-                <button class="btn btn-info" id="refreshBtn">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
+                <div class="card total-expense">
+                    <h3><i class="fas fa-file-invoice-dollar"></i> Total Expenses</h3>
+                    <div class="value" id="totalExpense">$0.00</div>
+                    <div class="trend down"><i class="fas fa-arrow-down"></i> <span id="expenseTrend">0%</span> from last month</div>
+                </div>
+                <div class="card net-income">
+                    <h3><i class="fas fa-chart-line"></i> Net Income</h3>
+                    <div class="value" id="netIncome">$0.00</div>
+                    <div class="trend up"><i class="fas fa-arrow-up"></i> <span id="netTrend">0%</span> from last month</div>
+                </div>
+                <div class="card accounts">
+                    <h3><i class="fas fa-university"></i> Active Accounts</h3>
+                    <div class="value" id="activeAccounts">0</div>
+                    <div class="trend up"><i class="fas fa-plus"></i> <span id="accountChange">0</span> this month</div>
+                </div>
             </div>
-        </div>
 
-        <!-- Filters -->
-        <div class="filter-section">
-            <div class="filters-row">
-                <div class="filter-group">
-                    <label for="dateFilter">Date Range</label>
-                    <select id="dateFilter">
-                        <option value="all">All Time</option>
-                        <option value="today">Today</option>
-                        <option value="week">This Week</option>
-                        <option value="month" selected>This Month</option>
-                        <option value="quarter">This Quarter</option>
-                        <option value="year">This Year</option>
-                        <option value="custom">Custom Range</option>
-                    </select>
+            <!-- Controls -->
+            <div class="controls">
+                <div class="controls-left">
+                    <button class="btn btn-primary" id="addTransactionBtn">
+                        <i class="fas fa-plus"></i> New Transaction
+                    </button>
+                    <button class="btn btn-success" id="importBtn">
+                        <i class="fas fa-file-import"></i> Import CSV
+                    </button>
+                    <button class="btn btn-warning" id="reportsBtn">
+                        <i class="fas fa-chart-bar"></i> Reports
+                    </button>
                 </div>
-                <div class="filter-group" id="customDateRange" style="display: none;">
-                    <label for="startDate">From Date</label>
-                    <input type="date" id="startDate">
-                </div>
-                <div class="filter-group" id="customDateRangeEnd" style="display: none;">
-                    <label for="endDate">To Date</label>
-                    <input type="date" id="endDate">
-                </div>
-                <div class="filter-group">
-                    <label for="accountFilter">Account</label>
-                    <select id="accountFilter">
-                        <option value="all">All Accounts</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="typeFilter">Transaction Type</label>
-                    <select id="typeFilter">
-                        <option value="all">All Types</option>
-                        <option value="income">Income</option>
-                        <option value="expense">Expense</option>
-                        <option value="transfer">Transfer</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>&nbsp;</label>
-                    <button class="btn btn-primary" id="applyFiltersBtn">Apply Filters</button>
+                <div class="controls-right">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchInput" placeholder="Search transactions...">
+                    </div>
+                    <button class="btn btn-info" id="refreshBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
                 </div>
             </div>
-        </div>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Ledger Section -->
-            <div class="ledger-section">
-                <div class="section-header">
-                    <h2><i class="fas fa-list"></i> General Ledger</h2>
-                    <div>
-                        <button class="btn btn-sm btn-info" id="exportLedgerBtn">
-                            <i class="fas fa-download"></i> Export
-                        </button>
+            <!-- Filters -->
+            <div class="filter-section">
+                <div class="filters-row">
+                    <div class="filter-group">
+                        <label for="dateFilter">Date Range</label>
+                        <select id="dateFilter">
+                            <option value="all">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month" selected>This Month</option>
+                            <option value="quarter">This Quarter</option>
+                            <option value="year">This Year</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+                    </div>
+                    <div class="filter-group" id="customDateRange" style="display: none;">
+                        <label for="startDate">From Date</label>
+                        <input type="date" id="startDate">
+                    </div>
+                    <div class="filter-group" id="customDateRangeEnd" style="display: none;">
+                        <label for="endDate">To Date</label>
+                        <input type="date" id="endDate">
+                    </div>
+                    <div class="filter-group">
+                        <label for="accountFilter">Account</label>
+                        <select id="accountFilter">
+                            <option value="all">All Accounts</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="typeFilter">Transaction Type</label>
+                        <select id="typeFilter">
+                            <option value="all">All Types</option>
+                            <option value="income">Income</option>
+                            <option value="expense">Expense</option>
+                            <option value="transfer">Transfer</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <button class="btn btn-primary" id="applyFiltersBtn">Apply Filters</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Ledger Section -->
+                <div class="ledger-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-list"></i> General Ledger</h2>
+                        <div>
+                            <button class="btn btn-sm btn-info" id="exportLedgerBtn">
+                                <i class="fas fa-download"></i> Export
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="ledgerTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Account</th>
+                                    <th>Description</th>
+                                    <th>Debit</th>
+                                    <th>Credit</th>
+                                    <th>Balance</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ledgerTableBody">
+                                <tr>
+                                    <td colspan="7" class="empty-state">
+                                        <i class="fas fa-inbox"></i>
+                                        <p>No transactions found</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="pagination">
+                        <button id="firstPageBtn" class="disabled">First</button>
+                        <button id="prevPageBtn" class="disabled">Previous</button>
+                        <span id="paginationInfo">Page 1 of 1</span>
+                        <button id="nextPageBtn" class="disabled">Next</button>
+                        <button id="lastPageBtn" class="disabled">Last</button>
                     </div>
                 </div>
 
-                <div class="table-responsive">
-                    <table id="ledgerTable">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Account</th>
-                                <th>Description</th>
-                                <th>Debit</th>
-                                <th>Credit</th>
-                                <th>Balance</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ledgerTableBody">
-                            <tr>
-                                <td colspan="7" class="empty-state">
-                                    <i class="fas fa-inbox"></i>
-                                    <p>No transactions found</p>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <!-- Sidebar -->
+                <div class="sidebar">
+                    <!-- Chart -->
+                    <div class="chart-container">
+                        <h3><i class="fas fa-chart-pie"></i> Income vs Expenses</h3>
+                        <canvas id="incomeExpenseChart"></canvas>
+                    </div>
 
-                <div class="pagination">
-                    <button id="firstPageBtn" class="disabled">First</button>
-                    <button id="prevPageBtn" class="disabled">Previous</button>
-                    <span id="paginationInfo">Page 1 of 1</span>
-                    <button id="nextPageBtn" class="disabled">Next</button>
-                    <button id="lastPageBtn" class="disabled">Last</button>
-                </div>
-            </div>
-
-            <!-- Sidebar -->
-            <div class="sidebar">
-                <!-- Chart -->
-                <div class="chart-container">
-                    <h3><i class="fas fa-chart-pie"></i> Income vs Expenses</h3>
-                    <canvas id="incomeExpenseChart"></canvas>
-                </div>
-
-                <!-- Recent Activity -->
-                <div class="recent-activity">
-                    <h3><i class="fas fa-history"></i> Recent Activity</h3>
-                    <div class="activity-list" id="recentActivityList">
-                        <div class="empty-state">
-                            <i class="fas fa-clock"></i>
-                            <p>No recent activity</p>
+                    <!-- Recent Activity -->
+                    <div class="recent-activity">
+                        <h3><i class="fas fa-history"></i> Recent Activity</h3>
+                        <div class="activity-list" id="recentActivityList">
+                            <div class="empty-state">
+                                <i class="fas fa-clock"></i>
+                                <p>No recent activity</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Floating Action Button -->
-    <button class="floating-btn" id="quickAddBtn">
-        <i class="fas fa-plus"></i>
-    </button>
+        <!-- Floating Action Button -->
+        <button class="floating-btn" id="quickAddBtn">
+            <i class="fas fa-plus"></i>
+        </button>
 
-    <!-- Transaction Modal -->
-    <div class="modal" id="transactionModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2><i class="fas fa-receipt"></i> <span id="modalTitle">Add Transaction</span></h2>
-                <button class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form id="transactionForm">
-                    <input type="hidden" id="transactionId">
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="transactionDate">Date *</label>
-                            <input type="date" id="transactionDate" required>
+        <!-- Transaction Modal -->
+        <div class="modal" id="transactionModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2><i class="fas fa-receipt"></i> <span id="modalTitle">Add Transaction</span></h2>
+                    <button class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="transactionForm">
+                        <input type="hidden" id="transactionId">
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="transactionDate">Date *</label>
+                                <input type="date" id="transactionDate" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="transactionType">Type *</label>
+                                <select id="transactionType" required>
+                                    <option value="">Select Type</option>
+                                    <option value="income">Income</option>
+                                    <option value="expense">Expense</option>
+                                    <option value="transfer">Transfer</option>
+                                </select>
+                            </div>
                         </div>
+
                         <div class="form-group">
-                            <label for="transactionType">Type *</label>
-                            <select id="transactionType" required>
-                                <option value="">Select Type</option>
-                                <option value="income">Income</option>
-                                <option value="expense">Expense</option>
-                                <option value="transfer">Transfer</option>
+                            <label for="account">Account *</label>
+                            <select id="account" required>
+                                <option value="">Select Account</option>
                             </select>
                         </div>
-                    </div>
 
-                    <div class="form-group">
-                        <label for="account">Account *</label>
-                        <select id="account" required>
-                            <option value="">Select Account</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="description">Description *</label>
-                        <input type="text" id="description" placeholder="Enter transaction description" required>
-                    </div>
-
-                    <div class="form-row">
                         <div class="form-group">
-                            <label for="debitAmount">Debit Amount</label>
-                            <input type="number" id="debitAmount" step="0.01" min="0" placeholder="0.00">
+                            <label for="description">Description *</label>
+                            <input type="text" id="description" placeholder="Enter transaction description" required>
                         </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="debitAmount">Debit Amount</label>
+                                <input type="number" id="debitAmount" step="0.01" min="0" placeholder="0.00">
+                            </div>
+                            <div class="form-group">
+                                <label for="creditAmount">Credit Amount</label>
+                                <input type="number" id="creditAmount" step="0.01" min="0" placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="transferSection" style="display: none;">
+                            <label for="transferAccount">Transfer To Account</label>
+                            <select id="transferAccount">
+                                <option value="">Select Account</option>
+                            </select>
+                        </div>
+
                         <div class="form-group">
-                            <label for="creditAmount">Credit Amount</label>
-                            <input type="number" id="creditAmount" step="0.01" min="0" placeholder="0.00">
+                            <label for="reference">Reference Number</label>
+                            <input type="text" id="reference" placeholder="Optional reference number">
                         </div>
-                    </div>
 
-                    <div class="form-group" id="transferSection" style="display: none;">
-                        <label for="transferAccount">Transfer To Account</label>
-                        <select id="transferAccount">
-                            <option value="">Select Account</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="reference">Reference Number</label>
-                        <input type="text" id="reference" placeholder="Optional reference number">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="attachment">Attachment</label>
-                        <input type="file" id="attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary" id="cancelTransactionBtn">Cancel</button>
-                        <button type="submit" class="btn btn-primary" id="saveTransactionBtn">Save Transaction</button>
-                    </div>
-                </form>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" id="cancelTransactionBtn">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="saveTransactionBtn">Save Transaction</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Reports Modal -->
-    <div class="modal" id="reportsModal">
-        <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-header">
-                <h2><i class="fas fa-chart-bar"></i> Financial Reports</h2>
-                <button class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="tabs">
-                    <div class="tab active" data-tab="income-statement">Income Statement</div>
-                    <div class="tab" data-tab="balance-sheet">Balance Sheet</div>
-                    <div class="tab" data-tab="trial-balance">Trial Balance</div>
+        <!-- Reports Modal -->
+        <div class="modal" id="reportsModal">
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2><i class="fas fa-chart-bar"></i> Financial Reports</h2>
+                    <button class="close-btn">&times;</button>
                 </div>
+                <div class="modal-body">
+                    <div class="tabs">
+                        <div class="tab active" data-tab="income-statement">Income Statement</div>
+                        <div class="tab" data-tab="balance-sheet">Balance Sheet</div>
+                        <div class="tab" data-tab="trial-balance">Trial Balance</div>
+                    </div>
 
-                <div class="tab-content active" id="income-statement">
-                    <div class="financial-statement">
-                        <div class="statement-header">
-                            <h3>Income Statement</h3>
-                            <p id="incomeStatementPeriod">For the period ending ...</p>
-                        </div>
-                        <div id="incomeStatementContent">
-                            <div class="loading">
-                                <div class="spinner"></div>
+                    <div class="tab-content active" id="income-statement">
+                        <div class="financial-statement">
+                            <div class="statement-header">
+                                <h3>Income Statement</h3>
+                                <p id="incomeStatementPeriod">For the period ending ...</p>
                             </div>
-                        </div>
-                        <div class="report-actions">
-                            <button class="btn btn-primary" id="printIncomeStatementBtn">
-                                <i class="fas fa-print"></i> Print
-                            </button>
-                            <button class="btn btn-success" id="exportIncomeStatementBtn">
-                                <i class="fas fa-download"></i> Export PDF
-                            </button>
+                            <div id="incomeStatementContent">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                </div>
+                            </div>
+                            <div class="report-actions">
+                                <button class="btn btn-primary" id="printIncomeStatementBtn">
+                                    <i class="fas fa-print"></i> Print
+                                </button>
+                                <button class="btn btn-success" id="exportIncomeStatementBtn">
+                                    <i class="fas fa-download"></i> Export PDF
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="tab-content" id="balance-sheet">
-                    <div class="financial-statement">
-                        <div class="statement-header">
-                            <h3>Balance Sheet</h3>
-                            <p id="balanceSheetDate">As of ...</p>
-                        </div>
-                        <div id="balanceSheetContent">
-                            <div class="loading">
-                                <div class="spinner"></div>
+                    <div class="tab-content" id="balance-sheet">
+                        <div class="financial-statement">
+                            <div class="statement-header">
+                                <h3>Balance Sheet</h3>
+                                <p id="balanceSheetDate">As of ...</p>
                             </div>
-                        </div>
-                        <div class="report-actions">
-                            <button class="btn btn-primary" id="printBalanceSheetBtn">
-                                <i class="fas fa-print"></i> Print
-                            </button>
-                            <button class="btn btn-success" id="exportBalanceSheetBtn">
-                                <i class="fas fa-download"></i> Export PDF
-                            </button>
+                            <div id="balanceSheetContent">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                </div>
+                            </div>
+                            <div class="report-actions">
+                                <button class="btn btn-primary" id="printBalanceSheetBtn">
+                                    <i class="fas fa-print"></i> Print
+                                </button>
+                                <button class="btn btn-success" id="exportBalanceSheetBtn">
+                                    <i class="fas fa-download"></i> Export PDF
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="tab-content" id="trial-balance">
-                    <div class="financial-statement">
-                        <div class="statement-header">
-                            <h3>Trial Balance</h3>
-                            <p id="trialBalanceDate">As of ...</p>
-                        </div>
-                        <div id="trialBalanceContent">
-                            <div class="loading">
-                                <div class="spinner"></div>
+                    <div class="tab-content" id="trial-balance">
+                        <div class="financial-statement">
+                            <div class="statement-header">
+                                <h3>Trial Balance</h3>
+                                <p id="trialBalanceDate">As of ...</p>
                             </div>
-                        </div>
-                        <div class="report-actions">
-                            <button class="btn btn-primary" id="printTrialBalanceBtn">
-                                <i class="fas fa-print"></i> Print
-                            </button>
-                            <button class="btn btn-success" id="exportTrialBalanceBtn">
-                                <i class="fas fa-download"></i> Export PDF
-                            </button>
+                            <div id="trialBalanceContent">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                </div>
+                            </div>
+                            <div class="report-actions">
+                                <button class="btn btn-primary" id="printTrialBalanceBtn">
+                                    <i class="fas fa-print"></i> Print
+                                </button>
+                                <button class="btn btn-success" id="exportTrialBalanceBtn">
+                                    <i class="fas fa-download"></i> Export PDF
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Loading Modal -->
-    <div class="modal" id="loadingModal">
-        <div class="modal-content" style="max-width: 300px; text-align: center;">
-            <div class="modal-body">
-                <div class="spinner" style="margin: 0 auto 20px;"></div>
-                <h3>Processing...</h3>
-                <p id="loadingMessage">Please wait</p>
+        <!-- Loading Modal -->
+        <div class="modal" id="loadingModal">
+            <div class="modal-content" style="max-width: 300px; text-align: center;">
+                <div class="modal-body">
+                    <div class="spinner" style="margin: 0 auto 20px;"></div>
+                    <h3>Processing...</h3>
+                    <p id="loadingMessage">Please wait</p>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // This is a comprehensive General Ledger System
-        // In a real implementation, this would connect to a backend like Firebase
-        // For this demo, we'll use localStorage to simulate data persistence
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+            authDomain: "budget-app-1365f.firebaseapp.com",
+            projectId: "budget-app-1365f",
+            storageBucket: "budget-app-1365f.appspot.com",
+            messagingSenderId: "1036194450411",
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+            measurementId: "G-YFFJL2H54X"
+        };
 
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        // Global variables
+        let currentUser = null;
+        let accounts = [];
+        let transactions = [];
+        let chart = null;
+
+        // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize the application
             initApp();
         });
 
@@ -1253,11 +1339,16 @@
             // Initialize event listeners
             initEventListeners();
             
-            // Load initial data
-            loadInitialData();
-            
-            // Initialize charts
-            initCharts();
+            // Check auth state
+            auth.onAuthStateChanged((user) => {
+                if (user) {
+                    currentUser = user;
+                    showApp();
+                    loadUserData();
+                } else {
+                    showLogin();
+                }
+            });
         }
 
         function initTheme() {
@@ -1283,12 +1374,16 @@
             // Theme toggle
             document.getElementById('themeToggle').addEventListener('click', toggleTheme);
             
+            // Login form
+            document.getElementById('loginForm').addEventListener('submit', handleLogin);
+            
             // Navigation buttons
             document.getElementById('addTransactionBtn').addEventListener('click', openTransactionModal);
             document.getElementById('quickAddBtn').addEventListener('click', openTransactionModal);
             document.getElementById('importBtn').addEventListener('click', openImportModal);
             document.getElementById('reportsBtn').addEventListener('click', openReportsModal);
             document.getElementById('refreshBtn').addEventListener('click', refreshData);
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
             
             // Filter controls
             document.getElementById('applyFiltersBtn').addEventListener('click', applyFilters);
@@ -1305,12 +1400,6 @@
             document.getElementById('transactionForm').addEventListener('submit', saveTransaction);
             document.getElementById('transactionType').addEventListener('change', toggleTransferSection);
             
-            // Pagination
-            document.getElementById('firstPageBtn').addEventListener('click', goToFirstPage);
-            document.getElementById('prevPageBtn').addEventListener('click', goToPrevPage);
-            document.getElementById('nextPageBtn').addEventListener('click', goToNextPage);
-            document.getElementById('lastPageBtn').addEventListener('click', goToLastPage);
-            
             // Search
             document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
             
@@ -1320,14 +1409,6 @@
             });
             
             // Report actions
-            document.getElementById('printIncomeStatementBtn').addEventListener('click', printIncomeStatement);
-            document.getElementById('exportIncomeStatementBtn').addEventListener('click', exportIncomeStatement);
-            document.getElementById('printBalanceSheetBtn').addEventListener('click', printBalanceSheet);
-            document.getElementById('exportBalanceSheetBtn').addEventListener('click', exportBalanceSheet);
-            document.getElementById('printTrialBalanceBtn').addEventListener('click', printTrialBalance);
-            document.getElementById('exportTrialBalanceBtn').addEventListener('click', exportTrialBalance);
-            
-            // Export ledger
             document.getElementById('exportLedgerBtn').addEventListener('click', exportLedger);
         }
 
@@ -1339,119 +1420,144 @@
             updateThemeToggleIcon(newTheme);
         }
 
-        function loadInitialData() {
-            // In a real app, this would load from Firebase or another backend
-            // For demo purposes, we'll initialize with sample data if none exists
-            if (!localStorage.getItem('generalLedgerData')) {
-                initializeSampleData();
-            }
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
             
-            loadDashboardData();
-            loadLedgerData();
-            loadRecentActivity();
-            populateAccountFilters();
-        }
-
-        function initializeSampleData() {
-            const sampleData = {
-                accounts: [
-                    { id: 1, name: 'Cash', type: 'asset', category: 'Current Assets', balance: 15000 },
-                    { id: 2, name: 'Accounts Receivable', type: 'asset', category: 'Current Assets', balance: 7500 },
-                    { id: 3, name: 'Inventory', type: 'asset', category: 'Current Assets', balance: 12000 },
-                    { id: 4, name: 'Equipment', type: 'asset', category: 'Fixed Assets', balance: 25000 },
-                    { id: 5, name: 'Accounts Payable', type: 'liability', category: 'Current Liabilities', balance: 8500 },
-                    { id: 6, name: 'Loans Payable', type: 'liability', category: 'Long-term Liabilities', balance: 15000 },
-                    { id: 7, name: 'Owner\'s Equity', type: 'equity', category: 'Equity', balance: 30000 },
-                    { id: 8, name: 'Sales Revenue', type: 'revenue', category: 'Revenue', balance: 0 },
-                    { id: 9, name: 'Cost of Goods Sold', type: 'expense', category: 'Cost of Sales', balance: 0 },
-                    { id: 10, name: 'Rent Expense', type: 'expense', category: 'Operating Expenses', balance: 0 },
-                    { id: 11, name: 'Utilities Expense', type: 'expense', category: 'Operating Expenses', balance: 0 },
-                    { id: 12, name: 'Salaries Expense', type: 'expense', category: 'Operating Expenses', balance: 0 }
-                ],
-                transactions: [
-                    {
-                        id: 1,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 8,
-                        description: 'Product Sales',
-                        debit: 0,
-                        credit: 5000,
-                        type: 'income',
-                        reference: 'INV-001'
-                    },
-                    {
-                        id: 2,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 1,
-                        description: 'Product Sales',
-                        debit: 5000,
-                        credit: 0,
-                        type: 'income',
-                        reference: 'INV-001'
-                    },
-                    {
-                        id: 3,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 9,
-                        description: 'Cost of goods sold',
-                        debit: 2500,
-                        credit: 0,
-                        type: 'expense',
-                        reference: 'COGS-001'
-                    },
-                    {
-                        id: 4,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 3,
-                        description: 'Cost of goods sold',
-                        debit: 0,
-                        credit: 2500,
-                        type: 'expense',
-                        reference: 'COGS-001'
-                    },
-                    {
-                        id: 5,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 10,
-                        description: 'Monthly office rent',
-                        debit: 1200,
-                        credit: 0,
-                        type: 'expense',
-                        reference: 'RENT-001'
-                    },
-                    {
-                        id: 6,
-                        date: new Date().toISOString().split('T')[0],
-                        accountId: 1,
-                        description: 'Monthly office rent',
-                        debit: 0,
-                        credit: 1200,
-                        type: 'expense',
-                        reference: 'RENT-001'
+            showLoading('Signing in...');
+            
+            // Sign in with email and password
+            auth.signInWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    currentUser = userCredential.user;
+                    showApp();
+                    loadUserData();
+                    hideLoading();
+                })
+                .catch((error) => {
+                    // If user doesn't exist, create new account
+                    if (error.code === 'auth/user-not-found') {
+                        auth.createUserWithEmailAndPassword(email, password)
+                            .then((userCredential) => {
+                                currentUser = userCredential.user;
+                                initializeUserData();
+                                showApp();
+                                loadUserData();
+                                hideLoading();
+                            })
+                            .catch((error) => {
+                                hideLoading();
+                                Swal.fire('Error', error.message, 'error');
+                            });
+                    } else {
+                        hideLoading();
+                        Swal.fire('Error', error.message, 'error');
                     }
-                ],
-                settings: {
-                    companyName: 'Sample Company',
-                    fiscalYearStart: '2023-01-01'
-                }
-            };
-            
-            localStorage.setItem('generalLedgerData', JSON.stringify(sampleData));
+                });
         }
 
-        function loadDashboardData() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
+        function handleLogout() {
+            auth.signOut().then(() => {
+                showLogin();
+            });
+        }
+
+        function showLogin() {
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('app').style.display = 'none';
+        }
+
+        function showApp() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
             
-            // Calculate totals
+            // Update user info
+            document.getElementById('username').textContent = currentUser.email;
+            document.getElementById('userInitials').textContent = currentUser.email.charAt(0).toUpperCase();
+        }
+
+        function initializeUserData() {
+            // Create default accounts for new user
+            const defaultAccounts = [
+                { name: 'Cash', type: 'asset', category: 'Current Assets', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Accounts Receivable', type: 'asset', category: 'Current Assets', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Inventory', type: 'asset', category: 'Current Assets', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Equipment', type: 'asset', category: 'Fixed Assets', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Accounts Payable', type: 'liability', category: 'Current Liabilities', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Loans Payable', type: 'liability', category: 'Long-term Liabilities', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: "Owner's Equity", type: 'equity', category: 'Equity', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Sales Revenue', type: 'revenue', category: 'Revenue', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Cost of Goods Sold', type: 'expense', category: 'Cost of Sales', balance: 0, userId: currentUser.uid, createdAt: new Date() },
+                { name: 'Rent Expense', type: 'expense', category: 'Operating Expenses', balance: 0, userId: currentUser.uid, createdAt: new Date() }
+            ];
+
+            const batch = db.batch();
+            defaultAccounts.forEach(account => {
+                const accountRef = db.collection('accounts').doc();
+                batch.set(accountRef, account);
+            });
+
+            return batch.commit();
+        }
+
+        function loadUserData() {
+            showLoading('Loading your data...');
+            
+            // Load accounts
+            db.collection('accounts')
+                .where('userId', '==', currentUser.uid)
+                .orderBy('createdAt')
+                .get()
+                .then((snapshot) => {
+                    accounts = [];
+                    snapshot.forEach(doc => {
+                        accounts.push({
+                            id: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    
+                    // Load transactions
+                    return db.collection('transactions')
+                        .where('userId', '==', currentUser.uid)
+                        .orderBy('date', 'desc')
+                        .get();
+                })
+                .then((snapshot) => {
+                    transactions = [];
+                    snapshot.forEach(doc => {
+                        transactions.push({
+                            id: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    
+                    // Update UI
+                    updateDashboard();
+                    populateAccountFilters();
+                    loadLedgerData();
+                    loadRecentActivity();
+                    initCharts();
+                    hideLoading();
+                })
+                .catch((error) => {
+                    hideLoading();
+                    console.error('Error loading data:', error);
+                    Swal.fire('Error', 'Failed to load data', 'error');
+                });
+        }
+
+        function updateDashboard() {
+            // Calculate totals from transactions
             let totalIncome = 0;
             let totalExpense = 0;
             
-            data.transactions.forEach(transaction => {
+            transactions.forEach(transaction => {
                 if (transaction.type === 'income') {
-                    totalIncome += transaction.credit;
+                    totalIncome += transaction.credit || 0;
                 } else if (transaction.type === 'expense') {
-                    totalExpense += transaction.debit;
+                    totalExpense += transaction.debit || 0;
                 }
             });
             
@@ -1461,23 +1567,43 @@
             document.getElementById('totalIncome').textContent = formatCurrency(totalIncome);
             document.getElementById('totalExpense').textContent = formatCurrency(totalExpense);
             document.getElementById('netIncome').textContent = formatCurrency(netIncome);
-            document.getElementById('activeAccounts').textContent = data.accounts.length;
+            document.getElementById('activeAccounts').textContent = accounts.length;
+        }
+
+        function populateAccountFilters() {
+            const accountFilter = document.getElementById('accountFilter');
+            const accountSelect = document.getElementById('account');
+            const transferAccountSelect = document.getElementById('transferAccount');
             
-            // Calculate trends (simplified for demo)
-            document.getElementById('incomeTrend').textContent = '12.5%';
-            document.getElementById('expenseTrend').textContent = '8.3%';
-            document.getElementById('netTrend').textContent = '15.2%';
-            document.getElementById('accountChange').textContent = '2';
+            // Clear existing options
+            accountFilter.innerHTML = '<option value="all">All Accounts</option>';
+            accountSelect.innerHTML = '<option value="">Select Account</option>';
+            transferAccountSelect.innerHTML = '<option value="">Select Account</option>';
+            
+            // Add accounts to filters
+            accounts.forEach(account => {
+                const option1 = document.createElement('option');
+                option1.value = account.id;
+                option1.textContent = account.name;
+                accountFilter.appendChild(option1);
+                
+                const option2 = document.createElement('option');
+                option2.value = account.id;
+                option2.textContent = account.name;
+                accountSelect.appendChild(option2);
+                
+                const option3 = document.createElement('option');
+                option3.value = account.id;
+                option3.textContent = account.name;
+                transferAccountSelect.appendChild(option3);
+            });
         }
 
         function loadLedgerData() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
             const tableBody = document.getElementById('ledgerTableBody');
             tableBody.innerHTML = '';
             
-            if (data.transactions.length === 0) {
+            if (transactions.length === 0) {
                 tableBody.innerHTML = `
                     <tr>
                         <td colspan="7" class="empty-state">
@@ -1489,24 +1615,37 @@
                 return;
             }
             
-            // Calculate running balances per account
+            // Calculate account balances
             const accountBalances = {};
-            data.accounts.forEach(account => {
+            accounts.forEach(account => {
                 accountBalances[account.id] = account.balance || 0;
             });
             
-            // Sort transactions by date (newest first)
-            const sortedTransactions = [...data.transactions].sort((a, b) => 
-                new Date(b.date) - new Date(a.date)
-            );
+            // Apply filters
+            let filteredTransactions = [...transactions];
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const accountFilter = document.getElementById('accountFilter').value;
+            const typeFilter = document.getElementById('typeFilter').value;
+            
+            if (searchTerm) {
+                filteredTransactions = filteredTransactions.filter(t => 
+                    t.description.toLowerCase().includes(searchTerm) ||
+                    t.reference?.toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            if (accountFilter !== 'all') {
+                filteredTransactions = filteredTransactions.filter(t => t.accountId === accountFilter);
+            }
+            
+            if (typeFilter !== 'all') {
+                filteredTransactions = filteredTransactions.filter(t => t.type === typeFilter);
+            }
             
             // Display transactions
-            sortedTransactions.forEach(transaction => {
-                const account = data.accounts.find(acc => acc.id === transaction.accountId);
+            filteredTransactions.forEach(transaction => {
+                const account = accounts.find(acc => acc.id === transaction.accountId);
                 if (!account) return;
-                
-                // Update balance for this account
-                accountBalances[account.id] += transaction.debit - transaction.credit;
                 
                 const row = document.createElement('tr');
                 row.innerHTML = `
@@ -1533,29 +1672,24 @@
             // Add event listeners to action buttons
             document.querySelectorAll('.edit-transaction').forEach(btn => {
                 btn.addEventListener('click', function() {
-                    const transactionId = parseInt(this.getAttribute('data-id'));
+                    const transactionId = this.getAttribute('data-id');
                     editTransaction(transactionId);
                 });
             });
             
             document.querySelectorAll('.delete-transaction').forEach(btn => {
                 btn.addEventListener('click', function() {
-                    const transactionId = parseInt(this.getAttribute('data-id'));
+                    const transactionId = this.getAttribute('data-id');
                     deleteTransaction(transactionId);
                 });
             });
-            
-            updatePagination();
         }
 
         function loadRecentActivity() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
             const activityList = document.getElementById('recentActivityList');
             activityList.innerHTML = '';
             
-            if (data.transactions.length === 0) {
+            if (transactions.length === 0) {
                 activityList.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-clock"></i>
@@ -1566,12 +1700,10 @@
             }
             
             // Get recent transactions (last 5)
-            const recentTransactions = [...data.transactions]
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .slice(0, 5);
+            const recentTransactions = transactions.slice(0, 5);
             
             recentTransactions.forEach(transaction => {
-                const account = data.accounts.find(acc => acc.id === transaction.accountId);
+                const account = accounts.find(acc => acc.id === transaction.accountId);
                 if (!account) return;
                 
                 const activityItem = document.createElement('div');
@@ -1606,65 +1738,37 @@
             });
         }
 
-        function populateAccountFilters() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
-            const accountFilter = document.getElementById('accountFilter');
-            const accountSelect = document.getElementById('account');
-            const transferAccountSelect = document.getElementById('transferAccount');
-            
-            // Clear existing options
-            accountFilter.innerHTML = '<option value="all">All Accounts</option>';
-            accountSelect.innerHTML = '<option value="">Select Account</option>';
-            transferAccountSelect.innerHTML = '<option value="">Select Account</option>';
-            
-            // Add accounts to filters
-            data.accounts.forEach(account => {
-                const option1 = document.createElement('option');
-                option1.value = account.id;
-                option1.textContent = account.name;
-                accountFilter.appendChild(option1);
-                
-                const option2 = document.createElement('option');
-                option2.value = account.id;
-                option2.textContent = account.name;
-                accountSelect.appendChild(option2);
-                
-                const option3 = document.createElement('option');
-                option3.value = account.id;
-                option3.textContent = account.name;
-                transferAccountSelect.appendChild(option3);
-            });
-        }
-
         function initCharts() {
             const ctx = document.getElementById('incomeExpenseChart').getContext('2d');
             
-            // Sample data - in a real app, this would come from your transaction data
-            const chartData = {
-                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-                datasets: [
-                    {
-                        label: 'Income',
-                        data: [12000, 19000, 15000, 18000, 22000, 19500],
-                        backgroundColor: 'rgba(40, 167, 69, 0.2)',
-                        borderColor: 'rgba(40, 167, 69, 1)',
-                        borderWidth: 2
-                    },
-                    {
-                        label: 'Expenses',
-                        data: [8500, 12000, 11000, 13500, 15000, 12500],
-                        backgroundColor: 'rgba(220, 53, 69, 0.2)',
-                        borderColor: 'rgba(220, 53, 69, 1)',
-                        borderWidth: 2
-                    }
-                ]
-            };
+            if (chart) {
+                chart.destroy();
+            }
             
-            new Chart(ctx, {
-                type: 'line',
-                data: chartData,
+            // Calculate monthly data
+            const monthlyData = calculateMonthlyData();
+            
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: monthlyData.labels,
+                    datasets: [
+                        {
+                            label: 'Income',
+                            data: monthlyData.income,
+                            backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                            borderColor: 'rgba(40, 167, 69, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Expenses',
+                            data: monthlyData.expenses,
+                            backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                            borderColor: 'rgba(220, 53, 69, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -1697,6 +1801,27 @@
                     }
                 }
             });
+        }
+
+        function calculateMonthlyData() {
+            const monthlyData = {
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                income: new Array(12).fill(0),
+                expenses: new Array(12).fill(0)
+            };
+            
+            transactions.forEach(transaction => {
+                const date = new Date(transaction.date);
+                const month = date.getMonth();
+                
+                if (transaction.type === 'income') {
+                    monthlyData.income[month] += transaction.credit || 0;
+                } else if (transaction.type === 'expense') {
+                    monthlyData.expenses[month] += transaction.debit || 0;
+                }
+            });
+            
+            return monthlyData;
         }
 
         function openTransactionModal() {
@@ -1746,7 +1871,7 @@
             const transactionId = document.getElementById('transactionId').value;
             const date = document.getElementById('transactionDate').value;
             const type = document.getElementById('transactionType').value;
-            const accountId = parseInt(document.getElementById('account').value);
+            const accountId = document.getElementById('account').value;
             const description = document.getElementById('description').value;
             const debitAmount = parseFloat(document.getElementById('debitAmount').value) || 0;
             const creditAmount = parseFloat(document.getElementById('creditAmount').value) || 0;
@@ -1754,98 +1879,82 @@
             
             // Validate form
             if (!date || !type || !accountId || !description) {
-                alert('Please fill in all required fields');
+                Swal.fire('Error', 'Please fill in all required fields', 'error');
                 return;
             }
             
             if (debitAmount === 0 && creditAmount === 0) {
-                alert('Please enter either a debit or credit amount');
+                Swal.fire('Error', 'Please enter either a debit or credit amount', 'error');
                 return;
             }
             
             if (debitAmount > 0 && creditAmount > 0) {
-                alert('A transaction cannot have both debit and credit amounts');
+                Swal.fire('Error', 'A transaction cannot have both debit and credit amounts', 'error');
                 return;
             }
             
-            // Load existing data
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
+            showLoading('Saving transaction...');
             
             // Create transaction object
-            const transaction = {
-                id: transactionId ? parseInt(transactionId) : Date.now(),
+            const transactionData = {
                 date,
                 accountId,
                 description,
                 debit: debitAmount,
                 credit: creditAmount,
                 type,
-                reference
+                reference,
+                userId: currentUser.uid,
+                createdAt: new Date()
             };
             
-            // Handle transfer transactions
-            if (type === 'transfer') {
-                const transferAccountId = parseInt(document.getElementById('transferAccount').value);
-                if (!transferAccountId) {
-                    alert('Please select a transfer account');
-                    return;
-                }
-                
-                if (accountId === transferAccountId) {
-                    alert('Cannot transfer to the same account');
-                    return;
-                }
-                
-                // Create the corresponding transaction for the transfer account
-                const transferTransaction = {
-                    id: Date.now() + 1,
-                    date,
-                    accountId: transferAccountId,
-                    description: `Transfer: ${description}`,
-                    debit: creditAmount, // Reverse the amounts for the other account
-                    credit: debitAmount,
-                    type: 'transfer',
-                    reference
-                };
-                
-                data.transactions.push(transferTransaction);
-            }
+            let promise;
             
-            // Add or update transaction
             if (transactionId) {
                 // Update existing transaction
-                const index = data.transactions.findIndex(t => t.id === parseInt(transactionId));
-                if (index !== -1) {
-                    data.transactions[index] = transaction;
-                }
+                promise = db.collection('transactions').doc(transactionId).update(transactionData);
             } else {
                 // Add new transaction
-                data.transactions.push(transaction);
+                promise = db.collection('transactions').add(transactionData);
             }
             
-            // Save data
-            localStorage.setItem('generalLedgerData', JSON.stringify(data));
-            
-            // Close modal and refresh data
-            closeModals();
-            refreshData();
-            
-            // Show success message
-            Swal.fire({
-                icon: 'success',
-                title: 'Transaction Saved',
-                text: 'The transaction has been successfully saved.',
-                timer: 2000,
-                showConfirmButton: false
-            });
+            promise
+                .then(() => {
+                    // Handle transfer transactions
+                    if (type === 'transfer') {
+                        const transferAccountId = document.getElementById('transferAccount').value;
+                        if (transferAccountId) {
+                            const transferTransaction = {
+                                date,
+                                accountId: transferAccountId,
+                                description: `Transfer: ${description}`,
+                                debit: creditAmount, // Reverse the amounts
+                                credit: debitAmount,
+                                type: 'transfer',
+                                reference,
+                                userId: currentUser.uid,
+                                createdAt: new Date()
+                            };
+                            
+                            return db.collection('transactions').add(transferTransaction);
+                        }
+                    }
+                })
+                .then(() => {
+                    hideLoading();
+                    closeModals();
+                    refreshData();
+                    Swal.fire('Success', 'Transaction saved successfully!', 'success');
+                })
+                .catch((error) => {
+                    hideLoading();
+                    console.error('Error saving transaction:', error);
+                    Swal.fire('Error', 'Failed to save transaction', 'error');
+                });
         }
 
         function editTransaction(transactionId) {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
-            const transaction = data.transactions.find(t => t.id === transactionId);
+            const transaction = transactions.find(t => t.id === transactionId);
             if (!transaction) return;
             
             // Populate form with transaction data
@@ -1856,8 +1965,8 @@
             document.getElementById('transactionType').value = transaction.type;
             document.getElementById('account').value = transaction.accountId;
             document.getElementById('description').value = transaction.description;
-            document.getElementById('debitAmount').value = transaction.debit;
-            document.getElementById('creditAmount').value = transaction.credit;
+            document.getElementById('debitAmount').value = transaction.debit || '';
+            document.getElementById('creditAmount').value = transaction.credit || '';
             document.getElementById('reference').value = transaction.reference || '';
             
             // Show/hide transfer section
@@ -1875,37 +1984,29 @@
                 confirmButtonText: 'Yes, delete it!'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-                    if (!data) return;
+                    showLoading('Deleting transaction...');
                     
-                    // Remove transaction
-                    data.transactions = data.transactions.filter(t => t.id !== transactionId);
-                    
-                    // Save data
-                    localStorage.setItem('generalLedgerData', JSON.stringify(data));
-                    
-                    // Refresh data
-                    refreshData();
-                    
-                    Swal.fire(
-                        'Deleted!',
-                        'The transaction has been deleted.',
-                        'success'
-                    );
+                    db.collection('transactions').doc(transactionId).delete()
+                        .then(() => {
+                            hideLoading();
+                            refreshData();
+                            Swal.fire('Deleted!', 'Transaction has been deleted.', 'success');
+                        })
+                        .catch((error) => {
+                            hideLoading();
+                            console.error('Error deleting transaction:', error);
+                            Swal.fire('Error', 'Failed to delete transaction', 'error');
+                        });
                 }
             });
         }
 
         function applyFilters() {
-            // This would filter the ledger data based on selected filters
-            // For this demo, we'll just reload the data
             loadLedgerData();
         }
 
         function refreshData() {
-            loadDashboardData();
-            loadLedgerData();
-            loadRecentActivity();
+            loadUserData();
         }
 
         function openReportsModal() {
@@ -1916,22 +2017,15 @@
         }
 
         function generateIncomeStatement() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
-            // Calculate revenue
+            // Calculate revenue and expenses
             let revenue = 0;
-            data.transactions.forEach(transaction => {
-                if (transaction.type === 'income') {
-                    revenue += transaction.credit;
-                }
-            });
-            
-            // Calculate expenses
             let expenses = 0;
-            data.transactions.forEach(transaction => {
-                if (transaction.type === 'expense') {
-                    expenses += transaction.debit;
+            
+            transactions.forEach(transaction => {
+                if (transaction.type === 'income') {
+                    revenue += transaction.credit || 0;
+                } else if (transaction.type === 'expense') {
+                    expenses += transaction.debit || 0;
                 }
             });
             
@@ -1949,14 +2043,14 @@
                         <td colspan="2">Revenue</td>
                     </tr>
                     <tr>
-                        <td>Sales Revenue</td>
+                        <td>Total Revenue</td>
                         <td class="debit">${formatCurrency(revenue)}</td>
                     </tr>
                     <tr class="section-header">
                         <td colspan="2">Expenses</td>
                     </tr>
                     <tr>
-                        <td>Cost of Goods Sold</td>
+                        <td>Total Expenses</td>
                         <td class="credit">${formatCurrency(expenses)}</td>
                     </tr>
                     <tr class="total-row">
@@ -1968,21 +2062,31 @@
         }
 
         function generateBalanceSheet() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
+            // Calculate account balances from transactions
+            const accountBalances = {};
+            accounts.forEach(account => {
+                accountBalances[account.id] = 0;
+            });
             
-            // Calculate totals for each category
+            transactions.forEach(transaction => {
+                if (accountBalances[transaction.accountId] !== undefined) {
+                    accountBalances[transaction.accountId] += (transaction.debit || 0) - (transaction.credit || 0);
+                }
+            });
+            
+            // Calculate totals
             let totalAssets = 0;
             let totalLiabilities = 0;
             let totalEquity = 0;
             
-            data.accounts.forEach(account => {
+            accounts.forEach(account => {
+                const balance = accountBalances[account.id] || 0;
                 if (account.type === 'asset') {
-                    totalAssets += account.balance;
+                    totalAssets += balance;
                 } else if (account.type === 'liability') {
-                    totalLiabilities += account.balance;
+                    totalLiabilities += balance;
                 } else if (account.type === 'equity') {
-                    totalEquity += account.balance;
+                    totalEquity += balance;
                 }
             });
             
@@ -1997,10 +2101,10 @@
                     <tr class="section-header">
                         <td colspan="2">Assets</td>
                     </tr>
-                    ${data.accounts.filter(acc => acc.type === 'asset').map(account => `
+                    ${accounts.filter(acc => acc.type === 'asset').map(account => `
                         <tr>
                             <td>${account.name}</td>
-                            <td class="debit">${formatCurrency(account.balance)}</td>
+                            <td class="debit">${formatCurrency(accountBalances[account.id] || 0)}</td>
                         </tr>
                     `).join('')}
                     <tr class="total-row">
@@ -2011,10 +2115,10 @@
                     <tr class="section-header">
                         <td colspan="2">Liabilities</td>
                     </tr>
-                    ${data.accounts.filter(acc => acc.type === 'liability').map(account => `
+                    ${accounts.filter(acc => acc.type === 'liability').map(account => `
                         <tr>
                             <td>${account.name}</td>
-                            <td class="credit">${formatCurrency(account.balance)}</td>
+                            <td class="credit">${formatCurrency(accountBalances[account.id] || 0)}</td>
                         </tr>
                     `).join('')}
                     <tr class="total-row">
@@ -2025,10 +2129,10 @@
                     <tr class="section-header">
                         <td colspan="2">Equity</td>
                     </tr>
-                    ${data.accounts.filter(acc => acc.type === 'equity').map(account => `
+                    ${accounts.filter(acc => acc.type === 'equity').map(account => `
                         <tr>
                             <td>${account.name}</td>
-                            <td class="credit">${formatCurrency(account.balance)}</td>
+                            <td class="credit">${formatCurrency(accountBalances[account.id] || 0)}</td>
                         </tr>
                     `).join('')}
                     <tr class="total-row">
@@ -2045,24 +2149,20 @@
         }
 
         function generateTrialBalance() {
-            const data = JSON.parse(localStorage.getItem('generalLedgerData'));
-            if (!data) return;
-            
             // Calculate account balances from transactions
             const accountBalances = {};
-            data.accounts.forEach(account => {
+            accounts.forEach(account => {
                 accountBalances[account.id] = {
                     name: account.name,
-                    type: account.type,
                     debit: 0,
                     credit: 0
                 };
             });
             
-            data.transactions.forEach(transaction => {
+            transactions.forEach(transaction => {
                 if (accountBalances[transaction.accountId]) {
-                    accountBalances[transaction.accountId].debit += transaction.debit;
-                    accountBalances[transaction.accountId].credit += transaction.credit;
+                    accountBalances[transaction.accountId].debit += transaction.debit || 0;
+                    accountBalances[transaction.accountId].credit += transaction.credit || 0;
                 }
             });
             
@@ -2124,50 +2224,11 @@
             document.getElementById(tabId).classList.add('active');
         }
 
-        function printIncomeStatement() {
-            window.print();
-        }
-
-        function exportIncomeStatement() {
-            Swal.fire({
-                icon: 'info',
-                title: 'Export Feature',
-                text: 'In a full implementation, this would generate and download a PDF of the income statement.',
-                confirmButtonText: 'OK'
-            });
-        }
-
-        function printBalanceSheet() {
-            window.print();
-        }
-
-        function exportBalanceSheet() {
-            Swal.fire({
-                icon: 'info',
-                title: 'Export Feature',
-                text: 'In a full implementation, this would generate and download a PDF of the balance sheet.',
-                confirmButtonText: 'OK'
-            });
-        }
-
-        function printTrialBalance() {
-            window.print();
-        }
-
-        function exportTrialBalance() {
-            Swal.fire({
-                icon: 'info',
-                title: 'Export Feature',
-                text: 'In a full implementation, this would generate and download a PDF of the trial balance.',
-                confirmButtonText: 'OK'
-            });
-        }
-
         function exportLedger() {
             Swal.fire({
                 icon: 'info',
                 title: 'Export Feature',
-                text: 'In a full implementation, this would export the ledger data to CSV or Excel format.',
+                text: 'This would export the ledger data to CSV format in a full implementation.',
                 confirmButtonText: 'OK'
             });
         }
@@ -2176,7 +2237,7 @@
             Swal.fire({
                 icon: 'info',
                 title: 'Import Feature',
-                text: 'In a full implementation, this would open a modal to import transactions from CSV files.',
+                text: 'This would open a CSV import dialog in a full implementation.',
                 confirmButtonText: 'OK'
             });
         }
@@ -2205,30 +2266,15 @@
             };
         }
 
-        // Pagination functions (simplified for demo)
-        function updatePagination() {
-            // In a real implementation, this would update based on filtered data
-            document.getElementById('paginationInfo').textContent = 'Page 1 of 1';
-            document.getElementById('firstPageBtn').classList.add('disabled');
-            document.getElementById('prevPageBtn').classList.add('disabled');
-            document.getElementById('nextPageBtn').classList.add('disabled');
-            document.getElementById('lastPageBtn').classList.add('disabled');
+        function showLoading(message) {
+            document.getElementById('loadingModal').style.display = 'flex';
+            if (message) {
+                document.getElementById('loadingMessage').textContent = message;
+            }
         }
 
-        function goToFirstPage() {
-            // Implementation for first page
-        }
-
-        function goToPrevPage() {
-            // Implementation for previous page
-        }
-
-        function goToNextPage() {
-            // Implementation for next page
-        }
-
-        function goToLastPage() {
-            // Implementation for last page
+        function hideLoading() {
+            document.getElementById('loadingModal').style.display = 'none';
         }
     </script>
 </body>
