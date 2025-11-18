@@ -143,6 +143,7 @@
       transition: background-color 0.3s;
     }
     .transactions-table tbody tr:nth-child(even) td { background: var(--bg-primary); }
+    .transactions-table tbody tr.selected td { background-color: rgba(111, 66, 193, 0.1); }
 
     .badge-income { 
       background-color: rgba(15, 122, 58, 0.15);
@@ -396,6 +397,74 @@
       text-align: center;
       color: white;
     }
+    
+    /* Bulk actions */
+    .bulk-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+      padding: 12px;
+      background: var(--card-bg);
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      align-items: center;
+    }
+    .bulk-actions.hidden {
+      display: none;
+    }
+    .bulk-count {
+      font-weight: 600;
+      color: var(--purple-1);
+    }
+    
+    /* Split transaction styles */
+    .split-transaction-item {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      background: var(--bg-primary);
+    }
+    .split-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .split-amount {
+      font-weight: 700;
+      color: var(--purple-1);
+    }
+    .remove-split {
+      background: var(--danger);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .split-summary {
+      margin-top: 15px;
+      padding: 10px;
+      background: var(--card-bg);
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .amount-remaining {
+      color: var(--success);
+    }
+    .amount-exceeded {
+      color: var(--danger);
+    }
+    
+    /* Checkbox in table */
+    .transaction-checkbox {
+      width: 18px;
+      height: 18px;
+    }
   </style>
 </head>
 <body>
@@ -428,6 +497,7 @@
         <div class="header-actions">
           <button id="newTxBtn" class="btn btn-light btn-sm text-primary"><i class="fa fa-plus me-1"></i> New Transaction</button>
           <button id="quickAddBtn" class="btn btn-light btn-sm text-primary ms-2"><i class="fa fa-bolt me-1"></i> Quick Add</button>
+          <button id="splitIncomeBtn" class="btn btn-light btn-sm text-primary ms-2"><i class="fa fa-share-alt me-1"></i> Split Income</button>
           <button id="themeToggle" class="theme-toggle">
             <i class="fa fa-moon"></i>
           </button>
@@ -438,6 +508,20 @@
             <button id="logoutBtn" class="btn btn-outline-light btn-sm">Logout</button>
           </div>
         </div>
+      </div>
+
+      <!-- Bulk Actions -->
+      <div id="bulkActions" class="bulk-actions hidden">
+        <span class="bulk-count" id="selectedCount">0 transactions selected</span>
+        <button id="bulkDeleteBtn" class="btn btn-outline-danger btn-sm">
+          <i class="fa fa-trash me-1"></i> Delete Selected
+        </button>
+        <button id="bulkEditBtn" class="btn btn-outline-warning btn-sm">
+          <i class="fa fa-edit me-1"></i> Edit Selected
+        </button>
+        <button id="clearSelectionBtn" class="btn btn-outline-secondary btn-sm">
+          <i class="fa fa-times me-1"></i> Clear Selection
+        </button>
       </div>
 
       <!-- top cards -->
@@ -523,6 +607,8 @@
           <button id="applyFiltersBtn" class="btn btn-sm btn-primary"><i class="fa fa-search me-1"></i> Apply</button>
           <button id="resetFiltersBtn" class="btn btn-sm btn-outline-secondary">Reset</button>
           <button id="advancedFiltersBtn" class="btn btn-sm btn-outline-info">Advanced</button>
+          <button id="selectAllBtn" class="btn btn-sm btn-outline-primary">Select All</button>
+          <button id="deselectAllBtn" class="btn btn-sm btn-outline-secondary">Deselect All</button>
         </div>
         
         <!-- Advanced filters (initially hidden) -->
@@ -542,6 +628,9 @@
           <table class="table mb-0">
             <thead>
               <tr>
+                <th style="width:40px;">
+                  <input type="checkbox" id="selectAllCheckbox" class="transaction-checkbox">
+                </th>
                 <th style="width:110px;">Date</th>
                 <th style="width:120px; text-align:right;">Account Header</th>
                 <th>Description</th>
@@ -556,7 +645,7 @@
               </tr>
             </thead>
             <tbody id="transactionsTableBody">
-              <tr><td colspan="11" class="text-center text-muted py-4">No transactions loaded.</td></tr>
+              <tr><td colspan="12" class="text-center text-muted py-4">No transactions loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -723,6 +812,88 @@
     </div>
   </div>
 
+  <!-- Split Income Modal -->
+  <div class="modal fade" id="splitIncomeModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Split Income into Multiple Expenses</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Income Amount to Split</label>
+            <input id="splitIncomeAmount" type="number" step="0.01" class="form-control" placeholder="Enter total income amount" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Income Description</label>
+            <input id="splitIncomeDescription" type="text" class="form-control" placeholder="Description for the income transaction" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Income Bank Account</label>
+            <select id="splitIncomeBank" class="form-select">
+              <option value="">Select Bank</option>
+              <!-- Will be populated from COA -->
+            </select>
+          </div>
+          
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6>Expense Transactions</h6>
+            <button type="button" id="addSplitExpenseBtn" class="btn btn-sm btn-primary">
+              <i class="fa fa-plus me-1"></i> Add Expense
+            </button>
+          </div>
+          
+          <div id="splitExpensesContainer">
+            <!-- Split expense items will be added here -->
+          </div>
+          
+          <div id="splitSummary" class="split-summary">
+            <!-- Summary will be updated here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button data-bs-dismiss="modal" class="btn btn-outline-secondary">Cancel</button>
+          <button id="saveSplitTransactionsBtn" class="btn btn-primary">Save All Transactions</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Edit Modal -->
+  <div class="modal fade" id="bulkEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Bulk Edit Transactions</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Update Field</label>
+            <select id="bulkEditField" class="form-select">
+              <option value="BANK_NAME">Bank Name</option>
+              <option value="ACCOUNT_HEADER">Account Header</option>
+              <option value="TYPE">Transaction Type</option>
+              <option value="VOUCHER_TYPE">Voucher Type</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">New Value</label>
+            <input id="bulkEditValue" type="text" class="form-control" placeholder="Enter new value" />
+          </div>
+          <div class="alert alert-info">
+            <small>This will update <span id="bulkEditCount">0</span> selected transactions.</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button id="confirmBulkEditBtn" class="btn btn-primary">Update Transactions</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Attachment modal -->
   <div class="modal fade" id="attachmentModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -746,6 +917,19 @@
         <div class="modal-footer">
           <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button id="confirmDeleteBtn" class="btn btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Delete Confirm -->
+  <div class="modal fade" id="confirmBulkDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-body">Are you sure you want to delete <span id="bulkDeleteCount">0</span> selected transactions?</div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button id="confirmBulkDeleteBtn" class="btn btn-danger">Delete All</button>
         </div>
       </div>
     </div>
@@ -803,6 +987,7 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const newTxBtn = document.getElementById("newTxBtn");
     const quickAddBtn = document.getElementById("quickAddBtn");
+    const splitIncomeBtn = document.getElementById("splitIncomeBtn");
     const floatingAdd = document.getElementById("floatingAdd");
     const balanceToggle = document.getElementById("balanceToggle");
     const backBtn = document.getElementById("backBtn");
@@ -825,6 +1010,33 @@
     const loadingModalEl = document.getElementById("loadingModal");
     const loadingModal = new bootstrap.Modal(loadingModalEl);
     const loadingMessage = document.getElementById("loadingMessage");
+    const selectAllBtn = document.getElementById("selectAllBtn");
+    const deselectAllBtn = document.getElementById("deselectAllBtn");
+    const selectAllCheckbox = document.getElementById("selectAllCheckbox");
+    const bulkActions = document.getElementById("bulkActions");
+    const selectedCount = document.getElementById("selectedCount");
+    const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
+    const bulkEditBtn = document.getElementById("bulkEditBtn");
+    const clearSelectionBtn = document.getElementById("clearSelectionBtn");
+    const splitIncomeModalEl = document.getElementById("splitIncomeModal");
+    const splitIncomeModal = new bootstrap.Modal(splitIncomeModalEl);
+    const splitIncomeAmount = document.getElementById("splitIncomeAmount");
+    const splitIncomeDescription = document.getElementById("splitIncomeDescription");
+    const splitIncomeBank = document.getElementById("splitIncomeBank");
+    const addSplitExpenseBtn = document.getElementById("addSplitExpenseBtn");
+    const splitExpensesContainer = document.getElementById("splitExpensesContainer");
+    const splitSummary = document.getElementById("splitSummary");
+    const saveSplitTransactionsBtn = document.getElementById("saveSplitTransactionsBtn");
+    const bulkEditModalEl = document.getElementById("bulkEditModal");
+    const bulkEditModal = new bootstrap.Modal(bulkEditModalEl);
+    const bulkEditField = document.getElementById("bulkEditField");
+    const bulkEditValue = document.getElementById("bulkEditValue");
+    const bulkEditCount = document.getElementById("bulkEditCount");
+    const confirmBulkEditBtn = document.getElementById("confirmBulkEditBtn");
+    const confirmBulkDeleteModalEl = document.getElementById("confirmBulkDeleteModal");
+    const confirmBulkDeleteModal = new bootstrap.Modal(confirmBulkDeleteModalEl);
+    const bulkDeleteCount = document.getElementById("bulkDeleteCount");
+    const confirmBulkDeleteBtn = document.getElementById("confirmBulkDeleteBtn");
 
     // Other DOM refs (filters, table, etc.)
     const dateFilter = document.getElementById("dateFilter");
@@ -894,6 +1106,7 @@
     let lastVoucherNumber = 0;
     let currentTheme = 'light';
     let transactionsChartInstance = null;
+    let selectedTransactions = new Set();
     
     // COA data
     let coaAccounts = [];
@@ -963,6 +1176,26 @@
 
     processQuickAddBtn.addEventListener("click", processQuickAdd);
 
+    // Split Income button
+    splitIncomeBtn.addEventListener("click", () => {
+      openSplitIncomeModal();
+    });
+
+    // Bulk action buttons
+    selectAllBtn.addEventListener("click", selectAllTransactions);
+    deselectAllBtn.addEventListener("click", deselectAllTransactions);
+    selectAllCheckbox.addEventListener("change", toggleSelectAll);
+    bulkDeleteBtn.addEventListener("click", confirmBulkDelete);
+    bulkEditBtn.addEventListener("click", openBulkEditModal);
+    clearSelectionBtn.addEventListener("click", clearSelection);
+    confirmBulkEditBtn.addEventListener("click", processBulkEdit);
+    confirmBulkDeleteBtn.addEventListener("click", processBulkDelete);
+
+    // Split income functionality
+    addSplitExpenseBtn.addEventListener("click", addSplitExpense);
+    saveSplitTransactionsBtn.addEventListener("click", saveSplitTransactions);
+    splitIncomeAmount.addEventListener("input", updateSplitSummary);
+
     // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
       try {
@@ -1015,6 +1248,7 @@
       formACCOUNTHEADER.innerHTML = '<option value="">Select Account Header</option>';
       formBANKNAME.innerHTML = '<option value="">Select Bank</option>';
       bankFilter.innerHTML = '<option value="all">All Banks</option>';
+      splitIncomeBank.innerHTML = '<option value="">Select Bank</option>';
       
       // Add account headers
       coaAccounts.forEach(account => {
@@ -1030,6 +1264,7 @@
         option.value = bank;
         option.textContent = bank;
         formBANKNAME.appendChild(option);
+        splitIncomeBank.appendChild(option.cloneNode(true));
         
         // Also add to bank filter
         const filterOption = document.createElement('option');
@@ -1105,7 +1340,7 @@
     // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
     async function loadTransactions(){
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 small-muted">Loading...</td></tr>`;
         
         const q = query(
           collection(db, "users", currentUser.uid, "transactions"), 
@@ -1138,7 +1373,7 @@
         await initVoucherNumbering();
       } catch (err) {
         console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
       }
     }
 
@@ -1667,7 +1902,7 @@
     // build table
     function buildTable(){
       if (filteredTransactions.length === 0) {
-        transactionsTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
         paginationControls.innerHTML = "";
         return;
       }
@@ -1682,6 +1917,7 @@
         const income = parseFloat(tx.INCOME) || 0;
         const expense = parseFloat(tx.EXPENSE) || 0;
         const balance = parseFloat(tx.BALANCE) || 0;
+        const isSelected = selectedTransactions.has(tx.id);
         
         // Apply color coding
         const incomeDisplay = income > 0 ? `<span class="income-color">$${income.toFixed(2)}</span>` : "$0.00";
@@ -1695,7 +1931,10 @@
         else if (tx.TYPE === 'Transfer') badgeClass = 'badge-transfer';
         
         html += `
-          <tr>
+          <tr class="${isSelected ? 'selected' : ''}">
+            <td>
+              <input type="checkbox" class="transaction-checkbox row-checkbox" data-id="${tx.id}" ${isSelected ? 'checked' : ''}>
+            </td>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(tx.ACCOUNT_HEADER || "-")}</td>
             <td>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</td>
@@ -1754,6 +1993,25 @@
         btn.addEventListener("click", e => {
           const attachment = e.currentTarget.getAttribute("data-attachment");
           viewAttachment(attachment);
+        });
+      });
+
+      // Add event listeners for row checkboxes
+      document.querySelectorAll(".row-checkbox").forEach(checkbox => {
+        checkbox.addEventListener("change", e => {
+          const id = e.target.getAttribute("data-id");
+          const row = e.target.closest("tr");
+          
+          if (e.target.checked) {
+            selectedTransactions.add(id);
+            row.classList.add("selected");
+          } else {
+            selectedTransactions.delete(id);
+            row.classList.remove("selected");
+            selectAllCheckbox.checked = false;
+          }
+          
+          updateBulkActions();
         });
       });
 
@@ -2219,7 +2477,7 @@
           reject(new Error('Upload failed'));
         });
         
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOAD_NAME}/auto/upload`);
         xhr.send(formData);
       });
     }
@@ -2585,6 +2843,407 @@
       const day = date.getDate().toString().padStart(2, '0');
       return `${year}-${month}-${day}`;
     }
+
+    // ========== NEW FEATURES ==========
+
+    // Multiple Selection Functions
+    function selectAllTransactions() {
+      const pageTransactions = filteredTransactions.slice(
+        (currentPage - 1) * rowsPerPage,
+        currentPage * rowsPerPage
+      );
+      
+      pageTransactions.forEach(tx => {
+        selectedTransactions.add(tx.id);
+      });
+      
+      buildTable();
+      updateBulkActions();
+    }
+
+    function deselectAllTransactions() {
+      selectedTransactions.clear();
+      buildTable();
+      updateBulkActions();
+    }
+
+    function toggleSelectAll() {
+      if (selectAllCheckbox.checked) {
+        selectAllTransactions();
+      } else {
+        deselectAllTransactions();
+      }
+    }
+
+    function clearSelection() {
+      selectedTransactions.clear();
+      buildTable();
+      updateBulkActions();
+    }
+
+    function updateBulkActions() {
+      const count = selectedTransactions.size;
+      selectedCount.textContent = `${count} transaction${count !== 1 ? 's' : ''} selected`;
+      
+      if (count > 0) {
+        bulkActions.classList.remove('hidden');
+      } else {
+        bulkActions.classList.add('hidden');
+      }
+    }
+
+    function confirmBulkDelete() {
+      const count = selectedTransactions.size;
+      if (count === 0) return;
+      
+      bulkDeleteCount.textContent = count;
+      confirmBulkDeleteModal.show();
+    }
+
+    async function processBulkDelete() {
+      const count = selectedTransactions.size;
+      if (count === 0) return;
+      
+      try {
+        loadingMessage.textContent = `Deleting ${count} transactions...`;
+        loadingModal.show();
+        
+        // Delete all selected transactions
+        const deletePromises = Array.from(selectedTransactions).map(id => 
+          deleteDoc(doc(db, "users", currentUser.uid, "transactions", id))
+        );
+        
+        await Promise.all(deletePromises);
+        
+        loadingModal.hide();
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Deleted', 
+          text: `${count} transaction${count !== 1 ? 's' : ''} deleted successfully` 
+        });
+        
+        selectedTransactions.clear();
+        confirmBulkDeleteModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("bulkDeleteTransactions", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transactions' });
+      }
+    }
+
+    function openBulkEditModal() {
+      const count = selectedTransactions.size;
+      if (count === 0) return;
+      
+      bulkEditCount.textContent = count;
+      bulkEditValue.value = "";
+      bulkEditModal.show();
+    }
+
+    async function processBulkEdit() {
+      const count = selectedTransactions.size;
+      if (count === 0) return;
+      
+      const field = bulkEditField.value;
+      const value = bulkEditValue.value.trim();
+      
+      if (!value) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a value' });
+        return;
+      }
+      
+      try {
+        loadingMessage.textContent = `Updating ${count} transactions...`;
+        loadingModal.show();
+        
+        // Update all selected transactions
+        const updatePromises = Array.from(selectedTransactions).map(id => {
+          const updateData = {};
+          updateData[field] = value;
+          
+          return updateDoc(doc(db, "users", currentUser.uid, "transactions", id), updateData);
+        });
+        
+        await Promise.all(updatePromises);
+        
+        loadingModal.hide();
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Updated', 
+          text: `${count} transaction${count !== 1 ? 's' : ''} updated successfully` 
+        });
+        
+        selectedTransactions.clear();
+        bulkEditModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("bulkEditTransactions", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions' });
+      }
+    }
+
+    // Split Income Functions
+    function openSplitIncomeModal() {
+      // Reset the modal
+      splitIncomeAmount.value = "";
+      splitIncomeDescription.value = "";
+      splitIncomeBank.value = "";
+      splitExpensesContainer.innerHTML = "";
+      splitSummary.innerHTML = "";
+      
+      // Add one initial expense
+      addSplitExpense();
+      
+      splitIncomeModal.show();
+    }
+
+    function addSplitExpense() {
+      const expenseId = 'expense-' + Date.now();
+      const expenseHtml = `
+        <div class="split-transaction-item" id="${expenseId}">
+          <div class="split-header">
+            <h6>Expense</h6>
+            <button type="button" class="remove-split" onclick="removeSplitExpense('${expenseId}')">
+              <i class="fa fa-times"></i>
+            </button>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="form-label">Amount</label>
+              <input type="number" step="0.01" class="form-control split-amount-input" placeholder="0.00" oninput="updateSplitSummary()">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Description</label>
+              <input type="text" class="form-control split-description-input" placeholder="Expense description">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Bank Account</label>
+              <select class="form-select split-bank-input">
+                <option value="">Select Bank</option>
+                ${coaBanks.map(bank => `<option value="${bank}">${bank}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="row g-2 mt-2">
+            <div class="col-md-12">
+              <label class="form-label">Account Header</label>
+              <select class="form-select split-account-input">
+                <option value="">Select Account Header</option>
+                ${coaAccounts.map(account => `<option value="${account}">${account}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      splitExpensesContainer.insertAdjacentHTML('beforeend', expenseHtml);
+      updateSplitSummary();
+    }
+
+    function removeSplitExpense(id) {
+      const element = document.getElementById(id);
+      if (element) {
+        element.remove();
+        updateSplitSummary();
+      }
+    }
+
+    function updateSplitSummary() {
+      const incomeAmount = parseFloat(splitIncomeAmount.value) || 0;
+      const expenseElements = splitExpensesContainer.querySelectorAll('.split-transaction-item');
+      
+      let totalExpenses = 0;
+      expenseElements.forEach(element => {
+        const amountInput = element.querySelector('.split-amount-input');
+        const amount = parseFloat(amountInput.value) || 0;
+        totalExpenses += amount;
+      });
+      
+      const remaining = incomeAmount - totalExpenses;
+      
+      let summaryHtml = '';
+      if (incomeAmount > 0) {
+        summaryHtml = `
+          <div class="d-flex justify-content-between">
+            <span>Total Income:</span>
+            <span>$${incomeAmount.toFixed(2)}</span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span>Total Expenses:</span>
+            <span>$${totalExpenses.toFixed(2)}</span>
+          </div>
+          <div class="d-flex justify-content-between ${remaining >= 0 ? 'amount-remaining' : 'amount-exceeded'}">
+            <span>Remaining:</span>
+            <span>$${remaining.toFixed(2)}</span>
+          </div>
+        `;
+        
+        if (remaining < 0) {
+          summaryHtml += `<div class="text-danger small mt-1">Warning: Expenses exceed income by $${Math.abs(remaining).toFixed(2)}</div>`;
+        } else if (remaining > 0) {
+          summaryHtml += `<div class="text-warning small mt-1">Note: $${remaining.toFixed(2)} of income not allocated</div>`;
+        } else {
+          summaryHtml += `<div class="text-success small mt-1">Perfect! All income allocated to expenses</div>`;
+        }
+      }
+      
+      splitSummary.innerHTML = summaryHtml;
+    }
+
+    async function saveSplitTransactions() {
+      const incomeAmount = parseFloat(splitIncomeAmount.value) || 0;
+      const incomeDescription = splitIncomeDescription.value.trim();
+      const incomeBank = splitIncomeBank.value;
+      
+      if (!incomeAmount || incomeAmount <= 0) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a valid income amount' });
+        return;
+      }
+      
+      if (!incomeDescription) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter an income description' });
+        return;
+      }
+      
+      if (!incomeBank) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please select an income bank account' });
+        return;
+      }
+      
+      const expenseElements = splitExpensesContainer.querySelectorAll('.split-transaction-item');
+      if (expenseElements.length === 0) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please add at least one expense' });
+        return;
+      }
+      
+      let totalExpenses = 0;
+      const expenses = [];
+      
+      // Validate all expenses
+      for (const element of expenseElements) {
+        const amountInput = element.querySelector('.split-amount-input');
+        const descriptionInput = element.querySelector('.split-description-input');
+        const bankInput = element.querySelector('.split-bank-input');
+        const accountInput = element.querySelector('.split-account-input');
+        
+        const amount = parseFloat(amountInput.value) || 0;
+        const description = descriptionInput.value.trim();
+        const bank = bankInput.value;
+        const account = accountInput.value;
+        
+        if (amount <= 0) {
+          Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a positive amount' });
+          return;
+        }
+        
+        if (!description) {
+          Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a description' });
+          return;
+        }
+        
+        if (!bank) {
+          Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a bank account selected' });
+          return;
+        }
+        
+        if (!account) {
+          Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have an account header selected' });
+          return;
+        }
+        
+        totalExpenses += amount;
+        expenses.push({ amount, description, bank, account });
+      }
+      
+      const remaining = incomeAmount - totalExpenses;
+      if (remaining < 0) {
+        const result = await Swal.fire({
+          icon: 'warning',
+          title: 'Expenses Exceed Income',
+          text: `Your expenses ($${totalExpenses.toFixed(2)}) exceed your income ($${incomeAmount.toFixed(2)}) by $${Math.abs(remaining).toFixed(2)}. Do you want to continue?`,
+          showCancelButton: true,
+          confirmButtonText: 'Yes, Continue',
+          cancelButtonText: 'No, Cancel'
+        });
+        
+        if (!result.isConfirmed) {
+          return;
+        }
+      }
+      
+      try {
+        loadingMessage.textContent = "Saving split transactions...";
+        loadingModal.show();
+        
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Save income transaction
+        const incomeVoucher = await getNextVoucherNumber("Receipt");
+        const incomeData = {
+          DATE: today,
+          SINO: incomeVoucher,
+          ACCOUNT_HEADER: "Income",
+          BANK_NAME: incomeBank,
+          MODE: incomeBank,
+          VOUCHER_TYPE: "Receipt",
+          TYPE: "Income",
+          INCOME: incomeAmount,
+          EXPENSE: 0,
+          BALANCE: 0,
+          DESCRIPTION: incomeDescription,
+          NOTES: "Split income transaction",
+          CURRENCY: "USD",
+          createdAt: new Date(),
+          userId: currentUser.uid
+        };
+        
+        await addDoc(collection(db, "users", currentUser.uid, "transactions"), incomeData);
+        
+        // Save all expense transactions
+        for (const expense of expenses) {
+          const expenseVoucher = await getNextVoucherNumber("Payment");
+          const expenseData = {
+            DATE: today,
+            SINO: expenseVoucher,
+            ACCOUNT_HEADER: expense.account,
+            BANK_NAME: expense.bank,
+            MODE: expense.bank,
+            VOUCHER_TYPE: "Payment",
+            TYPE: "Expense",
+            INCOME: 0,
+            EXPENSE: expense.amount,
+            BALANCE: 0,
+            DESCRIPTION: expense.description,
+            NOTES: "Split from income",
+            CURRENCY: "USD",
+            createdAt: new Date(),
+            userId: currentUser.uid
+          };
+          
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), expenseData);
+        }
+        
+        loadingModal.hide();
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Success', 
+          text: `Created ${1 + expenses.length} transactions successfully` 
+        });
+        
+        splitIncomeModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("saveSplitTransactions", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transactions' });
+      }
+    }
+
+    // Make functions available globally for inline event handlers
+    window.removeSplitExpense = removeSplitExpense;
+    window.updateSplitSummary = updateSplitSummary;
   </script>
 
   <!-- Bootstrap JS -->
