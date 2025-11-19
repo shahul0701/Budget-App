@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Budget App by Shahul</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* Global Styles */
     * {
@@ -330,6 +331,23 @@
       box-shadow: 0 0 0 3px rgba(98, 0, 238, 0.1);
     }
     
+    /* Password Input Container */
+    .password-container {
+      position: relative;
+    }
+    
+    .toggle-password {
+      position: absolute;
+      right: 15px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 18px;
+    }
+    
     /* Footer */
     footer {
       text-align: center;
@@ -423,6 +441,41 @@
       cursor: pointer;
       text-decoration: underline;
       font-weight: 500;
+    }
+    
+    /* Loading Screen */
+    .loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      flex-direction: column;
+      color: white;
+    }
+    
+    .loading-spinner {
+      width: 80px;
+      height: 80px;
+      border: 8px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s ease-in-out infinite;
+      margin-bottom: 20px;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .loading-text {
+      font-size: 24px;
+      font-weight: 600;
     }
     
     /* Home Page Styles */
@@ -653,6 +706,12 @@
   </style>
 </head>
 <body>
+  <!-- Loading Screen -->
+  <div class="loading-screen" id="loadingScreen">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading Budget App...</div>
+  </div>
+
   <!-- Navigation -->
   <nav>
     <div class="container nav-container">
@@ -885,18 +944,17 @@
       
       <div class="chart-container">
         <h3 style="margin-bottom: 20px;">Expense Breakdown</h3>
-        <div class="chart-placeholder">
-          <i class="fas fa-chart-pie" style="font-size: 40px; margin-right: 15px;"></i>
-          Interactive Pie Chart Would Appear Here
-        </div>
+        <canvas id="expenseChart" height="300"></canvas>
       </div>
       
       <div class="chart-container">
         <h3 style="margin-bottom: 20px;">Income vs Expenses</h3>
-        <div class="chart-placeholder">
-          <i class="fas fa-chart-bar" style="font-size: 40px; margin-right: 15px;"></i>
-          Interactive Bar Chart Would Appear Here
-        </div>
+        <canvas id="incomeExpenseChart" height="300"></canvas>
+      </div>
+      
+      <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">Monthly Savings Trend</h3>
+        <canvas id="savingsChart" height="300"></canvas>
       </div>
     </div>
   </div>
@@ -1030,10 +1088,21 @@
       <p style="margin-bottom: 20px; color: #666;">Welcome back! Please enter your details</p>
       
       <input type="email" id="email" class="modal-input" placeholder="Email address">
-      <input type="password" id="password" class="modal-input" placeholder="Password">
+      
+      <div class="password-container">
+        <input type="password" id="password" class="modal-input" placeholder="Password">
+        <button type="button" class="toggle-password" id="togglePassword">
+          <i class="fas fa-eye"></i>
+        </button>
+      </div>
       
       <div id="extraField" style="display:none;">
-        <input type="password" id="confirmPassword" class="modal-input" placeholder="Confirm Password">
+        <div class="password-container">
+          <input type="password" id="confirmPassword" class="modal-input" placeholder="Confirm Password">
+          <button type="button" class="toggle-password" id="toggleConfirmPassword">
+            <i class="fas fa-eye"></i>
+          </button>
+        </div>
       </div>
       
       <button class="btn" id="submitBtn" style="width: 100%; justify-content: center;">Login</button>
@@ -1046,146 +1115,334 @@
   </div>
 
   <script type="module">
-   // Import Firebase modules
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    // Import Firebase modules
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-  authDomain: "budget-app-1365f.firebaseapp.com",
-  projectId: "budget-app-1365f",
-  storageBucket: "budget-app-1365f.appspot.com",
-  messagingSenderId: "1036194450411",
-  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-  measurementId: "G-YFFJL2H54X"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-
-// Navigation
-document.querySelectorAll('.nav-links a').forEach(link => {
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    const pageId = link.getAttribute('data-page');
-    showPage(pageId);
-    
-    // Update navigation active state
-    document.querySelectorAll('.nav-links li').forEach(li => {
-      li.classList.remove('active');
-    });
-    link.parentElement.classList.add('active');
-  });
-});
-
-function showPage(pageId) {
-  document.querySelectorAll('.page').forEach(page => {
-    page.classList.remove('active');
-  });
-  document.getElementById(pageId).classList.add('active');
-}
-
-// Modal toggle
-const modal = document.getElementById("authModal");
-document.getElementById("openAuth").onclick = () => modal.style.display = "flex";
-document.getElementById("openAuthHero").onclick = () => modal.style.display = "flex";
-document.getElementById("closeModal").onclick = () => modal.style.display = "none";
-
-// Close modal when clicking outside
-window.onclick = (e) => {
-  if (e.target === modal) {
-    modal.style.display = "none";
-  }
-}
-
-// Switch login/signup
-let isLogin = true;
-const switchAuth = document.getElementById("switchAuth");
-switchAuth.onclick = () => {
-  isLogin = !isLogin;
-  document.getElementById("authTitle").innerText = isLogin ? "Login to Your Account" : "Create Your Account";
-  document.getElementById("submitBtn").innerText = isLogin ? "Login" : "Sign Up";
-  document.getElementById("extraField").style.display = isLogin ? "none" : "block";
-  document.getElementById("switchText").innerText = isLogin ? "Don't have an account?" : "Already have an account?";
-  switchAuth.innerText = isLogin ? "Sign Up" : "Login";
-};
-
-// Handle authentication
-const submitAuth = async () => {
-  const email = document.getElementById("email").value;
-  const password = document.getElementById("password").value;
-  
-  try {
-    if (isLogin) {
-      // Login user
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Show success message
-      alert('Login successful! Welcome back.');
-      
-      // Close modal and update UI
-      modal.style.display = "none";
-      document.getElementById("authButtonText").innerText = "Logout";
-      document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
-    } else {
-      // Sign up user
-      const confirm = document.getElementById("confirmPassword").value;
-      if (password !== confirm) {
-        alert("Passwords do not match!");
-        return;
-      }
-      
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Show success message
-      alert('Account created successfully! Welcome to Budget App.');
-      
-      // Close modal and update UI
-      modal.style.display = "none";
-      document.getElementById("authButtonText").innerText = "Logout";
-      document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
-    }
-  } catch (error) {
-    alert(error.message);
-  }
-};
-
-// Submit on Enter key
-document.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && modal.style.display === 'flex') {
-    submitAuth();
-  }
-});
-
-document.getElementById("submitBtn").onclick = submitAuth;
-
-// Check if user is already logged in
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    // User is signed in
-    document.getElementById("authButtonText").innerText = "Logout";
-    document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
-    
-    // Update logout functionality
-    document.getElementById("openAuth").onclick = () => {
-      signOut(auth).then(() => {
-        alert('You have been logged out successfully.');
-        document.getElementById("authButtonText").innerText = "Login";
-        document.getElementById("openAuth").innerHTML = '<i class="fas fa-user"></i> <span id="authButtonText">Login</span>';
-        document.getElementById("openAuth").onclick = () => modal.style.display = "flex";
-      }).catch((error) => {
-        alert('Error signing out: ' + error.message);
-      });
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
     };
-  }
-});
 
-// Set default date to today
-document.getElementById('transactionDate').valueAsDate = new Date();
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    // Hide loading screen after page loads
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        document.getElementById('loadingScreen').style.display = 'none';
+      }, 1500);
+    });
+
+    // Navigation
+    document.querySelectorAll('.nav-links a').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const pageId = link.getAttribute('data-page');
+        showPage(pageId);
+        
+        // Update navigation active state
+        document.querySelectorAll('.nav-links li').forEach(li => {
+          li.classList.remove('active');
+        });
+        link.parentElement.classList.add('active');
+      });
+    });
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page').forEach(page => {
+        page.classList.remove('active');
+      });
+      document.getElementById(pageId).classList.add('active');
+      
+      // Initialize charts when reports page is shown
+      if (pageId === 'reports') {
+        initializeCharts();
+      }
+    }
+
+    // Modal toggle
+    const modal = document.getElementById("authModal");
+    document.getElementById("openAuth").onclick = () => modal.style.display = "flex";
+    document.getElementById("openAuthHero").onclick = () => modal.style.display = "flex";
+    document.getElementById("closeModal").onclick = () => modal.style.display = "none";
+
+    // Close modal when clicking outside
+    window.onclick = (e) => {
+      if (e.target === modal) {
+        modal.style.display = "none";
+      }
+    }
+
+    // Toggle password visibility
+    document.getElementById('togglePassword').addEventListener('click', function() {
+      const passwordInput = document.getElementById('password');
+      const icon = this.querySelector('i');
+      
+      if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+      } else {
+        passwordInput.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+      }
+    });
+
+    document.getElementById('toggleConfirmPassword').addEventListener('click', function() {
+      const confirmPasswordInput = document.getElementById('confirmPassword');
+      const icon = this.querySelector('i');
+      
+      if (confirmPasswordInput.type === 'password') {
+        confirmPasswordInput.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+      } else {
+        confirmPasswordInput.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+      }
+    });
+
+    // Switch login/signup
+    let isLogin = true;
+    const switchAuth = document.getElementById("switchAuth");
+    switchAuth.onclick = () => {
+      isLogin = !isLogin;
+      document.getElementById("authTitle").innerText = isLogin ? "Login to Your Account" : "Create Your Account";
+      document.getElementById("submitBtn").innerText = isLogin ? "Login" : "Sign Up";
+      document.getElementById("extraField").style.display = isLogin ? "none" : "block";
+      document.getElementById("switchText").innerText = isLogin ? "Don't have an account?" : "Already have an account?";
+      switchAuth.innerText = isLogin ? "Sign Up" : "Login";
+    };
+
+    // Handle authentication
+    const submitAuth = async () => {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      
+      try {
+        if (isLogin) {
+          // Show loading screen
+          document.getElementById('loadingScreen').style.display = 'flex';
+          
+          // Login user
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          const user = userCredential.user;
+          
+          // Simulate loading for better UX
+          setTimeout(() => {
+            // Hide loading screen
+            document.getElementById('loadingScreen').style.display = 'none';
+            
+            // Show success message
+            alert('Login successful! Welcome back.');
+            
+            // Close modal and update UI
+            modal.style.display = "none";
+            document.getElementById("authButtonText").innerText = "Logout";
+            document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
+            
+            // Redirect to home.html (simulated)
+            window.location.href = 'home.html';
+          }, 2000);
+        } else {
+          // Sign up user
+          const confirm = document.getElementById("confirmPassword").value;
+          if (password !== confirm) {
+            alert("Passwords do not match!");
+            return;
+          }
+          
+          // Show loading screen
+          document.getElementById('loadingScreen').style.display = 'flex';
+          
+          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          const user = userCredential.user;
+          
+          // Simulate loading for better UX
+          setTimeout(() => {
+            // Hide loading screen
+            document.getElementById('loadingScreen').style.display = 'none';
+            
+            // Show success message
+            alert('Account created successfully! Welcome to Budget App.');
+            
+            // Close modal and update UI
+            modal.style.display = "none";
+            document.getElementById("authButtonText").innerText = "Logout";
+            document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
+            
+            // Redirect to home.html (simulated)
+            window.location.href = 'home.html';
+          }, 2000);
+        }
+      } catch (error) {
+        // Hide loading screen in case of error
+        document.getElementById('loadingScreen').style.display = 'none';
+        alert(error.message);
+      }
+    };
+
+    // Submit on Enter key
+    document.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && modal.style.display === 'flex') {
+        submitAuth();
+      }
+    });
+
+    document.getElementById("submitBtn").onclick = submitAuth;
+
+    // Check if user is already logged in
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // User is signed in
+        document.getElementById("authButtonText").innerText = "Logout";
+        document.getElementById("openAuth").innerHTML = '<i class="fas fa-sign-out-alt"></i> <span id="authButtonText">Logout</span>';
+        
+        // Update logout functionality
+        document.getElementById("openAuth").onclick = () => {
+          signOut(auth).then(() => {
+            alert('You have been logged out successfully.');
+            document.getElementById("authButtonText").innerText = "Login";
+            document.getElementById("openAuth").innerHTML = '<i class="fas fa-user"></i> <span id="authButtonText">Login</span>';
+            document.getElementById("openAuth").onclick = () => modal.style.display = "flex";
+          }).catch((error) => {
+            alert('Error signing out: ' + error.message);
+          });
+        };
+      }
+    });
+
+    // Set default date to today
+    document.getElementById('transactionDate').valueAsDate = new Date();
+
+    // Initialize Charts
+    function initializeCharts() {
+      // Expense Breakdown Chart
+      const expenseCtx = document.getElementById('expenseChart').getContext('2d');
+      const expenseChart = new Chart(expenseCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Housing', 'Food', 'Transportation', 'Entertainment', 'Utilities', 'Other'],
+          datasets: [{
+            data: [35, 20, 15, 10, 12, 8],
+            backgroundColor: [
+              '#6200ee',
+              '#03dac6',
+              '#ff9800',
+              '#f44336',
+              '#4caf50',
+              '#9c27b0'
+            ],
+            borderWidth: 2,
+            borderColor: '#fff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'right',
+            },
+            title: {
+              display: true,
+              text: 'Expense Distribution'
+            }
+          }
+        }
+      });
+
+      // Income vs Expenses Chart
+      const incomeExpenseCtx = document.getElementById('incomeExpenseChart').getContext('2d');
+      const incomeExpenseChart = new Chart(incomeExpenseCtx, {
+        type: 'bar',
+        data: {
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+          datasets: [
+            {
+              label: 'Income',
+              data: [4500, 5200, 4800, 5500, 6000, 6500],
+              backgroundColor: '#4caf50',
+              borderColor: '#4caf50',
+              borderWidth: 1
+            },
+            {
+              label: 'Expenses',
+              data: [3200, 3800, 3500, 4200, 4500, 4800],
+              backgroundColor: '#f44336',
+              borderColor: '#f44336',
+              borderWidth: 1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Amount ($)'
+              }
+            }
+          },
+          plugins: {
+            title: {
+              display: true,
+              text: 'Monthly Income vs Expenses'
+            }
+          }
+        }
+      });
+
+      // Savings Trend Chart
+      const savingsCtx = document.getElementById('savingsChart').getContext('2d');
+      const savingsChart = new Chart(savingsCtx, {
+        type: 'line',
+        data: {
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+          datasets: [{
+            label: 'Savings',
+            data: [800, 950, 1100, 1050, 1200, 1400],
+            backgroundColor: 'rgba(3, 218, 198, 0.1)',
+            borderColor: '#03dac6',
+            borderWidth: 3,
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Savings ($)'
+              }
+            }
+          },
+          plugins: {
+            title: {
+              display: true,
+              text: 'Monthly Savings Trend'
+            }
+          }
+        }
+      });
+    }
   </script>
 </body>
 </html>
