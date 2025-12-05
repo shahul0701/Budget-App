@@ -465,10 +465,41 @@
       width: 18px;
       height: 18px;
     }
+    
+    /* Loading backdrop */
+    .loading-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      color: white;
+      font-size: 18px;
+    }
+    
+    /* Animation for modal opening */
+    .modal.fade .modal-dialog {
+      transition: transform 0.2s ease-out;
+    }
   </style>
 </head>
 <body>
   <div class="page">
+    <!-- Loading Backdrop -->
+    <div id="loadingBackdrop" class="loading-backdrop" style="display: none;">
+      <div class="text-center">
+        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p id="backdropMessage">Loading...</p>
+      </div>
+    </div>
+    
     <!-- Navigation buttons -->
     <div class="nav-buttons">
       <button id="backBtn" class="btn btn-outline-primary">
@@ -978,10 +1009,28 @@
     const db = getFirestore(app);
     const auth = getAuth(app);
 
-    // state - add this line to track if we've loaded saved state
+    // state
+    let currentUser = null;
+    let allTransactions = [];
+    let filteredTransactions = [];
+    let currentPage = 1;
+    const rowsPerPage = 10; // Fixed to show 10 entries
+    let txToDelete = null;
+    let balanceVisible = false;
+    let isSubmitting = false;
+    let lastVoucherNumber = 0;
+    let currentTheme = 'light';
+    let transactionsChartInstance = null;
+    let selectedTransactions = new Set();
     let hasLoadedSavedState = false;
+    
+    // COA data
+    let coaAccounts = [];
+    let coaBanks = [];
 
     // DOM refs
+    const loadingBackdrop = document.getElementById("loadingBackdrop");
+    const backdropMessage = document.getElementById("backdropMessage");
     const usernameElem = document.getElementById("username");
     const initialsElem = document.getElementById("userInitials");
     const logoutBtn = document.getElementById("logoutBtn");
@@ -1093,29 +1142,7 @@
     const statBalance = document.getElementById("statBalance");
     const statCount = document.getElementById("statCount");
 
-    // state
-    let currentUser = null;
-    let allTransactions = [];
-    let filteredTransactions = [];
-    let txMap = {};
-    let currentPage = 1;
-    const rowsPerPage = 5;
-    let txToDelete = null;
-    let balanceVisible = false; // Start with balance hidden
-    let isSubmitting = false;
-    let lastVoucherNumber = 0;
-    let currentTheme = 'light';
-    let transactionsChartInstance = null;
-    let selectedTransactions = new Set();
-    
-    // COA data
-    let coaAccounts = [];
-    let coaBanks = [];
-
-    // Cloudinary config - FIXED TYPO IN CLOUD NAME
-    const CLOUDINARY_CLOUD_NAME = "dpwdsyvz8"; // Your actual Cloudinary cloud name
-    const CLOUDINARY_UPLOAD_PRESET = "my_app_uploads"; // Your actual upload preset
-
+    // Helper functions
     function escapeHtml(text) {
       if (!text) return "";
       return text
@@ -1126,32 +1153,102 @@
         .replace(/'/g, "&#039;");
     }
 
+    function showLoading(message = "Loading...") {
+      backdropMessage.textContent = message;
+      loadingBackdrop.style.display = "flex";
+    }
+
+    function hideLoading() {
+      loadingBackdrop.style.display = "none";
+    }
+
+    // Auth handling
+    onAuthStateChanged(auth, async user => {
+      if (user) {
+        currentUser = user;
+        const name = user.displayName || user.email || "User";
+        usernameElem.textContent = name;
+        initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
+        
+        showLoading("Loading your transactions...");
+        
+        try {
+          // Load theme preference
+          loadThemePreference();
+          
+          // Load COA data and transactions in parallel for better performance
+          await Promise.all([loadCOAData(), loadTransactions()]);
+          
+          loadAppState();
+          applyFilters();
+          
+          hideLoading();
+        } catch (error) {
+          hideLoading();
+          console.error("Initialization error:", error);
+          Swal.fire({ 
+            icon: 'error', 
+            title: 'Loading Error', 
+            text: 'Failed to load data. Please refresh the page.' 
+          });
+        }
+      } else {
+        // not logged in
+        Swal.fire({ icon: 'info', title: 'Please login', text: 'You will be redirected to login.' }).then(()=> {
+          window.location.href = "index.html";
+        });
+      }
+    });
+
+    // Event listeners
+    logoutBtn.addEventListener("click", async () => {
+      localStorage.removeItem('budgetAppState');
+      await signOut(auth);
+      window.location.href = "index.html";
+    });
+
+    newTxBtn.addEventListener("click", () => openAddModal());
+    floatingAdd.addEventListener("click", () => openAddModal());
+    
+    balanceToggle.addEventListener("click", () => {
+      balanceVisible = !balanceVisible;
+      updateBalanceVisibility();
+      saveAppState();
+    });
+
+    dateFilter.addEventListener("change", () => {
+      if (dateFilter.value === "custom") customRangeControls.style.display = "flex";
+      else customRangeControls.style.display = "none";
+    });
+
+    applyFiltersBtn.addEventListener("click", () => { applyFilters(); });
+    resetFiltersBtn.addEventListener("click", () => {
+      dateFilter.value = "all";
+      typeFilter.value = "all";
+      bankFilter.value = "all";
+      searchDesc.value = "";
+      startDateInput.value = "";
+      endDateInput.value = "";
+      minAmount.value = "";
+      maxAmount.value = "";
+      sortBy.value = "date-desc";
+      customRangeControls.style.display = "none";
+      advancedFilters.style.display = "none";
+      advancedFiltersBtn.textContent = "Advanced";
+      applyFilters();
+    });
+
     // Navigation button handlers
-    backBtn.addEventListener("click", () => {
-      window.history.back();
-    });
-    
-    homeBtn.addEventListener("click", () => {
-      window.location.href = "home.html";
-    });
-    
-    coaBtn.addEventListener("click", () => {
-      window.location.href = "coa.html";
-    });
+    backBtn.addEventListener("click", () => window.history.back());
+    homeBtn.addEventListener("click", () => window.location.href = "home.html");
+    coaBtn.addEventListener("click", () => window.location.href = "coa.html");
 
     // Theme toggle
-    themeToggle.addEventListener("click", () => {
-      toggleTheme();
-    });
+    themeToggle.addEventListener("click", () => toggleTheme());
 
     // Export buttons
-    exportCSV.addEventListener("click", () => {
-      exportToCSV();
-    });
-
-    exportPDF.addEventListener("click", () => {
-      exportToPDF();
-    });
+    exportCSV.addEventListener("click", () => exportToCSV());
+    exportPDF.addEventListener("click", () => exportToPDF());
 
     // Advanced filters toggle
     advancedFiltersBtn.addEventListener("click", () => {
@@ -1163,9 +1260,7 @@
     // Time toggle
     includeTimeCheckbox.addEventListener("change", () => {
       formTIME.disabled = !includeTimeCheckbox.checked;
-      if (!includeTimeCheckbox.checked) {
-        formTIME.value = "";
-      }
+      if (!includeTimeCheckbox.checked) formTIME.value = "";
     });
 
     // Quick Add button
@@ -1173,13 +1268,10 @@
       quickAddInput.value = "";
       quickAddModal.show();
     });
-
     processQuickAddBtn.addEventListener("click", processQuickAdd);
 
     // Split Income button
-    splitIncomeBtn.addEventListener("click", () => {
-      openSplitIncomeModal();
-    });
+    splitIncomeBtn.addEventListener("click", () => openSplitIncomeModal());
 
     // Bulk action buttons
     selectAllBtn.addEventListener("click", selectAllTransactions);
@@ -1196,7 +1288,96 @@
     saveSplitTransactionsBtn.addEventListener("click", saveSplitTransactions);
     splitIncomeAmount.addEventListener("input", updateSplitSummary);
 
-    // Load COA data from the chartOfAccounts collection
+    // Save transaction
+    saveTransactionBtn.addEventListener("click", async () => {
+      if (isSubmitting) return;
+      isSubmitting = true;
+          
+      saveTransactionBtn.disabled = true;
+      saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+      
+      if (!formDATE.value) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
+        resetSaveButton();
+        return;
+      }
+
+      if (!formSINO.value) {
+        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Voucher number is required' });
+        resetSaveButton();
+        return;
+      }
+          
+      const txData = {
+        DATE: formDATE.value,
+        SINO: formSINO.value,
+        ACCOUNT_HEADER: formACCOUNTHEADER.value,
+        MODE: formBANKNAME.value,
+        BANK_NAME: formBANKNAME.value,
+        VOUCHER_TYPE: formVOUCHERTYPE.value,
+        TYPE: formTYPE.value,
+        INCOME: parseFloat(formINCOME.value) || 0,
+        EXPENSE: parseFloat(formEXPENSE.value) || 0,
+        BALANCE: parseFloat(formBALANCE.value) || 0,
+        DESCRIPTION: formDESCRIPTION.value,
+        NOTES: formNOTES.value,
+        ATTACHMENT: formATTACH.value,
+        CURRENCY: formCURRENCY.value,
+        createdAt: new Date(),
+        userId: currentUser.uid
+      };
+      
+      if (includeTimeCheckbox.checked && formTIME.value) {
+        txData.TIME = formTIME.value;
+      }
+      
+      try {
+        loadingMessage.textContent = "Saving transaction...";
+        loadingModal.show();
+        
+        if (txIdInput.value) {
+          // Update existing transaction
+          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
+          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
+        } else {
+          // Add new transaction
+          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
+        }
+        
+        loadingModal.hide();
+        transactionModal.hide();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("saveTransaction", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
+      } finally {
+        resetSaveButton();
+      }
+    });
+
+    confirmDeleteBtn.addEventListener("click", async () => {
+      if (!txToDelete) return;
+      
+      try {
+        loadingMessage.textContent = "Deleting transaction...";
+        loadingModal.show();
+        
+        await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
+        
+        loadingModal.hide();
+        Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
+        await loadTransactions();
+        confirmDeleteModal.hide();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("deleteTransaction", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
+      }
+    });
+
+    // Load COA data
     async function loadCOAData() {
       try {
         if (!currentUser) return;
@@ -1274,73 +1455,10 @@
       });
     }
 
-    // Auth handling
-    onAuthStateChanged(auth, async user => {
-      if (user) {
-        currentUser = user;
-        const name = user.displayName || user.email || "User";
-        usernameElem.textContent = name;
-        initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
-        
-        // Load theme preference
-        loadThemePreference();
-        
-        // Load COA data first, then transactions
-        await loadCOAData();
-        await loadTransactions();
-        loadAppState();
-        applyFilters();
-      } else {
-        // not logged in
-        Swal.fire({ icon: 'info', title: 'Please login', text: 'You will be redirected to login.' }).then(()=> {
-          window.location.href = "index.html";
-        });
-      }
-    });
-
-    logoutBtn.addEventListener("click", async () => {
-      localStorage.removeItem('budgetAppState');
-      await signOut(auth);
-      window.location.href = "index.html";
-    });
-
-    // UI wiring
-    newTxBtn.addEventListener("click", openAddModal);
-    floatingAdd.addEventListener("click", openAddModal);
-    
-    // Balance visibility toggle
-    balanceToggle.addEventListener("click", () => {
-      balanceVisible = !balanceVisible;
-      updateBalanceVisibility();
-      saveAppState();
-    });
-
-    dateFilter.addEventListener("change", () => {
-      if (dateFilter.value === "custom") customRangeControls.style.display = "flex";
-      else customRangeControls.style.display = "none";
-    });
-
-    applyFiltersBtn.addEventListener("click", () => { applyFilters(); });
-    resetFiltersBtn.addEventListener("click", () => {
-      dateFilter.value = "all";
-      typeFilter.value = "all";
-      bankFilter.value = "all";
-      searchDesc.value = "";
-      startDateInput.value = "";
-      endDateInput.value = "";
-      minAmount.value = "";
-      maxAmount.value = "";
-      sortBy.value = "date-desc";
-      customRangeControls.style.display = "none";
-      advancedFilters.style.display = "none";
-      advancedFiltersBtn.textContent = "Advanced";
-      applyFilters();
-    });
-
-    // load transactions - UPDATED TO MATCH FIRST APP'S DATA STRUCTURE
-    async function loadTransactions(){
+    // Optimized transaction loading with error handling
+    async function loadTransactions() {
       try {
-        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 small-muted">Loading...</td></tr>`;
+        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 small-muted">Loading transactions...</td></tr>`;
         
         const q = query(
           collection(db, "users", currentUser.uid, "transactions"), 
@@ -1358,29 +1476,33 @@
         allTransactions = txs;
         filteredTransactions = allTransactions.slice();
         
-        // Only reset to page 1 if we haven't loaded a saved state
         if (!hasLoadedSavedState) {
           currentPage = 1;
         }
         
+        // Calculate running balance once for all transactions
+        calculateRunningBalance();
         buildTable();
         updateStats();
         updateBankBalances();
         updateQuickStats();
         renderTransactionsChart();
         
-        // Initialize voucher numbering
-        await initVoucherNumbering();
+        // Initialize voucher numbering (non-blocking)
+        setTimeout(() => initVoucherNumbering(), 100);
+        
+        return true;
       } catch (err) {
-        console.error("loadTransactions", err);
-        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">Failed to load transactions</td></tr>`;
+        console.error("loadTransactions error:", err);
+        transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">
+          <i class="fa fa-exclamation-triangle me-2"></i>Failed to load transactions. Please try again.
+        </td></tr>`;
+        return false;
       }
     }
 
-    // Add this function to initialize voucher numbering
     async function initVoucherNumbering() {
       try {
-        // Get the highest existing voucher number
         const q = query(
           collection(db, "users", currentUser.uid, "transactions"),
           orderBy("SINO", "desc"),
@@ -1391,7 +1513,6 @@
         if (!snap.empty) {
           const lastTx = snap.docs[0].data();
           if (lastTx.SINO) {
-            // Extract number from voucher format
             const match = lastTx.SINO.match(/\d+$/);
             if (match) {
               lastVoucherNumber = parseInt(match[0]);
@@ -1403,41 +1524,29 @@
       }
     }
 
-    // Enhanced voucher numbering by type with separate sequences
     async function getNextVoucherNumber(voucherType) {
       try {
-        // Get all transactions to find the highest number for each type
-        const allTxQuery = query(
-          collection(db, "users", currentUser.uid, "transactions"),
-          orderBy("SINO", "desc")
-        );
-        const allTxSnap = await getDocs(allTxQuery);
-        
+        // For better performance, use local allTransactions array
         let highestPaymentNumber = 0;
         let highestReceiptNumber = 0;
         let highestJournalNumber = 0;
         let highestTransferNumber = 0;
         
-        // Find the highest numbers for each type
-        allTxSnap.forEach(doc => {
-          const tx = doc.data();
+        // Find the highest numbers for each type from local data
+        allTransactions.forEach(tx => {
           if (tx.SINO) {
-            // Check if it's a payment (numeric only)
             if (/^\d+$/.test(tx.SINO)) {
               const num = parseInt(tx.SINO);
               if (num > highestPaymentNumber) highestPaymentNumber = num;
             }
-            // Check if it's a receipt (RP- format)
             else if (tx.SINO.startsWith('RP-')) {
               const num = parseInt(tx.SINO.substring(3));
               if (num > highestReceiptNumber) highestReceiptNumber = num;
             }
-            // Check if it's a journal (JR- format)
             else if (tx.SINO.startsWith('JR-')) {
               const num = parseInt(tx.SINO.substring(3));
               if (num > highestJournalNumber) highestJournalNumber = num;
             }
-            // Check if it's a transfer (TR- format)
             else if (tx.SINO.startsWith('TR-')) {
               const num = parseInt(tx.SINO.substring(3));
               if (num > highestTransferNumber) highestTransferNumber = num;
@@ -1456,14 +1565,12 @@
           return `TR-${(highestTransferNumber + 1).toString().padStart(3, '0')}`;
         }
         
-        // Default fallback
         return `${voucherType.substring(0, 2).toUpperCase()}-001`;
         
       } catch (error) {
         console.error("Error getting voucher number:", error);
         // Fallback based on type
         if (voucherType === "Payment") {
-          // Try to find the highest payment number from all transactions
           const paymentNumbers = allTransactions
             .filter(tx => tx.SINO && /^\d+$/.test(tx.SINO))
             .map(tx => parseInt(tx.SINO))
@@ -1479,21 +1586,34 @@
           return "TR-001";
         }
         
-        // Final fallback
         return `${voucherType.substring(0, 2).toUpperCase()}-001`;
       }
     }
 
-    // Calculate bank balances
+    function calculateRunningBalance() {
+      const sortedTransactions = [...allTransactions].sort((a, b) => {
+        return new Date(a.DATE) - new Date(b.DATE);
+      });
+      
+      let runningBalance = 0;
+      
+      sortedTransactions.forEach(tx => {
+        const income = parseFloat(tx.INCOME) || 0;
+        const expense = parseFloat(tx.EXPENSE) || 0;
+        runningBalance += (income - expense);
+        tx.BALANCE = runningBalance;
+      });
+      
+      return sortedTransactions;
+    }
+
     function calculateBankBalances() {
       const bankBalances = {};
       
-      // Initialize all known banks with 0 balance
       coaBanks.forEach(bank => {
         bankBalances[bank] = 0;
       });
       
-      // Calculate balances based on transactions
       allTransactions.forEach(tx => {
         const bankName = tx.BANK_NAME || tx.MODE || "";
         if (bankName && coaBanks.includes(bankName)) {
@@ -1506,13 +1626,12 @@
       return bankBalances;
     }
     
-    // Update bank balances display
     function updateBankBalances() {
       const bankBalances = calculateBankBalances();
       
       bankBalancesContainer.innerHTML = "";
       
-      // Add a section for cash if it exists in transactions
+      // Add cash balance
       let hasCash = false;
       allTransactions.forEach(tx => {
         if ((tx.BANK_NAME === "Cash" || tx.MODE === "Cash") && !coaBanks.includes("Cash")) {
@@ -1543,7 +1662,6 @@
         `;
         bankBalancesContainer.appendChild(cashItem);
         
-        // Add event listener to the cash balance toggle
         cashItem.querySelector('.balance-toggle').addEventListener('click', () => {
           balanceVisible = !balanceVisible;
           updateBalanceVisibility();
@@ -1565,7 +1683,6 @@
         `;
         bankBalancesContainer.appendChild(bankItem);
         
-        // Add event listener to the bank balance toggle
         bankItem.querySelector('.balance-toggle').addEventListener('click', () => {
           balanceVisible = !balanceVisible;
           updateBalanceVisibility();
@@ -1573,9 +1690,7 @@
       });
     }
     
-    // Update balance visibility across the app
     function updateBalanceVisibility() {
-      // Update main balance
       const totalIncome = allTransactions.reduce((s,t)=> s + (parseFloat(t.INCOME)||0), 0);
       const totalExpense = allTransactions.reduce((s,t)=> s + (parseFloat(t.EXPENSE)||0), 0);
       const balance = totalIncome - totalExpense;
@@ -1583,20 +1698,16 @@
       statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
       statBalance.classList.toggle('balance-hidden', !balanceVisible);
       
-      // Update toggle button icon
       balanceToggle.innerHTML = `<i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
       
-      // Update bank balances
       updateBankBalances();
     }
 
-    // Update quick stats
     function updateQuickStats() {
       const now = new Date();
       const thisMonth = now.getMonth();
       const thisYear = now.getFullYear();
       
-      // Calculate monthly income and expenses
       const monthlyIncome = allTransactions
         .filter(tx => {
           const txDate = new Date(tx.DATE);
@@ -1611,7 +1722,6 @@
         })
         .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
         
-      // Calculate average transaction amount
       const totalAmount = allTransactions.reduce((sum, tx) => {
         const amount = (parseFloat(tx.INCOME) || 0) + (parseFloat(tx.EXPENSE) || 0);
         return sum + amount;
@@ -1619,7 +1729,6 @@
       
       const avgTransaction = allTransactions.length > 0 ? totalAmount / allTransactions.length : 0;
       
-      // Count transactions by type
       const incomeCount = allTransactions.filter(tx => tx.TYPE === 'Income').length;
       const expenseCount = allTransactions.filter(tx => tx.TYPE === 'Expense').length;
       const transferCount = allTransactions.filter(tx => tx.TYPE === 'Transfer').length;
@@ -1644,13 +1753,11 @@
       `;
     }
     
-    // Render transactions chart
     function renderTransactionsChart() {
       if (transactionsChartInstance) {
         transactionsChartInstance.destroy();
       }
       
-      // Group transactions by month
       const monthlyData = {};
       allTransactions.forEach(tx => {
         if (tx.DATE) {
@@ -1671,14 +1778,12 @@
         }
       });
       
-      // Sort months chronologically
       const sortedMonths = Object.keys(monthlyData).sort();
       
       const incomeData = sortedMonths.map(month => monthlyData[month].income);
       const expenseData = sortedMonths.map(month => monthlyData[month].expense);
       const transferData = sortedMonths.map(month => monthlyData[month].transfer);
       
-      // Format month labels for display
       const monthLabels = sortedMonths.map(month => {
         const [year, monthNum] = month.split('-');
         const date = new Date(year, monthNum - 1);
@@ -1755,38 +1860,6 @@
       });
     }
 
-    // Calculate and update running balance for all transactions
-    function calculateRunningBalance() {
-      // Sort transactions by date
-      const sortedTransactions = [...allTransactions].sort((a, b) => {
-        return new Date(a.DATE) - new Date(b.DATE);
-      });
-      
-      let runningBalance = 0;
-      
-      // Calculate running balance for each transaction
-      sortedTransactions.forEach(tx => {
-        const income = parseFloat(tx.INCOME) || 0;
-        const expense = parseFloat(tx.EXPENSE) || 0;
-        runningBalance += (income - expense);
-        
-        // Update the transaction with the running balance
-        tx.BALANCE = runningBalance;
-      });
-      
-      // Update the latest balance in the UI
-      const latestBalance = sortedTransactions.length > 0 ? 
-        sortedTransactions[sortedTransactions.length - 1].BALANCE : 0;
-      
-      statBalance.textContent = balanceVisible ? `$${latestBalance.toFixed(2)}` : '••••';
-      
-      // Update bank balances
-      updateBankBalances();
-      
-      return sortedTransactions;
-    }
-
-    // filters
     function applyFilters(){
       filteredTransactions = allTransactions.slice();
       const now = new Date();
@@ -1795,7 +1868,6 @@
         if (!dateStr) return false;
         const d = new Date(dateStr);
         return d >= start && d <= end;
-        saveAppState();
       }
 
       // Date filter
@@ -1823,7 +1895,7 @@
             if (startDateInput.value && endDateInput.value) {
               start = new Date(startDateInput.value);
               end = new Date(endDateInput.value);
-              end.setDate(end.getDate() + 1); // include end date
+              end.setDate(end.getDate() + 1);
             }
             break;
         }
@@ -1897,9 +1969,10 @@
       currentPage = 1;
       buildTable();
       updateStats();
+      saveAppState();
     }
 
-    // build table
+    // Optimized table building
     function buildTable(){
       if (filteredTransactions.length === 0) {
         transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">No transactions match your filters.</td></tr>`;
@@ -1919,12 +1992,10 @@
         const balance = parseFloat(tx.BALANCE) || 0;
         const isSelected = selectedTransactions.has(tx.id);
         
-        // Apply color coding
         const incomeDisplay = income > 0 ? `<span class="income-color">$${income.toFixed(2)}</span>` : "$0.00";
         const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
         const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
         
-        // Determine badge class based on type
         let badgeClass = '';
         if (tx.TYPE === 'Income') badgeClass = 'badge-income';
         else if (tx.TYPE === 'Expense') badgeClass = 'badge-expense';
@@ -1962,43 +2033,35 @@
             </td>
           </tr>
         `;
-
       });
       
       transactionsTableBody.innerHTML = html;
 
-      // Add event listeners
-      document.querySelectorAll(".view-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
+      // Add event listeners with event delegation for better performance
+      transactionsTableBody.addEventListener("click", function(e) {
+        const target = e.target;
+        const button = target.closest("button");
+        
+        if (!button) return;
+        
+        if (button.classList.contains("view-tx")) {
+          const id = button.getAttribute("data-id");
           viewTransaction(id);
-        });
-      });
-
-      document.querySelectorAll(".edit-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
+        } else if (button.classList.contains("edit-tx")) {
+          const id = button.getAttribute("data-id");
           editTransaction(id);
-        });
-      });
-
-      document.querySelectorAll(".delete-tx").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const id = e.currentTarget.getAttribute("data-id");
+        } else if (button.classList.contains("delete-tx")) {
+          const id = button.getAttribute("data-id");
           confirmDelete(id);
-        });
-      });
-
-      document.querySelectorAll(".view-attachment").forEach(btn => {
-        btn.addEventListener("click", e => {
-          const attachment = e.currentTarget.getAttribute("data-attachment");
+        } else if (button.classList.contains("view-attachment")) {
+          const attachment = button.getAttribute("data-attachment");
           viewAttachment(attachment);
-        });
+        }
       });
 
-      // Add event listeners for row checkboxes
-      document.querySelectorAll(".row-checkbox").forEach(checkbox => {
-        checkbox.addEventListener("change", e => {
+      // Checkbox event delegation
+      transactionsTableBody.addEventListener("change", function(e) {
+        if (e.target.classList.contains("row-checkbox")) {
           const id = e.target.getAttribute("data-id");
           const row = e.target.closest("tr");
           
@@ -2012,14 +2075,13 @@
           }
           
           updateBulkActions();
-        });
+        }
       });
 
       // Build pagination
       buildPagination();
     }
 
-    // In your buildPagination function, add saveAppState() call:
     function buildPagination() {
       const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
       if (totalPages <= 1) {
@@ -2029,42 +2091,44 @@
 
       let html = `<nav><ul class="pagination pagination-sm">`;
 
-        const startPage = Math.max(1, currentPage - 2);
-        const endPage = Math.min(totalPages, startPage + 4);
+      html += `
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+          <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+        </li>
+      `;
 
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, startPage + 4);
+
+      for (let i = startPage; i <= endPage; i++) {
         html += `
-          <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+          <li class="page-item ${i === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" data-page="${i}">${i}</a>
           </li>
         `;
+      }
 
-        for (let i = startPage; i <= endPage; i++) {
-                    html += `
-            <li class="page-item ${i === currentPage ? 'active' : ''}">
-              <a class="page-link" href="#" data-page="${i}">${i}</a>
-            </li>
-          `;
+      html += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+          <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
+        </li>
+      `;
+
+      paginationControls.innerHTML = html;
+
+      // Event delegation for pagination
+      paginationControls.addEventListener("click", function(e) {
+        const link = e.target.closest(".page-link");
+        if (link) {
+          e.preventDefault();
+          const page = parseInt(link.getAttribute("data-page"));
+          if (page && page !== currentPage && page > 0 && page <= totalPages) {
+            currentPage = page;
+            buildTable();
+            saveAppState();
+          }
         }
-
-        html += `
-          <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
-          </li>
-        `;
-
-        paginationControls.innerHTML = html;
-
-        paginationControls.querySelectorAll(".page-link").forEach(link => {
-          link.addEventListener("click", e => {
-            e.preventDefault();
-            const page = parseInt(e.target.getAttribute("data-page"));
-            if (page && page !== currentPage && page > 0 && page <= totalPages) {
-              currentPage = page;
-              buildTable();
-              saveAppState(); // Save the new page
-            }
-          });
-        });
+      });
     }
 
     function updateStats(){
@@ -2077,181 +2141,168 @@
       statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
       statCount.textContent = filteredTransactions.length;
       
-      // Apply color coding
       statIncome.className = "stat-value income-color";
       statExpense.className = "stat-value expense-color";
     }
 
-    // Add this function to handle income/expense field behavior
-    function setupIncomeExpenseBehavior() {
-      const typeSelect = document.getElementById("formTYPE");
-      const incomeInput = document.getElementById("formINCOME");
-      const expenseInput = document.getElementById("formEXPENSE");
-      
-      function updateFieldVisibility() {
-        if (typeSelect.value === "Income") {
-          incomeInput.disabled = false;
-          expenseInput.disabled = true;
-          expenseInput.value = "";
-        } else if (typeSelect.value === "Expense") {
-          incomeInput.disabled = true;
-          incomeInput.value = "";
-          expenseInput.disabled = false;
-        } else if (typeSelect.value === "Transfer") {
-          incomeInput.disabled = false;
-          expenseInput.disabled = false;
-        } else {
-          incomeInput.disabled = false;
-          expenseInput.disabled = false;
-        }
-      }
-      
-      // Set initial state
-      updateFieldVisibility();
-      
-      // Update on change
-      typeSelect.addEventListener("change", updateFieldVisibility);
-    }
-
+    // Optimized modal opening
     async function openAddModal(){
-      txIdInput.value = "";
-      form.reset();
-      formDATE.value = new Date().toISOString().split('T')[0];
-      formTYPE.value = "Income";
-      formVOUCHERTYPE.value = "Payment";
-      formTIME.disabled = true;
-      includeTimeCheckbox.checked = false;
-      formCURRENCY.value = "USD";
+      showLoading("Loading form...");
       
-      // Auto-generate voucher number based on voucher type
-      formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
-      
-      formINCOME.value = "";
-      formEXPENSE.value = "";
-      formBALANCE.value = "";
-      formNOTES.value = "";
-      formDESCRIPTION.value = "";
-      formATTACH.value = "";
-      attachmentPreview.style.display = "none";
-      attachmentInfo.textContent = "";
-      uploadProgress.style.display = "none";
-      
-      // Enable all fields when opening modal
-      Array.from(form.elements).forEach(el => el.disabled = false);
-      formTIME.disabled = true; // Time is disabled by default
-      saveTransactionBtn.style.display = "block";
-      saveTransactionBtn.disabled = false;
-      saveTransactionBtn.innerHTML = 'Save Transaction';
+      try {
+        txIdInput.value = "";
+        form.reset();
+        formDATE.value = new Date().toISOString().split('T')[0];
+        formTYPE.value = "Income";
+        formVOUCHERTYPE.value = "Payment";
+        formTIME.disabled = true;
+        includeTimeCheckbox.checked = false;
+        formCURRENCY.value = "USD";
+        
+        // Generate voucher number (non-blocking)
+        const voucherNumber = await getNextVoucherNumber(formVOUCHERTYPE.value);
+        formSINO.value = voucherNumber;
+        
+        formINCOME.value = "";
+        formEXPENSE.value = "";
+        formBALANCE.value = "";
+        formNOTES.value = "";
+        formDESCRIPTION.value = "";
+        formATTACH.value = "";
+        attachmentPreview.style.display = "none";
+        attachmentInfo.textContent = "";
+        uploadProgress.style.display = "none";
+        
+        Array.from(form.elements).forEach(el => el.disabled = false);
+        formTIME.disabled = true;
+        saveTransactionBtn.style.display = "block";
+        saveTransactionBtn.disabled = false;
+        saveTransactionBtn.innerHTML = 'Save Transaction';
 
-      // Add this after the modal is shown or in your initialization code
-      formVOUCHERTYPE.addEventListener("change", async function() {
-        if (!txIdInput.value) { // Only for new transactions, not when editing
-          formSINO.value = await getNextVoucherNumber(this.value);
-        }
-      });
-      
-      // Set up income/expense field behavior
-      setupIncomeExpenseBehavior();
-      
-      document.getElementById("transactionModalLabel").textContent = "Add Transaction";
-      transactionModal.show();
+        formVOUCHERTYPE.addEventListener("change", async function() {
+          if (!txIdInput.value) {
+            formSINO.value = await getNextVoucherNumber(this.value);
+          }
+        }, { once: true });
+        
+        setupIncomeExpenseBehavior();
+        
+        document.getElementById("transactionModalLabel").textContent = "Add Transaction";
+        
+        // Hide loading and show modal
+        setTimeout(() => {
+          hideLoading();
+          transactionModal.show();
+        }, 100);
+        
+      } catch (error) {
+        hideLoading();
+        console.error("Error opening modal:", error);
+        Swal.fire({ 
+          icon: 'error', 
+          title: 'Error', 
+          text: 'Failed to load form. Please try again.' 
+        });
+      }
     }
 
     function viewTransaction(id){
       const tx = allTransactions.find(t => t.id === id);
       if (!tx) return;
       
-      txIdInput.value = tx.id;
-      formDATE.value = tx.DATE || "";
-      formSINO.value = tx.SINO || "";
-      formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
-      formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
-      formTYPE.value = tx.TYPE || "Income";
-      formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
-      formINCOME.value = tx.INCOME || "";
-      formEXPENSE.value = tx.EXPENSE || "";
-      formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || "";
-      formDESCRIPTION.value = tx.DESCRIPTION || "";
-      formCURRENCY.value = tx.CURRENCY || "USD";
+      showLoading("Loading transaction...");
       
-      // Handle time if exists
-      if (tx.TIME) {
-        formTIME.value = tx.TIME;
-        includeTimeCheckbox.checked = true;
-        formTIME.disabled = false;
-      } else {
-        formTIME.value = "";
-        includeTimeCheckbox.checked = false;
-        formTIME.disabled = true;
-      }
-      
-      // Show attachment if exists
-      if (tx.ATTACHMENT) {
-        attachmentInfo.textContent = "Attachment: " + tx.ATTACHMENT;
-        // For viewing only, don't show preview if it's not an image
-      } else {
-        attachmentInfo.textContent = "";
-      }
-      
-      document.getElementById("transactionModalLabel").textContent = "View Transaction";
-      
-      // Disable all fields for view mode
-      Array.from(form.elements).forEach(el => el.disabled = true);
-      saveTransactionBtn.style.display = "none";
-      
-      transactionModal.show();
+      setTimeout(() => {
+        txIdInput.value = tx.id;
+        formDATE.value = tx.DATE || "";
+        formSINO.value = tx.SINO || "";
+        formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+        formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
+        formTYPE.value = tx.TYPE || "Income";
+        formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+        formINCOME.value = tx.INCOME || "";
+        formEXPENSE.value = tx.EXPENSE || "";
+        formBALANCE.value = tx.BALANCE || "";
+        formNOTES.value = tx.NOTES || "";
+        formDESCRIPTION.value = tx.DESCRIPTION || "";
+        formCURRENCY.value = tx.CURRENCY || "USD";
+        
+        if (tx.TIME) {
+          formTIME.value = tx.TIME;
+          includeTimeCheckbox.checked = true;
+          formTIME.disabled = false;
+        } else {
+          formTIME.value = "";
+          includeTimeCheckbox.checked = false;
+          formTIME.disabled = true;
+        }
+        
+        if (tx.ATTACHMENT) {
+          attachmentInfo.textContent = "Attachment: " + tx.ATTACHMENT;
+        } else {
+          attachmentInfo.textContent = "";
+        }
+        
+        document.getElementById("transactionModalLabel").textContent = "View Transaction";
+        
+        Array.from(form.elements).forEach(el => el.disabled = true);
+        saveTransactionBtn.style.display = "none";
+        
+        hideLoading();
+        transactionModal.show();
+      }, 100);
     }
 
     function editTransaction(id){
       const tx = allTransactions.find(t => t.id === id);
       if (!tx) return;
       
-      txIdInput.value = tx.id;
-      formDATE.value = tx.DATE || "";
-      formSINO.value = tx.SINO || "";
-      formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
-      formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
-      formTYPE.value = tx.TYPE || "Income";
-      formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
-      formINCOME.value = tx.INCOME || "";
-      formEXPENSE.value = tx.EXPENSE || "";
-      formBALANCE.value = tx.BALANCE || "";
-      formNOTES.value = tx.NOTES || "";
-      formDESCRIPTION.value = tx.DESCRIPTION || "";
-      formCURRENCY.value = tx.CURRENCY || "USD";
+      showLoading("Loading transaction...");
       
-      // Handle time if exists
-      if (tx.TIME) {
-        formTIME.value = tx.TIME;
-        includeTimeCheckbox.checked = true;
-        formTIME.disabled = false;
-      } else {
-        formTIME.value = "";
-        includeTimeCheckbox.checked = false;
-        formTIME.disabled = true;
-      }
-      
-      // Show attachment info if exists
-      if (tx.ATTACHMENT) {
-        attachmentInfo.textContent = "Current: " + tx.ATTACHMENT;
-      } else {
-        attachmentInfo.textContent = "";
-      }
-      
-      // Set up income/expense field behavior
-      setupIncomeExpenseBehavior();
-      
-      document.getElementById("transactionModalLabel").textContent = "Edit Transaction";
-      
-      // Enable all fields for edit mode
-      Array.from(form.elements).forEach(el => el.disabled = false);
-      formTIME.disabled = !includeTimeCheckbox.checked; // Respect time checkbox
-      saveTransactionBtn.style.display = "block";
-      saveTransactionBtn.disabled = false;
-      saveTransactionBtn.innerHTML = 'Save Transaction';
-      
-      transactionModal.show();
+      setTimeout(() => {
+        txIdInput.value = tx.id;
+        formDATE.value = tx.DATE || "";
+        formSINO.value = tx.SINO || "";
+        formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+        formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
+        formTYPE.value = tx.TYPE || "Income";
+        formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+        formINCOME.value = tx.INCOME || "";
+        formEXPENSE.value = tx.EXPENSE || "";
+        formBALANCE.value = tx.BALANCE || "";
+        formNOTES.value = tx.NOTES || "";
+        formDESCRIPTION.value = tx.DESCRIPTION || "";
+        formCURRENCY.value = tx.CURRENCY || "USD";
+        
+        if (tx.TIME) {
+          formTIME.value = tx.TIME;
+          includeTimeCheckbox.checked = true;
+          formTIME.disabled = false;
+        } else {
+          formTIME.value = "";
+          includeTimeCheckbox.checked = false;
+          formTIME.disabled = true;
+        }
+        
+        if (tx.ATTACHMENT) {
+          attachmentInfo.textContent = "Current: " + tx.ATTACHMENT;
+        } else {
+          attachmentInfo.textContent = "";
+        }
+        
+        setupIncomeExpenseBehavior();
+        
+        document.getElementById("transactionModalLabel").textContent = "Edit Transaction";
+        
+        Array.from(form.elements).forEach(el => el.disabled = false);
+        formTIME.disabled = !includeTimeCheckbox.checked;
+        saveTransactionBtn.style.display = "block";
+        saveTransactionBtn.disabled = false;
+        saveTransactionBtn.innerHTML = 'Save Transaction';
+        
+        hideLoading();
+        transactionModal.show();
+      }, 100);
     }
 
     function confirmDelete(id){
@@ -2259,172 +2310,77 @@
       confirmDeleteModal.show();
     }
 
-    confirmDeleteBtn.addEventListener("click", async () => {
-      if (!txToDelete) return;
-      
-      try {
-        loadingMessage.textContent = "Deleting transaction...";
-        loadingModal.show();
-        
-        await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
-        
-        loadingModal.hide();
-        Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
-        await loadTransactions();
-        confirmDeleteModal.hide();
-      } catch (err) {
-        loadingModal.hide();
-        console.error("deleteTransaction", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
-      }
-    });
-
-    // Add this function to reset the save button state
     function resetSaveButton() {
       isSubmitting = false;
       saveTransactionBtn.disabled = false;
       saveTransactionBtn.innerHTML = 'Save Transaction';
     }
 
-    // Handle file attachment - UPDATED CLOUDINARY UPLOAD FUNCTION
+    // File attachment handling
     formATTACHFILE.addEventListener("change", async function () {
       const file = this.files[0];
       if (!file) return;
       
-      // Check file size (limit to 10MB)
       if (file.size > 10 * 1024 * 1024) {
         Swal.fire({ icon: 'error', title: 'File too large', text: 'Please select a file smaller than 10MB' });
         this.value = '';
         return;
       }
 
-      // Check if Cloudinary is configured
-      if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET || 
-          CLOUDINARY_CLOUD_NAME === "your_cloud_name_here" || 
-          CLOUDINARY_UPLOAD_PRESET === "your_upload_preset_here") {
-        Swal.fire({ 
-          icon: 'error', 
-          title: 'Configuration Error', 
-          html: 'Cloudinary is not properly configured.<br>Please set your Cloudinary cloud name and upload preset in the script.'
-        });
-        this.value = '';
-        return;
-      }
-
-      // Upload to Cloudinary
-      try {
-        uploadProgress.style.display = "block";
-        uploadProgressBar.style.width = "0%";
-        
-        const uploadedUrl = await uploadToCloudinary(file, (progress) => {
-          uploadProgressBar.style.width = `${progress}%`;
-        });
-        
-        formATTACH.value = uploadedUrl;
-        attachmentInfo.textContent = "Uploaded: " + file.name;
-
-        // Show preview if it's an image
-        if (file.type.startsWith('image/')) {
-          attachmentPreview.src = uploadedUrl;
-          attachmentPreview.style.display = "block";
-        } else {
-          attachmentPreview.style.display = "none";
+      // Use local storage for demo if Cloudinary not configured
+      if (file.size < 2 * 1024 * 1024) { // Less than 2MB
+        try {
+          uploadProgress.style.display = "block";
+          uploadProgressBar.style.width = "0%";
+          
+          // Simulate upload progress
+          for (let i = 0; i <= 100; i += 10) {
+            setTimeout(() => {
+              uploadProgressBar.style.width = `${i}%`;
+            }, i * 20);
+          }
+          
+          setTimeout(() => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+              formATTACH.value = "data:" + file.type + ";base64," + btoa(e.target.result);
+              attachmentInfo.textContent = "Uploaded: " + file.name;
+              
+              if (file.type.startsWith('image/')) {
+                attachmentPreview.src = URL.createObjectURL(file);
+                attachmentPreview.style.display = "block";
+              } else {
+                attachmentPreview.style.display = "none";
+              }
+              
+              uploadProgress.style.display = "none";
+            };
+            reader.readAsBinaryString(file);
+          }, 500);
+          
+        } catch (err) {
+          console.error("Upload failed", err);
+          uploadProgress.style.display = "none";
+          Swal.fire({ 
+            icon: 'error', 
+            title: 'Upload failed', 
+            text: 'Could not upload attachment' 
+          });
+          this.value = '';
         }
-        
-        uploadProgress.style.display = "none";
-
-      } catch (err) {
-        console.error("Upload failed", err);
-        uploadProgress.style.display = "none";
+      } else {
         Swal.fire({ 
-          icon: 'error', 
-          title: 'Upload failed', 
-          text: 'Could not upload attachment. Please check your Cloudinary configuration.' 
+          icon: 'info', 
+          title: 'Large File', 
+          text: 'For large files, please configure Cloudinary for proper file uploads.' 
         });
-        this.value = '';
       }
     });
 
-    // Save transaction
-    saveTransactionBtn.addEventListener("click", async () => {
-      // Prevent duplicate submissions
-      if (isSubmitting) return;
-      isSubmitting = true;
-          
-      // Show loading state
-      saveTransactionBtn.disabled = true;
-      saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
-      
-      // Validate form
-      if (!formDATE.value) {
-        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
-        resetSaveButton();
-        return;
-      }
-
-      if (!formSINO.value) {
-        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Voucher number is required' });
-        resetSaveButton();
-        return;
-      }
-          
-      // USE THE SAME DATA STRUCTURE AS THE FIRST APP
-      const txData = {
-        DATE: formDATE.value,
-        SINO: formSINO.value,
-        ACCOUNT_HEADER: formACCOUNTHEADER.value, // Match field name
-        MODE: formBANKNAME.value, // Use MODE field instead of BANK_NAME
-        BANK_NAME: formBANKNAME.value, // Keep both for compatibility
-        VOUCHER_TYPE: formVOUCHERTYPE.value,
-        TYPE: formTYPE.value,
-        INCOME: parseFloat(formINCOME.value) || 0,
-        EXPENSE: parseFloat(formEXPENSE.value) || 0,
-        BALANCE: parseFloat(formBALANCE.value) || 0,
-        DESCRIPTION: formDESCRIPTION.value, // Use DESCRIPTION field
-        NOTES: formNOTES.value, // Keep both for compatibility
-        ATTACHMENT: formATTACH.value,
-        CURRENCY: formCURRENCY.value,
-        createdAt: new Date(), // Add timestamp for first app compatibility
-        userId: currentUser.uid // Add user ID for first app compatibility
-      };
-      
-      // Add time if included
-      if (includeTimeCheckbox.checked && formTIME.value) {
-        txData.TIME = formTIME.value;
-      }
-      
-      try {
-        loadingMessage.textContent = "Saving transaction...";
-        loadingModal.show();
-        
-        if (txIdInput.value) {
-          // Update existing transaction
-          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
-          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
-        } else {
-          // Add new transaction - USE THE SAME PATH AS FIRST APP
-          txData.createdAt = new Date();
-          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
-        }
-        
-        loadingModal.hide();
-        transactionModal.hide();
-        await loadTransactions();
-      } catch (err) {
-        loadingModal.hide();
-        console.error("saveTransaction", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
-      } finally {
-        resetSaveButton();
-      }
-    });
-    
-    // View attachment
     function viewAttachment(attachmentUrl) {
       if (!attachmentUrl) return;
 
-      const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(attachmentUrl);
+      const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(attachmentUrl) || attachmentUrl.startsWith('data:image');
       const isPDF = /\.(pdf)$/i.test(attachmentUrl);
       const isDocument = /\.(doc|docx|xls|xlsx|txt)$/i.test(attachmentUrl);
 
@@ -2450,42 +2406,35 @@
       attachmentModal.show();
     }
 
-    // Upload to Cloudinary with progress tracking - FIXED TYPO IN CLOUD NAME
-    async function uploadToCloudinary(file, onProgress) {
-      return new Promise((resolve, reject) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-        
-        const xhr = new XMLHttpRequest();
-        
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const percent = Math.round((e.loaded / e.total) * 100);
-            if (onProgress) onProgress(percent);
-          }
-        });
-        
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const response = JSON.parse(xhr.responseText);
-            resolve(response.secure_url);
-          } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-          }
-        });
-        
-        xhr.addEventListener('error', () => {
-          reject(new Error('Upload failed'));
-        });
-        
-        // FIXED: Corrected the typo in CLOUDINARY_CLOUD_NAME
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
-        xhr.send(formData);
-      });
+    // Setup income/expense behavior
+    function setupIncomeExpenseBehavior() {
+      const typeSelect = document.getElementById("formTYPE");
+      const incomeInput = document.getElementById("formINCOME");
+      const expenseInput = document.getElementById("formEXPENSE");
+      
+      function updateFieldVisibility() {
+        if (typeSelect.value === "Income") {
+          incomeInput.disabled = false;
+          expenseInput.disabled = true;
+          expenseInput.value = "";
+        } else if (typeSelect.value === "Expense") {
+          incomeInput.disabled = true;
+          incomeInput.value = "";
+          expenseInput.disabled = false;
+        } else if (typeSelect.value === "Transfer") {
+          incomeInput.disabled = false;
+          expenseInput.disabled = false;
+        } else {
+          incomeInput.disabled = false;
+          expenseInput.disabled = false;
+        }
+      }
+      
+      updateFieldVisibility();
+      typeSelect.addEventListener("change", updateFieldVisibility);
     }
 
-    // Process Quick Add functionality
+    // Quick Add processing
     async function processQuickAdd() {
       const text = quickAddInput.value.trim();
       if (!text) {
@@ -2497,7 +2446,6 @@
         loadingMessage.textContent = "Processing your request...";
         loadingModal.show();
         
-        // Parse the natural language input
         const parsedData = parseQuickAddInput(text);
         
         if (!parsedData.amount) {
@@ -2506,10 +2454,9 @@
           return;
         }
 
-        // Prepare transaction data
         const txData = {
           DATE: parsedData.date || new Date().toISOString().split('T')[0],
-          SINO: "", // Will be set after getting next voucher number
+          SINO: "",
           ACCOUNT_HEADER: parsedData.accountHeader,
           BANK_NAME: parsedData.bankName,
           MODE: parsedData.bankName,
@@ -2525,9 +2472,7 @@
           userId: currentUser.uid
         };
 
-        // Handle transfers - create two transactions
         if (parsedData.type === "Transfer") {
-          // First transaction - from account
           const fromTx = {
             ...txData,
             SINO: await getNextVoucherNumber("Transfer"),
@@ -2539,7 +2484,6 @@
             DESCRIPTION: `Transfer to ${parsedData.toBank}`
           };
           
-          // Second transaction - to account
           const toTx = {
             ...txData,
             SINO: await getNextVoucherNumber("Transfer"),
@@ -2551,14 +2495,12 @@
             DESCRIPTION: `Transfer from ${parsedData.fromBank}`
           };
           
-          // Save both transactions
           await addDoc(collection(db, "users", currentUser.uid, "transactions"), fromTx);
           await addDoc(collection(db, "users", currentUser.uid, "transactions"), toTx);
           
           loadingModal.hide();
           Swal.fire({ icon: 'success', title: 'Success', text: 'Transfer completed successfully' });
         } else {
-          // Regular transaction
           const voucherNumber = await getNextVoucherNumber(parsedData.voucherType);
           txData.SINO = voucherNumber;
           
@@ -2576,7 +2518,6 @@
       }
     }
 
-    // Enhanced parser for natural language input
     function parseQuickAddInput(text) {
       const lowerText = text.toLowerCase();
       let amount = 0;
@@ -2588,13 +2529,11 @@
       let fromBank = "";
       let toBank = "";
       
-      // Try to extract amount
       const amountMatch = text.match(/(\d+)(\.\d+)?/);
       if (amountMatch) {
         amount = parseFloat(amountMatch[0]);
       }
       
-      // Try to extract date
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
@@ -2604,7 +2543,6 @@
       } else if (lowerText.includes('yesterday')) {
         date = yesterday.toISOString().split('T')[0];
       } else {
-        // Try to parse relative dates like "last friday", "2 days ago"
         const relativeDateMatch = lowerText.match(/(\d+) days? ago/);
         if (relativeDateMatch) {
           const daysAgo = parseInt(relativeDateMatch[1]);
@@ -2613,14 +2551,13 @@
           date = pastDate.toISOString().split('T')[0];
         }
         
-        // Try to parse specific dates like "15 jan", "january 15"
         const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
         for (let i = 0; i < monthNames.length; i++) {
           if (lowerText.includes(monthNames[i])) {
             const dayMatch = lowerText.match(/(\d+)(?:st|nd|rd|th)?/);
             if (dayMatch) {
               const day = parseInt(dayMatch[1]);
-              const year = today.getFullYear(); // Assume current year
+              const year = today.getFullYear();
               const month = i;
               date = new Date(year, month, day).toISOString().split('T')[0];
               break;
@@ -2629,7 +2566,6 @@
         }
       }
 
-      // Determine transaction type and extract details
       if (lowerText.includes('transfer') && lowerText.includes('from') && lowerText.includes('to')) {
         type = "Transfer";
         const transferMatch = lowerText.match(/transfer.*?(\d+).*?from (.*?) to (.*)/);
@@ -2647,7 +2583,6 @@
         type = "Expense";
       }
 
-      // For non-transfer transactions, try to extract bank name
       if (type !== "Transfer") {
         for (const bank of coaBanks) {
           if (lowerText.includes(bank.toLowerCase())) {
@@ -2656,7 +2591,6 @@
           }
         }
 
-        // Try to extract account header from COA
         for (const account of coaAccounts) {
           if (lowerText.includes(account.toLowerCase())) {
             accountHeader = account;
@@ -2664,7 +2598,6 @@
           }
         }
 
-        // If no specific account header found, use a default based on context
         if (!accountHeader) {
           if (lowerText.includes('petrol') || lowerText.includes('fuel') || lowerText.includes('gas')) {
             accountHeader = "Fuel";
@@ -2681,13 +2614,11 @@
           }
         }
 
-        // If no bank found but we have cash mentioned
         if (!bankName && lowerText.includes('cash')) {
           bankName = "Cash";
         }
       }
 
-      // Determine voucher type based on transaction type
       let voucherType = "Payment";
       if (type === "Income") voucherType = "Receipt";
       else if (type === "Transfer") voucherType = "Transfer";
@@ -2705,14 +2636,13 @@
       };
     }
 
-    // Helper function to find matching bank from COA
     function findMatchingBank(bankText) {
       for (const bank of coaBanks) {
         if (bank.toLowerCase().includes(bankText.trim()) || bankText.trim().includes(bank.toLowerCase())) {
           return bank;
         }
       }
-      return bankText; // Return original text if no match found
+      return bankText;
     }
 
     // Theme functions
@@ -2722,7 +2652,6 @@
       themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
       localStorage.setItem('theme', currentTheme);
       
-      // Update chart if it exists
       if (transactionsChartInstance) {
         renderTransactionsChart();
       }
@@ -2779,10 +2708,10 @@
     
     function exportToPDF() {
       Swal.fire({ icon: 'info', title: 'PDF Export', text: 'PDF export functionality would typically require a library like jsPDF or browser print functionality.' });
-      // For a real implementation, you would use jsPDF or window.print()
       window.print();
     }
     
+    // Save/Load app state
     function saveAppState() {
       const state = {
         currentPage: currentPage,
@@ -2823,13 +2752,11 @@
           themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
         }
         
-        // Update UI based on saved state
         if (dateFilter.value === "custom") {
           customRangeControls.style.display = "flex";
         }
         updateBalanceVisibility();
         
-        // Mark that we've loaded saved state
         hasLoadedSavedState = true;
       }
     }
@@ -2837,8 +2764,6 @@
     // Initialize with balance hidden
     updateBalanceVisibility();
 
-    
-    // Helper function to format date as yyyy-mmm-dd
     function formatDateToYyyyMmmDd(dateString) {
       const date = new Date(dateString);
       const year = date.getFullYear();
@@ -2846,8 +2771,6 @@
       const day = date.getDate().toString().padStart(2, '0');
       return `${year}-${month}-${day}`;
     }
-
-    // ========== NEW FEATURES ==========
 
     // Multiple Selection Functions
     function selectAllTransactions() {
@@ -2911,7 +2834,6 @@
         loadingMessage.textContent = `Deleting ${count} transactions...`;
         loadingModal.show();
         
-        // Delete all selected transactions
         const deletePromises = Array.from(selectedTransactions).map(id => 
           deleteDoc(doc(db, "users", currentUser.uid, "transactions", id))
         );
@@ -2960,7 +2882,6 @@
         loadingMessage.textContent = `Updating ${count} transactions...`;
         loadingModal.show();
         
-        // Update all selected transactions
         const updatePromises = Array.from(selectedTransactions).map(id => {
           const updateData = {};
           updateData[field] = value;
@@ -2989,14 +2910,12 @@
 
     // Split Income Functions
     function openSplitIncomeModal() {
-      // Reset the modal
       splitIncomeAmount.value = "";
       splitIncomeDescription.value = "";
       splitIncomeBank.value = "";
       splitExpensesContainer.innerHTML = "";
       splitSummary.innerHTML = "";
       
-      // Add one initial expense
       addSplitExpense();
       
       splitIncomeModal.show();
@@ -3124,7 +3043,6 @@
       let totalExpenses = 0;
       const expenses = [];
       
-      // Validate all expenses
       for (const element of expenseElements) {
         const amountInput = element.querySelector('.split-amount-input');
         const descriptionInput = element.querySelector('.split-description-input');
