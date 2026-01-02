@@ -2307,6 +2307,8 @@
 
     // Calendar initialization
     let calendar;
+    let selectedDate = null;
+    
     document.addEventListener('DOMContentLoaded', function() {
       const calendarEl = document.getElementById('calendar');
       calendar = new FullCalendar.Calendar(calendarEl, {
@@ -2318,13 +2320,40 @@
         },
         events: [],
         height: 'auto',
+        dateClick: function(info) {
+          // When a date is clicked, open reminder modal with that date
+          selectedDate = info.dateStr;
+          openReminderModalWithDate(selectedDate);
+        },
         eventClick: function(info) {
           // When a reminder is clicked, show the detail modal
           showReminderDetails(info.event);
+        },
+        eventDidMount: function(info) {
+          // Add tooltip to events
+          info.el.title = info.event.title;
         }
       });
       calendar.render();
     });
+
+    // Open reminder modal with selected date
+    function openReminderModalWithDate(date) {
+      document.getElementById("reminderDate").value = date;
+      document.getElementById("reminderType").value = "reminder";
+      document.getElementById("reminderTitle").value = "";
+      document.getElementById("reminderTime").value = "";
+      document.getElementById("reminderNotes").value = "";
+      document.getElementById("billAmount").value = "";
+      document.querySelector('input[name="recurrence"][value="none"]').checked = true;
+      toggleBillFields("reminder");
+      
+      // Reset save button to default
+      saveReminderBtn.innerHTML = '<i class="fas fa-save"></i> Save Reminder';
+      saveReminderBtn.onclick = saveReminder;
+      
+      reminderModal.classList.add("active");
+    }
 
     // Show toast notification
     function showToast(message, type = '') {
@@ -2396,7 +2425,7 @@
       transactionTypePopup.classList.remove('active');
     }
 
-    // ========== SPLIT TRANSACTION FEATURE (COPIED FROM YOUR CODE) ==========
+    // ========== SPLIT TRANSACTION FEATURE ==========
 
     // Split Income Functions
     function openSplitIncomeModal() {
@@ -2653,10 +2682,11 @@
     // Load COA data from the chartOfAccounts collection
     async function loadCOAData() {
       try {
-        if (!currentUser) return;
+        const user = auth.currentUser;
+        if (!user) return;
         
         // Get account headers from chartOfAccounts collection
-        const accountsQuery = db.collection("users").doc(currentUser.uid).collection("chartOfAccounts");
+        const accountsQuery = db.collection("users").doc(user.uid).collection("chartOfAccounts");
         const accountsSnapshot = await accountsQuery.get();
         
         coaAccounts = [];
@@ -3502,7 +3532,20 @@
     // Reminder Modal
     addReminderBtn.addEventListener("click", () => {
       // Set default date to today
-      document.getElementById("reminderDate").value = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById("reminderDate").value = today;
+      document.getElementById("reminderType").value = "reminder";
+      document.getElementById("reminderTitle").value = "";
+      document.getElementById("reminderTime").value = "";
+      document.getElementById("reminderNotes").value = "";
+      document.getElementById("billAmount").value = "";
+      document.querySelector('input[name="recurrence"][value="none"]').checked = true;
+      toggleBillFields("reminder");
+      
+      // Reset save button to default
+      saveReminderBtn.innerHTML = '<i class="fas fa-save"></i> Save Reminder';
+      saveReminderBtn.onclick = saveReminder;
+      
       reminderModal.classList.add("active");
     });
     
@@ -3549,25 +3592,33 @@
       // Set current date in reminder modal
       document.getElementById("reminderDate").value = new Date().toISOString().split('T')[0];
       
-      // Add some sample events to calendar for demo
-      const today = new Date();
-      const nextWeek = new Date(today);
-      nextWeek.setDate(today.getDate() + 7);
-      
-      const sampleEvents = [
-        {
-          title: "Team Meeting",
-          start: today.toISOString().split('T')[0],
-          color: "#4ECDC4"
-        },
-        {
-          title: "Project Deadline",
-          start: nextWeek.toISOString().split('T')[0],
-          color: "#FF6B6B"
-        }
-      ];
-      
-      calendar.addEventSource(sampleEvents);
+      // Add some sample events to calendar for demo if no events exist
+      const user = auth.currentUser;
+      if (user) {
+        db.collection("users").doc(user.uid).collection("reminders").get()
+          .then(snapshot => {
+            if (snapshot.empty) {
+              const today = new Date();
+              const nextWeek = new Date(today);
+              nextWeek.setDate(today.getDate() + 7);
+              
+              const sampleEvents = [
+                {
+                  title: "Team Meeting",
+                  start: today.toISOString().split('T')[0],
+                  color: "#4ECDC4"
+                },
+                {
+                  title: "Project Deadline",
+                  start: nextWeek.toISOString().split('T')[0],
+                  color: "#FF6B6B"
+                }
+              ];
+              
+              calendar.addEventSource(sampleEvents);
+            }
+          });
+      }
     }
 
     // Initialize sample data when page loads
