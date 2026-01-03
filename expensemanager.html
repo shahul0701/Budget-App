@@ -1762,3 +1762,2409 @@
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <!-- XLSX for Excel parsing -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<!-- Firebase + App logic -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, where, limit, writeBatch
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+  authDomain: "budget-app-1365f.firebaseapp.com",
+  projectId: "budget-app-1365f",
+  storageBucket: "budget-app-1365f.appspot.com",
+  messagingSenderId: "1036194450411",
+  appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+  measurementId: "G-YFFJL2H54X"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const storage = getStorage(app);
+
+// state
+let currentUser = null;
+let allTransactions = [];
+let filteredTransactions = [];
+let currentPage = 1;
+const rowsPerPage = 10;
+let txToDelete = null;
+let balanceVisible = false;
+let isSubmitting = false;
+let lastVoucherNumber = 0;
+let currentTheme = 'light';
+let mainChart = null;
+let selectedTransactions = new Set();
+let hasLoadedSavedState = false;
+let allTags = new Set();
+let recurringTransactions = [];
+let currentCalendarMonth = new Date().getMonth();
+let currentCalendarYear = new Date().getFullYear();
+
+// COA data
+let coaAccounts = [];
+let coaBanks = [];
+
+// DOM refs
+const loadingBackdrop = document.getElementById("loadingBackdrop");
+const backdropMessage = document.getElementById("backdropMessage");
+const usernameElem = document.getElementById("username");
+const initialsElem = document.getElementById("userInitials");
+const logoutBtn = document.getElementById("logoutBtn");
+const newTxBtn = document.getElementById("newTxBtn");
+const quickAddBtn = document.getElementById("quickAddBtn");
+const splitIncomeBtn = document.getElementById("splitIncomeBtn");
+const floatingAdd = document.getElementById("floatingAdd");
+const balanceToggle = document.getElementById("balanceToggle");
+const backBtn = document.getElementById("backBtn");
+const homeBtn = document.getElementById("homeBtn");
+const coaBtn = document.getElementById("coaBtn");
+const recurringBtn = document.getElementById("recurringBtn");
+const tagManagerBtn = document.getElementById("tagManagerBtn");
+const themeToggle = document.getElementById("themeToggle");
+const exportCSV = document.getElementById("exportCSV");
+const exportExcel = document.getElementById("exportExcel");
+const advancedFiltersBtn = document.getElementById("advancedFiltersBtn");
+const advancedFilters = document.getElementById("advancedFilters");
+const includeTimeCheckbox = document.getElementById("includeTime");
+const formTIME = document.getElementById("formTIME");
+const formCURRENCY = document.getElementById("formCURRENCY");
+const minAmount = document.getElementById("minAmount");
+const maxAmount = document.getElementById("maxAmount");
+const sortBy = document.getElementById("sortBy");
+const groupBy = document.getElementById("groupBy");
+const tagFilter = document.getElementById("tagFilter");
+const formDESCRIPTION = document.getElementById("formDESCRIPTION");
+const quickAddInput = document.getElementById("quickAddInput");
+const processQuickAddBtn = document.getElementById("processQuickAddBtn");
+const loadingModalEl = document.getElementById("loadingModal");
+const loadingModal = new bootstrap.Modal(loadingModalEl);
+const loadingMessage = document.getElementById("loadingMessage");
+const selectAllBtn = document.getElementById("selectAllBtn");
+const deselectAllBtn = document.getElementById("deselectAllBtn");
+const selectAllCheckbox = document.getElementById("selectAllCheckbox");
+const bulkActions = document.getElementById("bulkActions");
+const selectedCount = document.getElementById("selectedCount");
+const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
+const bulkEditBtn = document.getElementById("bulkEditBtn");
+const bulkTagBtn = document.getElementById("bulkTagBtn");
+const bulkCategoryBtn = document.getElementById("bulkCategoryBtn");
+const clearSelectionBtn = document.getElementById("clearSelectionBtn");
+const splitIncomeModalEl = document.getElementById("splitIncomeModal");
+const splitIncomeModal = new bootstrap.Modal(splitIncomeModalEl);
+const splitIncomeAmount = document.getElementById("splitIncomeAmount");
+const splitIncomeDescription = document.getElementById("splitIncomeDescription");
+const splitIncomeBank = document.getElementById("splitIncomeBank");
+const addSplitExpenseBtn = document.getElementById("addSplitExpenseBtn");
+const splitExpensesContainer = document.getElementById("splitExpensesContainer");
+const splitSummary = document.getElementById("splitSummary");
+const saveSplitTransactionsBtn = document.getElementById("saveSplitTransactionsBtn");
+const bulkEditModalEl = document.getElementById("bulkEditModal");
+const bulkEditModal = new bootstrap.Modal(bulkEditModalEl);
+const bulkEditField = document.getElementById("bulkEditField");
+const bulkEditValue = document.getElementById("bulkEditValue");
+const bulkEditCount = document.getElementById("bulkEditCount");
+const confirmBulkEditBtn = document.getElementById("confirmBulkEditBtn");
+const confirmBulkDeleteModalEl = document.getElementById("confirmBulkDeleteModal");
+const confirmBulkDeleteModal = new bootstrap.Modal(confirmBulkDeleteModalEl);
+const bulkDeleteCount = document.getElementById("bulkDeleteCount");
+const confirmBulkDeleteBtn = document.getElementById("confirmBulkDeleteBtn");
+const duplicateTransactionBtn = document.getElementById("duplicateTransactionBtn");
+const makeRecurringBtn = document.getElementById("makeRecurringBtn");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const mobileMenuToggle = document.getElementById("mobileMenuToggle");
+const mainContent = document.getElementById("mainContent");
+const aiAssistant = document.getElementById("aiAssistant");
+const aiPanel = document.getElementById("aiPanel");
+const aiChat = document.getElementById("aiChat");
+const aiInput = document.getElementById("aiInput");
+const viewTabs = document.getElementById("viewTabs");
+const gridViewContainer = document.getElementById("gridViewContainer");
+const calendarContainer = document.getElementById("calendarContainer");
+const selectedSummary = document.getElementById("selectedSummary");
+const filterSummary = document.getElementById("filterSummary");
+const dynamicTip = document.getElementById("dynamicTip");
+const lastSync = document.getElementById("lastSync");
+const saveFilterBtn = document.getElementById("saveFilterBtn");
+const statusFilter = document.getElementById("statusFilter");
+const categoryFilter = document.getElementById("categoryFilter");
+const tagManagerModalEl = document.getElementById("tagManagerModal");
+const tagManagerModal = new bootstrap.Modal(tagManagerModalEl);
+const bulkTagModalEl = document.getElementById("bulkTagModal");
+const bulkTagModal = new bootstrap.Modal(bulkTagModalEl);
+const bulkTagsInput = document.getElementById("bulkTagsInput");
+const bulkTagCount = document.getElementById("bulkTagCount");
+const confirmBulkTagBtn = document.getElementById("confirmBulkTagBtn");
+
+// Other DOM refs
+const dateFilter = document.getElementById("dateFilter");
+const startDateInput = document.getElementById("startDate");
+const endDateInput = document.getElementById("endDate");
+const customRangeControls = document.getElementById("customRangeControls");
+const typeFilter = document.getElementById("typeFilter");
+const bankFilter = document.getElementById("bankFilter");
+const searchDesc = document.getElementById("searchDesc");
+const applyFiltersBtn = document.getElementById("applyFiltersBtn");
+const resetFiltersBtn = document.getElementById("resetFiltersBtn");
+const transactionsTableBody = document.getElementById("transactionsTableBody");
+const paginationControls = document.getElementById("paginationControls");
+const gridPaginationControls = document.getElementById("gridPaginationControls");
+const bankBalancesContainer = document.getElementById("bankBalances");
+const quickStatsContainer = document.getElementById("quickStats");
+const transactionsChart = document.getElementById("transactionsChart");
+
+// Modal refs
+const transactionModalEl = document.getElementById("transactionModal");
+const transactionModal = new bootstrap.Modal(transactionModalEl);
+const quickAddModalEl = document.getElementById("quickAddModal");
+const quickAddModal = new bootstrap.Modal(quickAddModalEl);
+const form = document.getElementById("transactionForm");
+const txIdInput = document.getElementById("txId");
+const formDATE = document.getElementById("formDATE");
+const formSINO = document.getElementById("formSINO");
+const formACCOUNTHEADER = document.getElementById("formACCOUNTHEADER");
+const formVOUCHERTYPE = document.getElementById("formVOUCHERTYPE");
+const formTYPE = document.getElementById("formTYPE");
+const formBANKNAME = document.getElementById("formBANKNAME");
+const formINCOME = document.getElementById("formINCOME");
+const formEXPENSE = document.getElementById("formEXPENSE");
+const formBALANCE = document.getElementById("formBALANCE");
+const formNOTES = document.getElementById("formNOTES");
+const formTAGS = document.getElementById("formTAGS");
+const formSTATUS = document.getElementById("formSTATUS");
+const tagsPreview = document.getElementById("tagsPreview");
+const formATTACHFILE = document.getElementById("formATTACHFILE");
+const formATTACH = document.getElementById("formATTACH");
+const attachmentPreview = document.getElementById("attachmentPreview");
+const attachmentInfo = document.getElementById("attachmentInfo");
+const saveTransactionBtn = document.getElementById("saveTransactionBtn");
+const uploadProgress = document.getElementById("uploadProgress");
+const uploadProgressBar = document.getElementById("uploadProgressBar");
+const recurringOptions = document.getElementById("recurringOptions");
+
+const attachmentModalEl = document.getElementById("attachmentModal");
+const attachmentModal = new bootstrap.Modal(attachmentModalEl);
+const attachmentModalBody = document.getElementById("attachmentModalBody");
+
+const confirmDeleteModalEl = document.getElementById("confirmDeleteModal");
+const confirmDeleteModal = new bootstrap.Modal(confirmDeleteModalEl);
+const confirmDeleteBtn = document.getElementById("confirmDeleteBtn");
+
+// stats
+const statIncome = document.getElementById("statIncome");
+const statExpense = document.getElementById("statExpense");
+const statBalance = document.getElementById("statBalance");
+const statCount = document.getElementById("statCount");
+const statCashflow = document.getElementById("statCashflow");
+const incomeTrend = document.getElementById("incomeTrend");
+const expenseTrend = document.getElementById("expenseTrend");
+
+// Helper functions
+function escapeHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function showLoading(message = "Loading...") {
+  backdropMessage.textContent = message;
+  loadingBackdrop.style.display = "flex";
+}
+
+function hideLoading() {
+  loadingBackdrop.style.display = "none";
+}
+
+function showToast(message, type = "info") {
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.innerHTML = `
+    <div class="d-flex align-items-center">
+      <i class="fa fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} 
+        text-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} me-2"></i>
+      <span>${message}</span>
+    </div>
+  `;
+  
+  const container = document.getElementById("toastContainer");
+  container.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.animation = "slideIn 0.3s ease reverse";
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function formatDateToYyyyMmmDd(dateString) {
+  if (!dateString) return "";
+  try {
+    const date = new Date(dateString);
+    const year = date.getFullYear();
+    const month = date.toLocaleString('default', { month: 'short' });
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch (e) {
+    return dateString;
+  }
+}
+
+// Auth handling
+onAuthStateChanged(auth, async user => {
+  if (user) {
+    currentUser = user;
+    const name = user.displayName || user.email || "User";
+    usernameElem.textContent = name;
+    initialsElem.textContent = (name.charAt(0) || "U").toUpperCase();
+    
+    showLoading("Loading your transactions...");
+    
+    try {
+      // Load theme preference
+      loadThemePreference();
+      
+      // Load user preferences and data
+      await Promise.all([
+        loadUserPreferences(),
+        loadCOAData(),
+        loadTransactions(),
+        loadTags(),
+        loadRecurringTransactions()
+      ]);
+      
+      loadAppState();
+      applyFilters();
+      updateLastSync();
+      startPeriodicSync();
+      
+      hideLoading();
+      showToast("Welcome back!", "success");
+    } catch (error) {
+      hideLoading();
+      console.error("Initialization error:", error);
+      Swal.fire({ 
+        icon: 'error', 
+        title: 'Loading Error', 
+        text: 'Failed to load data. Please refresh the page.' 
+      });
+    }
+  } else {
+    // not logged in
+    Swal.fire({ icon: 'info', title: 'Please login', text: 'You will be redirected to login.' }).then(()=> {
+      window.location.href = "index.html";
+    });
+  }
+});
+
+// Event listeners
+logoutBtn.addEventListener("click", async () => {
+  localStorage.removeItem('budgetAppState');
+  await signOut(auth);
+  window.location.href = "index.html";
+});
+
+newTxBtn.addEventListener("click", () => openAddModal());
+floatingAdd.addEventListener("click", () => openAddModal());
+
+balanceToggle.addEventListener("click", () => {
+  toggleBalanceVisibility();
+});
+
+dateFilter.addEventListener("change", () => {
+  if (dateFilter.value === "custom") {
+    customRangeControls.style.display = "flex";
+  } else {
+    customRangeControls.style.display = "none";
+  }
+});
+
+applyFiltersBtn.addEventListener("click", () => { applyFilters(); });
+resetFiltersBtn.addEventListener("click", () => {
+  dateFilter.value = "all";
+  typeFilter.value = "all";
+  bankFilter.value = "all";
+  categoryFilter.value = "all";
+  statusFilter.value = "all";
+  searchDesc.value = "";
+  startDateInput.value = "";
+  endDateInput.value = "";
+  minAmount.value = "";
+  maxAmount.value = "";
+  tagFilter.value = "";
+  sortBy.value = "date-desc";
+  groupBy.value = "none";
+  customRangeControls.style.display = "none";
+  advancedFilters.style.display = "none";
+  advancedFiltersBtn.textContent = "Advanced";
+  applyFilters();
+});
+
+// Navigation button handlers
+backBtn.addEventListener("click", () => window.history.back());
+homeBtn.addEventListener("click", () => window.location.href = "home.html");
+coaBtn.addEventListener("click", () => window.location.href = "coa.html");
+recurringBtn.addEventListener("click", () => showRecurringTransactions());
+tagManagerBtn.addEventListener("click", () => tagManagerModal.show());
+
+// Theme toggle
+themeToggle.addEventListener("click", () => toggleTheme());
+
+// Export buttons
+exportCSV.addEventListener("click", () => exportToCSV());
+exportExcel.addEventListener("click", () => exportToExcel());
+
+// Advanced filters toggle
+advancedFiltersBtn.addEventListener("click", () => {
+  const isVisible = advancedFilters.style.display === "flex";
+  advancedFilters.style.display = isVisible ? "none" : "flex";
+  advancedFiltersBtn.textContent = isVisible ? "Advanced" : "Hide Advanced";
+});
+
+// Time toggle
+includeTimeCheckbox.addEventListener("change", () => {
+  formTIME.disabled = !includeTimeCheckbox.checked;
+  if (!includeTimeCheckbox.checked) formTIME.value = "";
+});
+
+// Quick Add button
+quickAddBtn.addEventListener("click", () => {
+  quickAddInput.value = "";
+  quickAddModal.show();
+});
+processQuickAddBtn.addEventListener("click", processQuickAdd);
+
+// Split Income button
+splitIncomeBtn.addEventListener("click", () => openSplitIncomeModal());
+
+// Bulk action buttons
+selectAllBtn.addEventListener("click", selectAllTransactions);
+deselectAllBtn.addEventListener("click", deselectAllTransactions);
+selectAllCheckbox.addEventListener("change", toggleSelectAll);
+bulkDeleteBtn.addEventListener("click", confirmBulkDelete);
+bulkEditBtn.addEventListener("click", openBulkEditModal);
+bulkTagBtn.addEventListener("click", openBulkTagModal);
+bulkCategoryBtn.addEventListener("click", openBulkCategoryModal);
+clearSelectionBtn.addEventListener("click", clearSelection);
+confirmBulkEditBtn.addEventListener("click", processBulkEdit);
+confirmBulkDeleteBtn.addEventListener("click", processBulkDelete);
+confirmBulkTagBtn.addEventListener("click", processBulkTags);
+duplicateTransactionBtn.addEventListener("click", duplicateTransaction);
+makeRecurringBtn.addEventListener("click", toggleRecurringOptions);
+saveFilterBtn.addEventListener("click", saveFilterPreset);
+
+// Sidebar toggle
+sidebarToggle.addEventListener("click", toggleSidebar);
+mobileMenuToggle.addEventListener("click", toggleMobileMenu);
+
+// AI Assistant
+aiAssistant.addEventListener("click", toggleAIPanel);
+aiInput.addEventListener("keypress", (e) => {
+  if (e.key === 'Enter') sendAIMessage();
+});
+
+// Form inputs
+formTAGS.addEventListener("input", updateTagsPreview);
+formTYPE.addEventListener("change", updateFormFields);
+
+// Tab switching
+viewTabs.addEventListener("shown.bs.tab", (event) => {
+  const activeTab = event.target.getAttribute("href");
+  if (activeTab === "#gridView") {
+    renderGridView();
+  } else if (activeTab === "#calendarView") {
+    renderCalendarView();
+  }
+});
+
+// Save transaction
+saveTransactionBtn.addEventListener("click", async () => {
+  if (isSubmitting) return;
+  isSubmitting = true;
+      
+  saveTransactionBtn.disabled = true;
+  saveTransactionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+  
+  if (!formDATE.value) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Date is required' });
+    resetSaveButton();
+    return;
+  }
+
+  if (!formSINO.value) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Voucher number is required' });
+    resetSaveButton();
+    return;
+  }
+      
+  const txData = {
+    DATE: formDATE.value,
+    SINO: formSINO.value,
+    ACCOUNT_HEADER: formACCOUNTHEADER.value,
+    MODE: formBANKNAME.value,
+    BANK_NAME: formBANKNAME.value,
+    VOUCHER_TYPE: formVOUCHERTYPE.value,
+    TYPE: formTYPE.value,
+    INCOME: parseFloat(formINCOME.value) || 0,
+    EXPENSE: parseFloat(formEXPENSE.value) || 0,
+    BALANCE: parseFloat(formBALANCE.value) || 0,
+    DESCRIPTION: formDESCRIPTION.value,
+    NOTES: formNOTES.value,
+    TAGS: formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag),
+    STATUS: formSTATUS.value,
+    ATTACHMENT: formATTACH.value,
+    CURRENCY: formCURRENCY.value,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    userId: currentUser.uid
+  };
+  
+  if (includeTimeCheckbox.checked && formTIME.value) {
+    txData.TIME = formTIME.value;
+  }
+  
+  // Check if recurring
+  if (recurringOptions.style.display === "block") {
+    txData.RECURRING = {
+      frequency: document.getElementById("formRECURRING_FREQ").value,
+      interval: parseInt(document.getElementById("formRECURRING_INTERVAL").value) || 1,
+      endDate: document.getElementById("formRECURRING_ENDDATE").value,
+      nextDate: calculateNextRecurringDate(txData.DATE, {
+        frequency: document.getElementById("formRECURRING_FREQ").value,
+        interval: parseInt(document.getElementById("formRECURRING_INTERVAL").value) || 1
+      })
+    };
+  }
+  
+  try {
+    loadingMessage.textContent = "Saving transaction...";
+    loadingModal.show();
+    
+    if (txIdInput.value) {
+      // Update existing transaction
+      await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
+      showToast("Transaction updated successfully", "success");
+    } else {
+      // Add new transaction
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+      showToast("Transaction added successfully", "success");
+      
+      // Update tags collection
+      await updateTagsCollection(txData.TAGS);
+    }
+    
+    loadingModal.hide();
+    transactionModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("saveTransaction", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transaction' });
+  } finally {
+    resetSaveButton();
+  }
+});
+
+confirmDeleteBtn.addEventListener("click", async () => {
+  if (!txToDelete) return;
+  
+  try {
+    loadingMessage.textContent = "Deleting transaction...";
+    loadingModal.show();
+    
+    await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
+    
+    loadingModal.hide();
+    showToast("Transaction deleted successfully", "success");
+    await loadTransactions();
+    confirmDeleteModal.hide();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("deleteTransaction", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction' });
+  }
+});
+
+// Load COA data
+async function loadCOAData() {
+  try {
+    if (!currentUser) return;
+    
+    // Get account headers from chartOfAccounts collection
+    const accountsQuery = query(
+      collection(db, "users", currentUser.uid, "chartOfAccounts"), 
+      where("userId", "==", currentUser.uid)
+    );
+    const accountsSnapshot = await getDocs(accountsQuery);
+    
+    coaAccounts = [];
+    coaBanks = [];
+    
+    accountsSnapshot.forEach(doc => {
+      const data = doc.data();
+      coaAccounts.push(data.name);
+      
+      // Check if this is a bank account
+      if (data.category === "Bank" || data.category === "Cash" || 
+          data.type === "Asset" && data.name.toLowerCase().includes("bank")) {
+        coaBanks.push(data.name);
+      }
+    });
+    
+    // If no accounts found, set default accounts
+    if (coaAccounts.length === 0) {
+      coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
+    }
+    
+    if (coaBanks.length === 0) {
+      coaBanks = ["AXIS", "BOM", "Cash"];
+    }
+    
+    // Populate the dropdowns
+    populateCOADropdowns();
+    
+  } catch (error) {
+    console.warn('Error loading COA data:', error.message);
+    // Use default accounts if COA is not available
+    coaAccounts = ["Rent", "AXIS", "Amount Tally", "Meals & Entertainment", "BOM", "Fuel", "Shopping", "Miscellaneous"];
+    coaBanks = ["AXIS", "BOM", "Cash"];
+    populateCOADropdowns();
+  }
+}
+
+function populateCOADropdowns() {
+  // Clear existing options (except the first one)
+  formACCOUNTHEADER.innerHTML = '<option value="">Select Account Header</option>';
+  formBANKNAME.innerHTML = '<option value="">Select Bank</option>';
+  bankFilter.innerHTML = '<option value="all">All Banks</option>';
+  splitIncomeBank.innerHTML = '<option value="">Select Bank</option>';
+  categoryFilter.innerHTML = '<option value="all">All Categories</option>';
+  
+  // Add account headers
+  coaAccounts.forEach(account => {
+    const option = document.createElement('option');
+    option.value = account;
+    option.textContent = account;
+    formACCOUNTHEADER.appendChild(option);
+    
+    // Add to category filter
+    const categoryOption = document.createElement('option');
+    categoryOption.value = account;
+    categoryOption.textContent = account;
+    categoryFilter.appendChild(categoryOption);
+  });
+  
+  // Add bank names
+  coaBanks.forEach(bank => {
+    const option = document.createElement('option');
+    option.value = bank;
+    option.textContent = bank;
+    formBANKNAME.appendChild(option);
+    splitIncomeBank.appendChild(option.cloneNode(true));
+    
+    // Also add to bank filter
+    const filterOption = document.createElement('option');
+    filterOption.value = bank;
+    filterOption.textContent = bank;
+    bankFilter.appendChild(filterOption);
+  });
+}
+
+// Load user preferences
+async function loadUserPreferences() {
+  try {
+    const userPrefsRef = doc(db, "users", currentUser.uid, "preferences", "settings");
+    const userPrefsSnap = await getDoc(userPrefsRef);
+    
+    if (userPrefsSnap.exists()) {
+      const prefs = userPrefsSnap.data();
+      // Apply user preferences
+      if (prefs.defaultCurrency) {
+        formCURRENCY.value = prefs.defaultCurrency;
+      }
+      if (prefs.defaultBank) {
+        formBANKNAME.value = prefs.defaultBank;
+      }
+    }
+  } catch (error) {
+    console.warn('Error loading user preferences:', error.message);
+  }
+}
+
+// Optimized transaction loading
+async function loadTransactions() {
+  try {
+    transactionsTableBody.innerHTML = `<tr><td colspan="13" class="text-center py-4 small-muted">Loading transactions...</td></tr>`;
+    
+    const q = query(
+      collection(db, "users", currentUser.uid, "transactions"), 
+      orderBy("createdAt", "desc")
+    );
+    
+    const snap = await getDocs(q);
+    const txs = snap.docs.map(d => ({ 
+      id: d.id, 
+      ...d.data(),
+      NOTES: d.data().NOTES || d.data().DESCRIPTION || "",
+      BANK_NAME: d.data().BANK_NAME || d.data().MODE || "",
+      TAGS: d.data().TAGS || [],
+      STATUS: d.data().STATUS || "completed"
+    }));
+    
+    allTransactions = txs;
+    filteredTransactions = allTransactions.slice();
+    
+    if (!hasLoadedSavedState) {
+      currentPage = 1;
+    }
+    
+    // Calculate running balance once for all transactions
+    calculateRunningBalance();
+    buildTable();
+    updateStats();
+    updateBankBalances();
+    updateQuickStats();
+    renderMainChart();
+    updateSelectedSummary();
+    updateFilterSummary();
+    
+    // Initialize voucher numbering (non-blocking)
+    setTimeout(() => initVoucherNumbering(), 100);
+    
+    return true;
+  } catch (err) {
+    console.error("loadTransactions error:", err);
+    transactionsTableBody.innerHTML = `<tr><td colspan="13" class="text-center text-danger py-4">
+      <i class="fa fa-exclamation-triangle me-2"></i>Failed to load transactions. Please try again.
+    </td></tr>`;
+    return false;
+  }
+}
+
+async function loadTags() {
+  try {
+    const tagsRef = collection(db, "users", currentUser.uid, "tags");
+    const tagsSnap = await getDocs(tagsRef);
+    
+    allTags.clear();
+    tagsSnap.forEach(doc => {
+      const tagData = doc.data();
+      allTags.add(tagData.name);
+    });
+    
+    // Also extract tags from transactions
+    allTransactions.forEach(tx => {
+      if (tx.TAGS && Array.isArray(tx.TAGS)) {
+        tx.TAGS.forEach(tag => allTags.add(tag));
+      }
+    });
+  } catch (error) {
+    console.warn('Error loading tags:', error.message);
+  }
+}
+
+async function loadRecurringTransactions() {
+  try {
+    const recurringQuery = query(
+      collection(db, "users", currentUser.uid, "transactions"),
+      where("RECURRING", "!=", null)
+    );
+    
+    const recurringSnap = await getDocs(recurringQuery);
+    recurringTransactions = recurringSnap.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    }));
+  } catch (error) {
+    console.warn('Error loading recurring transactions:', error.message);
+  }
+}
+
+async function initVoucherNumbering() {
+  try {
+    const q = query(
+      collection(db, "users", currentUser.uid, "transactions"),
+      orderBy("SINO", "desc"),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    
+    if (!snap.empty) {
+      const lastTx = snap.docs[0].data();
+      if (lastTx.SINO) {
+        const match = lastTx.SINO.match(/\d+$/);
+        if (match) {
+          lastVoucherNumber = parseInt(match[0]);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error initializing voucher numbering:", error);
+  }
+}
+
+async function getNextVoucherNumber(voucherType) {
+  try {
+    // For better performance, use local allTransactions array
+    let highestPaymentNumber = 0;
+    let highestReceiptNumber = 0;
+    let highestJournalNumber = 0;
+    let highestTransferNumber = 0;
+    let highestContraNumber = 0;
+    
+    // Find the highest numbers for each type from local data
+    allTransactions.forEach(tx => {
+      if (tx.SINO) {
+        if (/^\d+$/.test(tx.SINO)) {
+          const num = parseInt(tx.SINO);
+          if (num > highestPaymentNumber) highestPaymentNumber = num;
+        }
+        else if (tx.SINO.startsWith('RP-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestReceiptNumber) highestReceiptNumber = num;
+        }
+        else if (tx.SINO.startsWith('JR-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestJournalNumber) highestJournalNumber = num;
+        }
+        else if (tx.SINO.startsWith('TR-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestTransferNumber) highestTransferNumber = num;
+        }
+        else if (tx.SINO.startsWith('CT-')) {
+          const num = parseInt(tx.SINO.substring(3));
+          if (num > highestContraNumber) highestContraNumber = num;
+        }
+      }
+    });
+    
+    // Generate the next number based on voucher type
+    if (voucherType === "Payment") {
+      return (highestPaymentNumber + 1).toString();
+    } else if (voucherType === "Receipt") {
+      return `RP-${(highestReceiptNumber + 1).toString().padStart(3, '0')}`;
+    } else if (voucherType === "Journal") {
+      return `JR-${(highestJournalNumber + 1).toString().padStart(3, '0')}`;
+    } else if (voucherType === "Transfer") {
+      return `TR-${(highestTransferNumber + 1).toString().padStart(3, '0')}`;
+    } else if (voucherType === "Contra") {
+      return `CT-${(highestContraNumber + 1).toString().padStart(3, '0')}`;
+    }
+    
+    return `${voucherType.substring(0, 2).toUpperCase()}-001`;
+    
+  } catch (error) {
+    console.error("Error getting voucher number:", error);
+    // Fallback based on type
+    if (voucherType === "Payment") {
+      const paymentNumbers = allTransactions
+        .filter(tx => tx.SINO && /^\d+$/.test(tx.SINO))
+        .map(tx => parseInt(tx.SINO))
+        .filter(num => !isNaN(num));
+      
+      const highestNumber = paymentNumbers.length > 0 ? Math.max(...paymentNumbers) : 0;
+      return (highestNumber + 1).toString();
+    } else if (voucherType === "Receipt") {
+      return "RP-001";
+    } else if (voucherType === "Journal") {
+      return "JR-001";
+    } else if (voucherType === "Transfer") {
+      return "TR-001";
+    } else if (voucherType === "Contra") {
+      return "CT-001";
+    }
+    
+    return `${voucherType.substring(0, 2).toUpperCase()}-001`;
+  }
+}
+
+function calculateRunningBalance() {
+  const sortedTransactions = [...allTransactions].sort((a, b) => {
+    return new Date(a.DATE) - new Date(b.DATE);
+  });
+  
+  let runningBalance = 0;
+  
+  sortedTransactions.forEach(tx => {
+    const income = parseFloat(tx.INCOME) || 0;
+    const expense = parseFloat(tx.EXPENSE) || 0;
+    runningBalance += (income - expense);
+    tx.BALANCE = runningBalance;
+  });
+  
+  return sortedTransactions;
+}
+
+function calculateBankBalances() {
+  const bankBalances = {};
+  
+  coaBanks.forEach(bank => {
+    bankBalances[bank] = 0;
+  });
+  
+  allTransactions.forEach(tx => {
+    const bankName = tx.BANK_NAME || tx.MODE || "";
+    if (bankName && coaBanks.includes(bankName)) {
+      const income = parseFloat(tx.INCOME) || 0;
+      const expense = parseFloat(tx.EXPENSE) || 0;
+      bankBalances[bankName] += (income - expense);
+    }
+  });
+  
+  return bankBalances;
+}
+
+function updateBankBalances() {
+  const bankBalances = calculateBankBalances();
+  
+  bankBalancesContainer.innerHTML = "";
+  
+  // Add cash balance
+  let hasCash = false;
+  allTransactions.forEach(tx => {
+    if ((tx.BANK_NAME === "Cash" || tx.MODE === "Cash") && !coaBanks.includes("Cash")) {
+      hasCash = true;
+    }
+  });
+  
+  if (hasCash) {
+    let cashBalance = 0;
+    allTransactions.forEach(tx => {
+      if (tx.BANK_NAME === "Cash" || tx.MODE === "Cash") {
+        const income = parseFloat(tx.INCOME) || 0;
+        const expense = parseFloat(tx.EXPENSE) || 0;
+        cashBalance += (income - expense);
+      }
+    });
+    
+    const cashItem = document.createElement("div");
+    cashItem.className = "bank-balance-item";
+    cashItem.innerHTML = `
+      <div class="bank-balance-name">Cash</div>
+      <div class="bank-balance-value ${cashBalance >= 0 ? 'positive-balance' : 'negative-balance'}">
+        ${balanceVisible ? `$${cashBalance.toFixed(2)}` : '••••'}
+      </div>
+      <button class="balance-toggle" title="Toggle balance visibility">
+        <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
+      </button>
+    `;
+    bankBalancesContainer.appendChild(cashItem);
+    
+    cashItem.querySelector('.balance-toggle').addEventListener('click', () => {
+      toggleBalanceVisibility();
+    });
+  }
+  
+  // Add bank balances
+  Object.entries(bankBalances).forEach(([bankName, balance]) => {
+    const bankItem = document.createElement("div");
+    bankItem.className = "bank-balance-item";
+    bankItem.innerHTML = `
+      <div class="bank-balance-name">${escapeHtml(bankName)}</div>
+      <div class="bank-balance-value ${balance >= 0 ? 'positive-balance' : 'negative-balance'}">
+        ${balanceVisible ? `$${balance.toFixed(2)}` : '••••'}
+      </div>
+      <button class="balance-toggle" title="Toggle balance visibility">
+        <i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>
+      </button>
+    `;
+    bankBalancesContainer.appendChild(bankItem);
+    
+    bankItem.querySelector('.balance-toggle').addEventListener('click', () => {
+      toggleBalanceVisibility();
+    });
+  });
+}
+
+function toggleBalanceVisibility() {
+  balanceVisible = !balanceVisible;
+  updateBalanceDisplay();
+  saveAppState();
+}
+
+function updateBalanceDisplay() {
+  const totalIncome = allTransactions.reduce((s,t)=> s + (parseFloat(t.INCOME)||0), 0);
+  const totalExpense = allTransactions.reduce((s,t)=> s + (parseFloat(t.EXPENSE)||0), 0);
+  const balance = totalIncome - totalExpense;
+  
+  statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
+  statBalance.classList.toggle('balance-hidden', !balanceVisible);
+  
+  balanceToggle.innerHTML = `<i class="fa ${balanceVisible ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+  
+  updateBankBalances();
+  buildTable(); // Refresh table to update balance display
+}
+
+function updateQuickStats() {
+  const now = new Date();
+  const thisMonth = now.getMonth();
+  const thisYear = now.getFullYear();
+  const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1;
+  const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear;
+  
+  // Current month stats
+  const monthlyIncome = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear && tx.TYPE === 'Income';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    
+  const monthlyExpenses = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear && tx.TYPE === 'Expense';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+    
+  // Last month stats
+  const lastMonthIncome = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate.getMonth() === lastMonth && txDate.getFullYear() === lastMonthYear && tx.TYPE === 'Income';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    
+  const lastMonthExpenses = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate.getMonth() === lastMonth && txDate.getFullYear() === lastMonthYear && tx.TYPE === 'Expense';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+    
+  // Calculate trends
+  const incomeTrendValue = lastMonthIncome > 0 ? ((monthlyIncome - lastMonthIncome) / lastMonthIncome * 100).toFixed(1) : 0;
+  const expenseTrendValue = lastMonthExpenses > 0 ? ((monthlyExpenses - lastMonthExpenses) / lastMonthExpenses * 100).toFixed(1) : 0;
+  
+  incomeTrend.textContent = `${incomeTrendValue}%`;
+  expenseTrend.textContent = `${expenseTrendValue}%`;
+  
+  // Total amount and average
+  const totalAmount = allTransactions.reduce((sum, tx) => {
+    const amount = (parseFloat(tx.INCOME) || 0) + (parseFloat(tx.EXPENSE) || 0);
+    return sum + amount;
+  }, 0);
+  
+  const avgTransaction = allTransactions.length > 0 ? totalAmount / allTransactions.length : 0;
+  
+  // Counts
+  const incomeCount = allTransactions.filter(tx => tx.TYPE === 'Income').length;
+  const expenseCount = allTransactions.filter(tx => tx.TYPE === 'Expense').length;
+  const transferCount = allTransactions.filter(tx => tx.TYPE === 'Transfer').length;
+  const recurringCount = recurringTransactions.length;
+  
+  // Cash flow (last 30 days)
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  
+  const recentIncome = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate >= thirtyDaysAgo && tx.TYPE === 'Income';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    
+  const recentExpenses = allTransactions
+    .filter(tx => {
+      try {
+        const txDate = new Date(tx.DATE);
+        return txDate >= thirtyDaysAgo && tx.TYPE === 'Expense';
+      } catch (e) {
+        return false;
+      }
+    })
+    .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+  
+  const cashflow = recentIncome - recentExpenses;
+  statCashflow.textContent = `$${cashflow.toFixed(2)}`;
+  
+  quickStatsContainer.innerHTML = `
+    <div class="quick-stat" onclick="showIncomeDetails()">
+      <i class="fa fa-arrow-up text-success"></i>
+      <span>Monthly Income: <strong>$${monthlyIncome.toFixed(2)}</strong></span>
+    </div>
+    <div class="quick-stat" onclick="showExpenseDetails()">
+      <i class="fa fa-arrow-down text-danger"></i>
+      <span>Monthly Expenses: <strong>$${monthlyExpenses.toFixed(2)}</strong></span>
+    </div>
+    <div class="quick-stat" onclick="showTransactionStats()">
+      <i class="fa fa-chart-line text-info"></i>
+      <span>Avg Transaction: <strong>$${avgTransaction.toFixed(2)}</strong></span>
+    </div>
+    <div class="quick-stat" onclick="showTransactionStats()">
+      <i class="fa fa-list text-primary"></i>
+      <span>Counts: <strong>${incomeCount}/${expenseCount}/${transferCount}</strong></span>
+    </div>
+    <div class="quick-stat" onclick="showRecurringTransactions()">
+      <i class="fa fa-redo text-warning"></i>
+      <span>Recurring: <strong>${recurringCount}</strong></span>
+    </div>
+  `;
+}
+
+function renderMainChart() {
+  if (mainChart) {
+    mainChart.destroy();
+  }
+  
+  const monthlyData = {};
+  allTransactions.forEach(tx => {
+    if (tx.DATE) {
+      try {
+        const date = new Date(tx.DATE);
+        const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        if (!monthlyData[monthYear]) {
+          monthlyData[monthYear] = { income: 0, expense: 0 };
+        }
+        
+        if (tx.TYPE === 'Income') {
+          monthlyData[monthYear].income += (parseFloat(tx.INCOME) || 0);
+        } else if (tx.TYPE === 'Expense') {
+          monthlyData[monthYear].expense += (parseFloat(tx.EXPENSE) || 0);
+        }
+      } catch (e) {
+        // Skip invalid dates
+      }
+    }
+  });
+  
+  const sortedMonths = Object.keys(monthlyData).sort();
+  
+  const incomeData = sortedMonths.map(month => monthlyData[month].income);
+  const expenseData = sortedMonths.map(month => monthlyData[month].expense);
+  
+  const monthLabels = sortedMonths.map(month => {
+    const [year, monthNum] = month.split('-');
+    const date = new Date(year, monthNum - 1);
+    return date.toLocaleString('default', { month: 'short', year: 'numeric' });
+  });
+  
+  const ctx = transactionsChart.getContext('2d');
+  mainChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: monthLabels,
+      datasets: [
+        {
+          label: 'Income',
+          data: incomeData,
+          backgroundColor: 'rgba(25, 135, 84, 0.7)',
+          borderColor: 'rgba(25, 135, 84, 1)',
+          borderWidth: 1
+        },
+        {
+          label: 'Expenses',
+          data: expenseData,
+          backgroundColor: 'rgba(220, 53, 69, 0.7)',
+          borderColor: 'rgba(220, 53, 69, 1)',
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: {
+            color: 'rgba(0, 0, 0, 0.1)'
+          },
+          ticks: {
+            callback: function(value) {
+              return '$' + value;
+            }
+          }
+        },
+        x: {
+          grid: {
+            display: false
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          position: 'top',
+        },
+        title: {
+          display: true,
+          text: 'Monthly Income vs Expenses'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return context.dataset.label + ': $' + context.raw.toFixed(2);
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function applyFilters(){
+  filteredTransactions = allTransactions.slice();
+  const now = new Date();
+
+  function inRange(dateStr, start, end){
+    if (!dateStr) return false;
+    try {
+      const d = new Date(dateStr);
+      return d >= start && d <= end;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Date filter
+  if (dateFilter.value !== "all") {
+    let start, end;
+    switch (dateFilter.value) {
+      case "today":
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        break;
+      case "week":
+        const day = now.getDay();
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - day) + 1);
+        break;
+      case "month":
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        break;
+      case "year":
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear() + 1, 0, 1);
+        break;
+      case "quarter":
+        const quarter = Math.floor(now.getMonth() / 3);
+        start = new Date(now.getFullYear(), quarter * 3, 1);
+        end = new Date(now.getFullYear(), (quarter + 1) * 3, 1);
+        break;
+      case "last7":
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        break;
+      case "last30":
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        break;
+      case "custom":
+        if (startDateInput.value && endDateInput.value) {
+          start = new Date(startDateInput.value);
+          end = new Date(endDateInput.value);
+          end.setDate(end.getDate() + 1);
+        }
+        break;
+    }
+    if (start && end) {
+      filteredTransactions = filteredTransactions.filter(t => inRange(t.DATE, start, end));
+    }
+  }
+
+  // Type filter
+  if (typeFilter.value !== "all") {
+    if (typeFilter.value === "recurring") {
+      filteredTransactions = filteredTransactions.filter(t => t.RECURRING);
+    } else {
+      filteredTransactions = filteredTransactions.filter(t => t.TYPE === typeFilter.value);
+    }
+  }
+
+  // Bank filter
+  if (bankFilter.value !== "all") {
+    filteredTransactions = filteredTransactions.filter(t => 
+      (t.BANK_NAME || t.MODE || "") === bankFilter.value
+    );
+  }
+
+  // Category filter
+  if (categoryFilter.value !== "all") {
+    filteredTransactions = filteredTransactions.filter(t => 
+      t.ACCOUNT_HEADER === categoryFilter.value
+    );
+  }
+
+  // Status filter
+  if (statusFilter.value !== "all") {
+    filteredTransactions = filteredTransactions.filter(t => 
+      t.STATUS === statusFilter.value
+    );
+  }
+
+  // Search filter
+  if (searchDesc.value.trim()) {
+    const term = searchDesc.value.trim().toLowerCase();
+    filteredTransactions = filteredTransactions.filter(t => 
+      (t.DESCRIPTION || "").toLowerCase().includes(term) ||
+      (t.NOTES || "").toLowerCase().includes(term) ||
+      (t.TAGS && t.TAGS.some(tag => tag.toLowerCase().includes(term))) ||
+      (t.SINO || "").toLowerCase().includes(term)
+    );
+  }
+  
+  // Amount filters
+  if (minAmount.value) {
+    const min = parseFloat(minAmount.value);
+    filteredTransactions = filteredTransactions.filter(t => {
+      const amount = (parseFloat(t.INCOME) || 0) + (parseFloat(t.EXPENSE) || 0);
+      return amount >= min;
+    });
+  }
+  
+  if (maxAmount.value) {
+    const max = parseFloat(maxAmount.value);
+    filteredTransactions = filteredTransactions.filter(t => {
+      const amount = (parseFloat(t.INCOME) || 0) + (parseFloat(t.EXPENSE) || 0);
+      return amount <= max;
+    });
+  }
+  
+  // Tag filter
+  if (tagFilter.value.trim()) {
+    const tags = tagFilter.value.split(',').map(tag => tag.trim().toLowerCase());
+    filteredTransactions = filteredTransactions.filter(t => {
+      if (!t.TAGS || !Array.isArray(t.TAGS)) return false;
+      return tags.every(tag => 
+        t.TAGS.some(t => t.toLowerCase().includes(tag))
+      );
+    });
+  }
+  
+  // Sorting
+  switch (sortBy.value) {
+    case "date-asc":
+      filteredTransactions.sort((a, b) => {
+        try {
+          return new Date(a.DATE) - new Date(b.DATE);
+        } catch (e) {
+          return 0;
+        }
+      });
+      break;
+    case "amount-desc":
+      filteredTransactions.sort((a, b) => {
+        const amountA = (parseFloat(a.INCOME) || 0) + (parseFloat(a.EXPENSE) || 0);
+        const amountB = (parseFloat(b.INCOME) || 0) + (parseFloat(b.EXPENSE) || 0);
+        return amountB - amountA;
+      });
+      break;
+    case "amount-asc":
+      filteredTransactions.sort((a, b) => {
+        const amountA = (parseFloat(a.INCOME) || 0) + (parseFloat(a.EXPENSE) || 0);
+        const amountB = (parseFloat(b.INCOME) || 0) + (parseFloat(b.EXPENSE) || 0);
+        return amountA - amountB;
+      });
+      break;
+    case "category":
+      filteredTransactions.sort((a, b) => (a.ACCOUNT_HEADER || "").localeCompare(b.ACCOUNT_HEADER || ""));
+      break;
+    case "bank":
+      filteredTransactions.sort((a, b) => (a.BANK_NAME || "").localeCompare(b.BANK_NAME || ""));
+      break;
+    default: // date-desc
+      filteredTransactions.sort((a, b) => {
+        try {
+          return new Date(b.DATE) - new Date(a.DATE);
+        } catch (e) {
+          return 0;
+        }
+      });
+      break;
+  }
+  
+  // Grouping
+  if (groupBy.value !== "none") {
+    // Grouping will be handled in the table render function
+  }
+
+  currentPage = 1;
+  buildTable();
+  updateStats();
+  updateSelectedSummary();
+  updateFilterSummary();
+  saveAppState();
+}
+
+// Optimized table building
+function buildTable(){
+  if (filteredTransactions.length === 0) {
+    transactionsTableBody.innerHTML = `
+      <tr>
+        <td colspan="13" class="text-center text-muted py-5">
+          <div class="empty-state">
+            <div class="empty-state-icon">
+              <i class="fa fa-exchange-alt"></i>
+            </div>
+            <h5>No transactions found</h5>
+            <p class="text-muted">Try changing your filters or add a new transaction.</p>
+            <button class="btn btn-primary mt-2" onclick="openAddModal()">
+              <i class="fa fa-plus me-1"></i> Add Transaction
+            </button>
+          </div>
+        </td>
+      </tr>`;
+    paginationControls.innerHTML = "";
+    return;
+  }
+
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = Math.min(startIndex + rowsPerPage, filteredTransactions.length);
+  const pageTransactions = filteredTransactions.slice(startIndex, endIndex);
+
+  let html = "";
+  
+  // Handle grouping
+  if (groupBy.value !== "none") {
+    const groups = {};
+    pageTransactions.forEach(tx => {
+      const groupKey = tx[groupBy.value.toUpperCase()] || tx[groupBy.value] || "Uncategorized";
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
+      }
+      groups[groupKey].push(tx);
+    });
+    
+    Object.entries(groups).forEach(([groupName, groupTransactions]) => {
+      html += `
+        <tr class="table-group">
+          <td colspan="13" style="background: rgba(111, 66, 193, 0.1); font-weight: 600;">
+            ${groupBy.value}: ${escapeHtml(groupName)}
+            <small class="float-end">${groupTransactions.length} transactions</small>
+          </td>
+        </tr>
+      `;
+      
+      html += groupTransactions.map(tx => renderTableRow(tx)).join('');
+    });
+  } else {
+    pageTransactions.forEach(tx => {
+      html += renderTableRow(tx);
+    });
+  }
+  
+  transactionsTableBody.innerHTML = html;
+
+  // Add event listeners with event delegation
+  transactionsTableBody.addEventListener("click", handleTableClick);
+  transactionsTableBody.addEventListener("change", handleTableChange);
+
+  // Build pagination
+  buildPagination();
+}
+
+function renderTableRow(tx) {
+  const date = tx.DATE ? formatDateToYyyyMmmDd(tx.DATE) : "";
+  const income = parseFloat(tx.INCOME) || 0;
+  const expense = parseFloat(tx.EXPENSE) || 0;
+  const balance = parseFloat(tx.BALANCE) || 0;
+  const isSelected = selectedTransactions.has(tx.id);
+  
+  const incomeDisplay = income > 0 ? `<span class="income-color">$${income.toFixed(2)}</span>` : "$0.00";
+  const expenseDisplay = expense > 0 ? `<span class="expense-color">$${expense.toFixed(2)}</span>` : "$0.00";
+  const balanceDisplay = balanceVisible ? `$${balance.toFixed(2)}` : "••••";
+  
+  let badgeClass = '';
+  let badgeText = tx.TYPE;
+  if (tx.TYPE === 'Income') badgeClass = 'badge-income';
+  else if (tx.TYPE === 'Expense') badgeClass = 'badge-expense';
+  else if (tx.TYPE === 'Transfer') badgeClass = 'badge-transfer';
+  
+  if (tx.RECURRING) {
+    badgeClass = 'badge-recurring';
+    badgeText = 'Recurring';
+  }
+  
+  // Highlight search term
+  let description = escapeHtml(tx.DESCRIPTION || tx.NOTES || "");
+  if (searchDesc.value.trim()) {
+    const term = searchDesc.value.trim();
+    const regex = new RegExp(`(${term})`, 'gi');
+    description = description.replace(regex, '<span class="highlight">$1</span>');
+  }
+  
+  // Render tags
+  let tagsHtml = '';
+  if (tx.TAGS && tx.TAGS.length > 0) {
+    tagsHtml = tx.TAGS.map(tag => `
+      <span class="tag">
+        ${escapeHtml(tag)}
+        <button class="tag-remove" onclick="removeTagFromTransaction('${tx.id}', '${tag}')">
+          <i class="fa fa-times"></i>
+        </button>
+      </span>
+    `).join('');
+  }
+  
+  return `
+    <tr class="${isSelected ? 'selected' : ''}" data-id="${tx.id}">
+      <td>
+        <input type="checkbox" class="transaction-checkbox row-checkbox" data-id="${tx.id}" ${isSelected ? 'checked' : ''}>
+        <i class="fa fa-grip-vertical drag-handle ms-1" title="Drag to reorder"></i>
+      </td>
+      <td>${date}</td>
+      <td>${escapeHtml(tx.ACCOUNT_HEADER || "-")}</td>
+      <td>${description}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td>${escapeHtml(tx.SINO || "")}</td>
+      <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
+      <td style="text-align:right;">${incomeDisplay}</td>
+      <td style="text-align:right;">${expenseDisplay}</td>
+      <td style="text-align:right;">${balanceDisplay}</td>
+      <td>
+        <div class="tag-container">
+          ${tagsHtml}
+        </div>
+      </td>
+      <td>
+        ${
+          tx.ATTACHMENT
+            ? `<button class="btn btn-sm btn-outline-primary view-attachment" data-attachment="${escapeHtml(tx.ATTACHMENT)}">
+                <i class="fa fa-paperclip"></i> View
+              </button>`
+            : `<span class="text-muted">None</span>`
+        }
+      </td>
+      <td>
+        <div class="d-flex gap-1">
+          <button class="action-btn btn-view view-tx" data-id="${tx.id}" title="View"><i class="fa fa-eye"></i></button>
+          <button class="action-btn btn-edit edit-tx" data-id="${tx.id}" title="Edit"><i class="fa fa-edit"></i></button>
+          <button class="action-btn btn-duplicate duplicate-tx" data-id="${tx.id}" title="Duplicate"><i class="fa fa-copy"></i></button>
+          ${tx.RECURRING ? '<button class="action-btn btn-recurring" data-id="${tx.id}" title="Recurring"><i class="fa fa-redo"></i></button>' : ''}
+          <button class="action-btn btn-del delete-tx" data-id="${tx.id}" title="Delete"><i class="fa fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function handleTableClick(e) {
+  const target = e.target;
+  const button = target.closest("button");
+  
+  if (!button) return;
+  
+  if (button.classList.contains("view-tx")) {
+    const id = button.getAttribute("data-id");
+    viewTransaction(id);
+  } else if (button.classList.contains("edit-tx")) {
+    const id = button.getAttribute("data-id");
+    editTransaction(id);
+  } else if (button.classList.contains("delete-tx")) {
+    const id = button.getAttribute("data-id");
+    confirmDelete(id);
+  } else if (button.classList.contains("duplicate-tx")) {
+    const id = button.getAttribute("data-id");
+    duplicateTransactionById(id);
+  } else if (button.classList.contains("view-attachment")) {
+    const attachment = button.getAttribute("data-attachment");
+    viewAttachment(attachment);
+  }
+}
+
+function handleTableChange(e) {
+  if (e.target.classList.contains("row-checkbox")) {
+    const id = e.target.getAttribute("data-id");
+    const row = e.target.closest("tr");
+    
+    if (e.target.checked) {
+      selectedTransactions.add(id);
+      row.classList.add("selected");
+    } else {
+      selectedTransactions.delete(id);
+      row.classList.remove("selected");
+      selectAllCheckbox.checked = false;
+    }
+    
+    updateBulkActions();
+    updateSelectedSummary();
+  }
+}
+
+function buildPagination() {
+  const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+  if (totalPages <= 1) {
+    paginationControls.innerHTML = "";
+    return;
+  }
+
+  let html = `<nav><ul class="pagination pagination-sm">`;
+
+  html += `
+    <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+      <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+    </li>
+  `;
+
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, startPage + 4);
+
+  for (let i = startPage; i <= endPage; i++) {
+    html += `
+      <li class="page-item ${i === currentPage ? 'active' : ''}">
+        <a class="page-link" href="#" data-page="${i}">${i}</a>
+      </li>
+    `;
+  }
+
+  html += `
+    <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+      <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
+    </li>
+  `;
+
+  paginationControls.innerHTML = html;
+
+  // Event delegation for pagination
+  paginationControls.addEventListener("click", function(e) {
+    const link = e.target.closest(".page-link");
+    if (link) {
+      e.preventDefault();
+      const page = parseInt(link.getAttribute("data-page"));
+      if (page && page !== currentPage && page > 0 && page <= totalPages) {
+        currentPage = page;
+        buildTable();
+        saveAppState();
+      }
+    }
+  });
+}
+
+function updateStats(){
+  const totalIncome = filteredTransactions.reduce((s, t) => s + (parseFloat(t.INCOME) || 0), 0);
+  const totalExpense = filteredTransactions.reduce((s, t) => s + (parseFloat(t.EXPENSE) || 0), 0);
+  const balance = totalIncome - totalExpense;
+  
+  statIncome.textContent = `$${totalIncome.toFixed(2)}`;
+  statExpense.textContent = `$${totalExpense.toFixed(2)}`;
+  statBalance.textContent = balanceVisible ? `$${balance.toFixed(2)}` : '••••';
+  statCount.textContent = filteredTransactions.length;
+  
+  statIncome.className = "stat-value income-color";
+  statExpense.className = "stat-value expense-color";
+}
+
+function updateSelectedSummary() {
+  const count = selectedTransactions.size;
+  if (count === 0) {
+    selectedSummary.innerHTML = "No transactions selected";
+    return;
+  }
+  
+  let totalIncome = 0;
+  let totalExpense = 0;
+  
+  selectedTransactions.forEach(id => {
+    const tx = allTransactions.find(t => t.id === id);
+    if (tx) {
+      totalIncome += parseFloat(tx.INCOME) || 0;
+      totalExpense += parseFloat(tx.EXPENSE) || 0;
+    }
+  });
+  
+  const net = totalIncome - totalExpense;
+  
+  selectedSummary.innerHTML = `
+    <div class="row">
+      <div class="col-4">Selected: <strong>${count}</strong></div>
+      <div class="col-4">Income: <strong class="text-success">$${totalIncome.toFixed(2)}</strong></div>
+      <div class="col-4">Expense: <strong class="text-danger">$${totalExpense.toFixed(2)}</strong></div>
+    </div>
+    <div class="row mt-1">
+      <div class="col-12">Net: <strong class="${net >= 0 ? 'text-success' : 'text-danger'}">$${net.toFixed(2)}</strong></div>
+    </div>
+  `;
+}
+
+function updateFilterSummary() {
+  const count = filteredTransactions.length;
+  const total = allTransactions.length;
+  const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+  
+  filterSummary.innerHTML = `
+    Showing ${count} of ${total} transactions (${percentage}%)
+    ${dateFilter.value !== 'all' ? `<br><small>Date filter: ${dateFilter.options[dateFilter.selectedIndex].text}</small>` : ''}
+    ${typeFilter.value !== 'all' ? `<br><small>Type: ${typeFilter.options[typeFilter.selectedIndex].text}</small>` : ''}
+    ${searchDesc.value ? `<br><small>Search: "${searchDesc.value}"</small>` : ''}
+  `;
+}
+
+// Optimized modal opening
+async function openAddModal(){
+  showLoading("Loading form...");
+  
+  try {
+    txIdInput.value = "";
+    form.reset();
+    formDATE.value = new Date().toISOString().split('T')[0];
+    formTYPE.value = "Income";
+    formVOUCHERTYPE.value = "Payment";
+    formTIME.disabled = true;
+    includeTimeCheckbox.checked = false;
+    formCURRENCY.value = "USD";
+    formSTATUS.value = "completed";
+    formTAGS.value = "";
+    tagsPreview.innerHTML = "";
+    recurringOptions.style.display = "none";
+    
+    // Generate voucher number (non-blocking)
+    const voucherNumber = await getNextVoucherNumber(formVOUCHERTYPE.value);
+    formSINO.value = voucherNumber;
+    
+    formINCOME.value = "";
+    formEXPENSE.value = "";
+    formBALANCE.value = "";
+    formNOTES.value = "";
+    formDESCRIPTION.value = "";
+    formATTACH.value = "";
+    attachmentPreview.style.display = "none";
+    attachmentInfo.textContent = "";
+    uploadProgress.style.display = "none";
+    
+    Array.from(form.elements).forEach(el => el.disabled = false);
+    formTIME.disabled = true;
+    saveTransactionBtn.style.display = "block";
+    saveTransactionBtn.disabled = false;
+    saveTransactionBtn.innerHTML = 'Save Transaction';
+
+    formVOUCHERTYPE.addEventListener("change", async function() {
+      if (!txIdInput.value) {
+        formSINO.value = await getNextVoucherNumber(this.value);
+      }
+    }, { once: true });
+    
+    updateFormFields();
+    
+    document.getElementById("transactionModalLabel").textContent = "Add Transaction";
+    duplicateTransactionBtn.style.display = "none";
+    makeRecurringBtn.style.display = "inline-block";
+    
+    // Hide loading and show modal
+    setTimeout(() => {
+      hideLoading();
+      transactionModal.show();
+    }, 100);
+    
+  } catch (error) {
+    hideLoading();
+    console.error("Error opening modal:", error);
+    Swal.fire({ 
+      icon: 'error', 
+      title: 'Error', 
+      text: 'Failed to load form. Please try again.' 
+    });
+  }
+}
+
+function viewTransaction(id){
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  showLoading("Loading transaction...");
+  
+  setTimeout(() => {
+    txIdInput.value = tx.id;
+    formDATE.value = tx.DATE || "";
+    formSINO.value = tx.SINO || "";
+    formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+    formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
+    formTYPE.value = tx.TYPE || "Income";
+    formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+    formINCOME.value = tx.INCOME || "";
+    formEXPENSE.value = tx.EXPENSE || "";
+    formBALANCE.value = tx.BALANCE || "";
+    formNOTES.value = tx.NOTES || "";
+    formDESCRIPTION.value = tx.DESCRIPTION || "";
+    formCURRENCY.value = tx.CURRENCY || "USD";
+    formSTATUS.value = tx.STATUS || "completed";
+    formTAGS.value = tx.TAGS ? tx.TAGS.join(', ') : "";
+    updateTagsPreview();
+    
+    if (tx.TIME) {
+      formTIME.value = tx.TIME;
+      includeTimeCheckbox.checked = true;
+      formTIME.disabled = false;
+    } else {
+      formTIME.value = "";
+      includeTimeCheckbox.checked = false;
+      formTIME.disabled = true;
+    }
+    
+    if (tx.ATTACHMENT) {
+      attachmentInfo.textContent = "Attachment: " + tx.ATTACHMENT;
+    } else {
+      attachmentInfo.textContent = "";
+    }
+    
+    if (tx.RECURRING) {
+      recurringOptions.style.display = "block";
+      document.getElementById("formRECURRING_FREQ").value = tx.RECURRING.frequency || "monthly";
+      document.getElementById("formRECURRING_INTERVAL").value = tx.RECURRING.interval || 1;
+      document.getElementById("formRECURRING_ENDDATE").value = tx.RECURRING.endDate || "";
+    } else {
+      recurringOptions.style.display = "none";
+    }
+    
+    updateFormFields();
+    
+    document.getElementById("transactionModalLabel").textContent = "View Transaction";
+    
+    Array.from(form.elements).forEach(el => el.disabled = true);
+    saveTransactionBtn.style.display = "none";
+    duplicateTransactionBtn.style.display = "inline-block";
+    makeRecurringBtn.style.display = tx.RECURRING ? "none" : "inline-block";
+    
+    hideLoading();
+    transactionModal.show();
+  }, 100);
+}
+
+function editTransaction(id){
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  showLoading("Loading transaction...");
+  
+  setTimeout(() => {
+    txIdInput.value = tx.id;
+    formDATE.value = tx.DATE || "";
+    formSINO.value = tx.SINO || "";
+    formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+    formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
+    formTYPE.value = tx.TYPE || "Income";
+    formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+    formINCOME.value = tx.INCOME || "";
+    formEXPENSE.value = tx.EXPENSE || "";
+    formBALANCE.value = tx.BALANCE || "";
+    formNOTES.value = tx.NOTES || "";
+    formDESCRIPTION.value = tx.DESCRIPTION || "";
+    formCURRENCY.value = tx.CURRENCY || "USD";
+    formSTATUS.value = tx.STATUS || "completed";
+    formTAGS.value = tx.TAGS ? tx.TAGS.join(', ') : "";
+    updateTagsPreview();
+    
+    if (tx.TIME) {
+      formTIME.value = tx.TIME;
+      includeTimeCheckbox.checked = true;
+      formTIME.disabled = false;
+    } else {
+      formTIME.value = "";
+      includeTimeCheckbox.checked = false;
+      formTIME.disabled = true;
+    }
+    
+    if (tx.ATTACHMENT) {
+      attachmentInfo.textContent = "Current: " + tx.ATTACHMENT;
+    } else {
+      attachmentInfo.textContent = "";
+    }
+    
+    if (tx.RECURRING) {
+      recurringOptions.style.display = "block";
+      document.getElementById("formRECURRING_FREQ").value = tx.RECURRING.frequency || "monthly";
+      document.getElementById("formRECURRING_INTERVAL").value = tx.RECURRING.interval || 1;
+      document.getElementById("formRECURRING_ENDDATE").value = tx.RECURRING.endDate || "";
+    } else {
+      recurringOptions.style.display = "none";
+    }
+    
+    updateFormFields();
+    
+    document.getElementById("transactionModalLabel").textContent = "Edit Transaction";
+    
+    Array.from(form.elements).forEach(el => el.disabled = false);
+    formTIME.disabled = !includeTimeCheckbox.checked;
+    saveTransactionBtn.style.display = "block";
+    saveTransactionBtn.disabled = false;
+    saveTransactionBtn.innerHTML = 'Save Transaction';
+    duplicateTransactionBtn.style.display = "inline-block";
+    makeRecurringBtn.style.display = tx.RECURRING ? "none" : "inline-block";
+    
+    hideLoading();
+    transactionModal.show();
+  }, 100);
+}
+
+function updateFormFields() {
+  const type = formTYPE.value;
+  const incomeInput = document.getElementById("formINCOME");
+  const expenseInput = document.getElementById("formEXPENSE");
+  
+  if (type === "Income") {
+    incomeInput.disabled = false;
+    incomeInput.required = true;
+    expenseInput.disabled = true;
+    expenseInput.value = "";
+    expenseInput.required = false;
+  } else if (type === "Expense") {
+    incomeInput.disabled = true;
+    incomeInput.value = "";
+    incomeInput.required = false;
+    expenseInput.disabled = false;
+    expenseInput.required = true;
+  } else {
+    incomeInput.disabled = false;
+    expenseInput.disabled = false;
+    incomeInput.required = false;
+    expenseInput.required = false;
+  }
+}
+
+function updateTagsPreview() {
+  const tags = formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+  tagsPreview.innerHTML = tags.map(tag => `
+    <span class="tag">
+      ${escapeHtml(tag)}
+      <button type="button" class="tag-remove" onclick="removeTagFromInput('${tag}')">
+        <i class="fa fa-times"></i>
+      </button>
+    </span>
+  `).join('');
+}
+
+function removeTagFromInput(tagToRemove) {
+  const tags = formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag && tag !== tagToRemove);
+  formTAGS.value = tags.join(', ');
+  updateTagsPreview();
+}
+
+async function removeTagFromTransaction(transactionId, tagToRemove) {
+  try {
+    const tx = allTransactions.find(t => t.id === transactionId);
+    if (!tx) return;
+    
+    const updatedTags = tx.TAGS.filter(tag => tag !== tagToRemove);
+    
+    await updateDoc(doc(db, "users", currentUser.uid, "transactions", transactionId), {
+      TAGS: updatedTags
+    });
+    
+    showToast("Tag removed successfully", "success");
+    await loadTransactions();
+  } catch (error) {
+    console.error("Error removing tag:", error);
+    showToast("Failed to remove tag", "error");
+  }
+}
+
+function confirmDelete(id){
+  txToDelete = id;
+  confirmDeleteModal.show();
+}
+
+function resetSaveButton() {
+  isSubmitting = false;
+  saveTransactionBtn.disabled = false;
+  saveTransactionBtn.innerHTML = 'Save Transaction';
+}
+
+// File attachment handling with Firebase Storage
+formATTACHFILE.addEventListener("change", async function () {
+  const file = this.files[0];
+  if (!file) return;
+  
+  if (file.size > 10 * 1024 * 1024) {
+    Swal.fire({ icon: 'error', title: 'File too large', text: 'Please select a file smaller than 10MB' });
+    this.value = '';
+    return;
+  }
+
+  try {
+    uploadProgress.style.display = "block";
+    uploadProgressBar.style.width = "0%";
+    
+    // Simulate upload progress
+    const progressInterval = setInterval(() => {
+      if (uploadProgressBar.style.width === "100%") {
+        clearInterval(progressInterval);
+      } else {
+        const currentWidth = parseInt(uploadProgressBar.style.width) || 0;
+        uploadProgressBar.style.width = Math.min(currentWidth + 10, 100) + "%";
+      }
+    }, 200);
+    
+    // Create a unique filename
+    const fileName = `${Date.now()}_${file.name}`;
+    const storageRef = ref(storage, `users/${currentUser.uid}/attachments/${fileName}`);
+    
+    // Upload file to Firebase Storage
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    
+    clearInterval(progressInterval);
+    uploadProgressBar.style.width = "100%";
+    
+    setTimeout(() => {
+      formATTACH.value = downloadURL;
+      attachmentInfo.textContent = "Uploaded: " + file.name;
+      
+      if (file.type.startsWith('image/')) {
+        attachmentPreview.src = URL.createObjectURL(file);
+        attachmentPreview.style.display = "block";
+      } else {
+        attachmentPreview.style.display = "none";
+      }
+      
+      uploadProgress.style.display = "none";
+    }, 500);
+    
+  } catch (err) {
+    console.error("Upload failed", err);
+    uploadProgress.style.display = "none";
+    Swal.fire({ 
+      icon: 'error', 
+      title: 'Upload failed', 
+      text: 'Could not upload attachment' 
+    });
+    this.value = '';
+  }
+});
+
+function viewAttachment(attachmentUrl) {
+  if (!attachmentUrl) return;
+
+  const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(attachmentUrl) || attachmentUrl.startsWith('data:image') || attachmentUrl.includes('firebasestorage');
+  const isPDF = /\.(pdf)$/i.test(attachmentUrl) || attachmentUrl.includes('.pdf');
+  const isDocument = /\.(doc|docx|xls|xlsx|txt)$/i.test(attachmentUrl);
+
+  attachmentModalBody.innerHTML = `
+    <div class="mb-3">
+      <h6>Attachment Preview</h6>
+      ${isImage 
+        ? `<img src="${attachmentUrl}" class="img-fluid" style="max-height: 400px;" />`
+        : isPDF
+          ? `<iframe src="${attachmentUrl}" width="100%" height="400px"></iframe>`
+          : isDocument
+            ? `<div class="alert alert-info">Document files can be downloaded but not previewed</div>`
+            : `<div class="alert alert-info">File type not supported for preview</div>`
+      }
+    </div>
+    <div>
+      <a class="btn btn-primary" href="${attachmentUrl}" download target="_blank">
+        <i class="fa fa-download me-1"></i> Download
+      </a>
+    </div>
+  `;
+
+  attachmentModal.show();
+}
+
+// Quick Add processing
+async function processQuickAdd() {
+  const text = quickAddInput.value.trim();
+  if (!text) {
+    Swal.fire({ icon: 'warning', title: 'Input required', text: 'Please enter a transaction description' });
+    return;
+  }
+
+  try {
+    loadingMessage.textContent = "Processing your request...";
+    loadingModal.show();
+    
+    const parsedData = parseQuickAddInput(text);
+    
+    if (!parsedData.amount) {
+      loadingModal.hide();
+      Swal.fire({ icon: 'warning', title: 'Invalid Input', text: 'Could not detect an amount in your input' });
+      return;
+    }
+
+    const txData = {
+      DATE: parsedData.date || new Date().toISOString().split('T')[0],
+      SINO: "",
+      ACCOUNT_HEADER: parsedData.accountHeader,
+      BANK_NAME: parsedData.bankName,
+      MODE: parsedData.bankName,
+      VOUCHER_TYPE: parsedData.voucherType,
+      TYPE: parsedData.type,
+      INCOME: parsedData.type === "Income" ? parsedData.amount : 0,
+      EXPENSE: parsedData.type === "Expense" ? parsedData.amount : 0,
+      BALANCE: 0,
+      DESCRIPTION: parsedData.description,
+      NOTES: "Quick add transaction",
+      TAGS: parsedData.tags || [],
+      STATUS: "completed",
+      CURRENCY: "USD",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: currentUser.uid
+    };
+
+    if (parsedData.type === "Transfer") {
+      const fromTx = {
+        ...txData,
+        SINO: await getNextVoucherNumber("Transfer"),
+        ACCOUNT_HEADER: parsedData.fromBank,
+        BANK_NAME: parsedData.fromBank,
+        MODE: parsedData.fromBank,
+        EXPENSE: parsedData.amount,
+        INCOME: 0,
+        DESCRIPTION: `Transfer to ${parsedData.toBank}`
+      };
+      
+      const toTx = {
+        ...txData,
+        SINO: await getNextVoucherNumber("Transfer"),
+        ACCOUNT_HEADER: parsedData.toBank,
+        BANK_NAME: parsedData.toBank,
+        MODE: parsedData.toBank,
+        INCOME: parsedData.amount,
+        EXPENSE: 0,
+        DESCRIPTION: `Transfer from ${parsedData.fromBank}`
+      };
+      
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), fromTx);
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), toTx);
+      
+      loadingModal.hide();
+      showToast("Transfer completed successfully", "success");
+    } else {
+      const voucherNumber = await getNextVoucherNumber(parsedData.voucherType);
+      txData.SINO = voucherNumber;
+      
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+      loadingModal.hide();
+      showToast("Transaction added successfully", "success");
+    }
+    
+    quickAddModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("Quick add error", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add transaction' });
+  }
+}
+
+function parseQuickAddInput(text) {
+  const lowerText = text.toLowerCase();
+  let amount = 0;
+  let type = "";
+  let accountHeader = "";
+  let bankName = "";
+  let description = text;
+  let date = null;
+  let fromBank = "";
+  let toBank = "";
+  let tags = [];
+  
+  // Extract amount
+  const amountMatch = text.match(/(\d+)(\.\d+)?/);
+  if (amountMatch) {
+    amount = parseFloat(amountMatch[0]);
+  }
+  
+  // Extract date
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  if (lowerText.includes('today')) {
+    date = today.toISOString().split('T')[0];
+  } else if (lowerText.includes('yesterday')) {
+    date = yesterday.toISOString().split('T')[0];
+  } else {
+    const relativeDateMatch = lowerText.match(/(\d+) days? ago/);
+    if (relativeDateMatch) {
+      const daysAgo = parseInt(relativeDateMatch[1]);
+      const pastDate = new Date(today);
+      pastDate.setDate(pastDate.getDate() - daysAgo);
+      date = pastDate.toISOString().split('T')[0];
+    }
+    
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    for (let i = 0; i < monthNames.length; i++) {
+      if (lowerText.includes(monthNames[i])) {
+        const dayMatch = lowerText.match(/(\d+)(?:st|nd|rd|th)?/);
+        if (dayMatch) {
+          const day = parseInt(dayMatch[1]);
+          const year = today.getFullYear();
+          const month = i;
+          date = new Date(year, month, day).toISOString().split('T')[0];
+          break;
+        }
+      }
+    }
+  }
+
+  // Determine transaction type
+  if (lowerText.includes('transfer') && lowerText.includes('from') && lowerText.includes('to')) {
+    type = "Transfer";
+    const transferMatch = lowerText.match(/transfer.*?(\d+).*?from (.*?) to (.*)/);
+    if (transferMatch) {
+      amount = parseFloat(transferMatch[1]);
+      fromBank = findMatchingBank(transferMatch[2]);
+      toBank = findMatchingBank(transferMatch[3]);
+      description = `Transfer from ${fromBank} to ${toBank}`;
+    }
+  } else if (lowerText.includes('add') || lowerText.includes('receive') || lowerText.includes('income') || 
+      lowerText.includes('deposit') || lowerText.includes('credit')) {
+    type = "Income";
+  } else if (lowerText.includes('spent') || lowerText.includes('spend') || lowerText.includes('pay') || 
+             lowerText.includes('expense') || lowerText.includes('debit') || lowerText.includes('withdraw')) {
+    type = "Expense";
+  }
+
+  if (type !== "Transfer") {
+    // Extract bank name
+    for (const bank of coaBanks) {
+      if (lowerText.includes(bank.toLowerCase())) {
+        bankName = bank;
+        break;
+      }
+    }
+
+    // Extract account header
+    for (const account of coaAccounts) {
+      if (lowerText.includes(account.toLowerCase())) {
+        accountHeader = account;
+        break;
+      }
+    }
+
+    // Extract tags
+    const commonTags = ['business', 'personal', 'travel', 'food', 'entertainment', 'shopping', 'bills', 'utilities'];
+    commonTags.forEach(tag => {
+      if (lowerText.includes(tag)) {
+        tags.push(tag);
+      }
+    });
+
+    if (!accountHeader) {
+      if (lowerText.includes('petrol') || lowerText.includes('fuel') || lowerText.includes('gas')) {
+        accountHeader = "Fuel";
+      } else if (lowerText.includes('food') || lowerText.includes('meal') || lowerText.includes('restaurant')) {
+        accountHeader = "Meals & Entertainment";
+      } else if (lowerText.includes('rent') || lowerText.includes('house') || lowerText.includes('apartment')) {
+        accountHeader = "Rent";
+      } else if (lowerText.includes('shopping') || lowerText.includes('store') || lowerText.includes('buy')) {
+        accountHeader = "Shopping";
+      } else if (bankName) {
+        accountHeader = bankName;
+      } else {
+        accountHeader = "Miscellaneous";
+      }
+    }
+
+    if (!bankName && lowerText.includes('cash')) {
+      bankName = "Cash";
+    }
+  }
+
+  let voucherType = "Payment";
+  if (type === "Income") voucherType = "Receipt";
+  else if (type === "Transfer") voucherType = "Transfer";
+
+  return {
+    amount,
+    type,
+    accountHeader,
+    bankName,
+    description,
+    date,
+    voucherType,
+    fromBank,
+    toBank,
+    tags
+  };
+}
+
+function findMatchingBank(bankText) {
+  for (const bank of coaBanks) {
+    if (bank.toLowerCase().includes(bankText.trim().toLowerCase()) || 
+        bankText.trim().toLowerCase().includes(bank.toLowerCase())) {
+      return bank;
+    }
+  }
+  return bankText;
+}
+
+// Theme functions
+function toggleTheme() {
+  currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+  localStorage.setItem('theme', currentTheme);
+  
+  if (mainChart) {
+    renderMainChart();
+  }
+}
+
+function loadThemePreference() {
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme) {
+    currentTheme = savedTheme;
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+  }
+}
+
+// Export functions
+function exportToCSV() {
+  if (filteredTransactions.length === 0) {
+    Swal.fire({ icon: 'warning', title: 'No Data', text: 'There are no transactions to export.' });
+    return;
+  }
+  
+  const headers = ['Date', 'Account Header', 'Description', 'Type', 'Voucher #', 'Bank Name', 'Income', 'Expense', 'Balance', 'Currency', 'Status', 'Tags'];
+  
+  let csvContent = headers.join(',') + '\n';
+  
+  filteredTransactions.forEach(tx => {
+    const row = [
+      tx.DATE || '',
+      tx.ACCOUNT_HEADER || '',
+      `"${(tx.DESCRIPTION || tx.NOTES || '').replace(/"/g, '""')}"`,
+      tx.TYPE || '',
+      tx.SINO || '',
+      tx.BANK_NAME || tx.MODE || '',
+      tx.INCOME || 0,
+      tx.EXPENSE || 0,
+      tx.BALANCE || 0,
+      tx.CURRENCY || '',
+      tx.STATUS || '',
+      tx.TAGS ? `"${tx.TAGS.join(', ')}"` : ''
+    ];
+    csvContent += row.join(',') + '\n';
+  });
+  
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  
+  link.setAttribute('href', url);
+  link.setAttribute('download', `transactions_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  showToast("CSV exported successfully", "success");
+}
+
+function exportToExcel() {
+  if (filteredTransactions.length === 0) {
+    Swal.fire({ icon: 'warning', title: 'No Data', text: 'There are no transactions to export.' });
+    return;
+  }
+  
+  // Create worksheet
+  const wsData = [
+    ['Date', 'Account Header', 'Description', 'Type', 'Voucher #', 'Bank Name', 'Income', 'Expense', 'Balance', 'Currency', 'Status', 'Tags'],
+    ...filteredTransactions.map(tx => [
+      tx.DATE || '',
+      tx.ACCOUNT_HEADER || '',
+      tx.DESCRIPTION || tx.NOTES || '',
+      tx.TYPE || '',
+      tx.SINO || '',
+      tx.BANK_NAME || tx.MODE || '',
+      tx.INCOME || 0,
+      tx.EXPENSE || 0,
+      tx.BALANCE || 0,
+      tx.CURRENCY || '',
+      tx.STATUS || '',
+      tx.TAGS ? tx.TAGS.join(', ') : ''
+    ])
+  ];
+  
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+  
+  // Generate and download
+  const fileName = `transactions_${new Date().toISOString().split('T')[0]}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  
+  showToast("Excel file exported successfully", "success");
+}
+
+// Save/Load app state
+function saveAppState() {
+  const state = {
+    currentPage: currentPage,
+    dateFilter: dateFilter.value,
+    typeFilter: typeFilter.value,
+    bankFilter: bankFilter.value,
+    categoryFilter: categoryFilter.value,
+    statusFilter: statusFilter.value,
+    searchDesc: searchDesc.value,
+    startDate: startDateInput.value,
+    endDate: endDateInput.value,
+    minAmount: minAmount.value,
+    maxAmount: maxAmount.value,
+    tagFilter: tagFilter.value,
+    sortBy: sortBy.value,
+    groupBy: groupBy.value,
+    balanceVisible: balanceVisible,
+    theme: currentTheme
+  };
+  localStorage.setItem('budgetAppState', JSON.stringify(state));
+}
+
+function loadAppState() {
+  const savedState = localStorage.getItem('budgetAppState');
+  if (savedState) {
+    const state = JSON.parse(savedState);
+    currentPage = state.currentPage || 1;
+    dateFilter.value = state.dateFilter || "all";
+    typeFilter.value = state.typeFilter || "all";
+    bankFilter.value = state.bankFilter || "all";
+    categoryFilter.value = state.categoryFilter || "all";
+    statusFilter.value = state.statusFilter || "all";
+    searchDesc.value = state.searchDesc || "";
+    startDateInput.value = state.startDate || "";
+    endDateInput.value = state.endDate || "";
+    minAmount.value = state.minAmount || "";
+    maxAmount.value = state.maxAmount || "";
+    tagFilter.value = state.tagFilter || "";
+    sortBy.value = state.sortBy || "date-desc";
+    groupBy.value = state.groupBy || "none";
+    balanceVisible = state.balanceVisible || false;
+    
+    if (state.theme) {
+      currentTheme = state.theme;
+      document.documentElement.setAttribute('data-theme', currentTheme);
+      themeToggle.innerHTML = currentTheme === 'light' ? '<i class="fa fa-moon"></i>' : '<i class="fa fa-sun"></i>';
+    }
+    
+    if (dateFilter.value === "custom") {
+      customRangeControls.style.display = "flex";
+    }
+    updateBalanceDisplay();
+    
+    hasLoadedSavedState = true;
+  }
+}
