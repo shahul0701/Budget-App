@@ -3233,3 +3233,2690 @@ function applyFilters(){
 }
 
 
+
+// Function to reset save button state
+function resetSaveButton() {
+  isSubmitting = false;
+  saveTransactionBtn.disabled = false;
+  saveTransactionBtn.innerHTML = 'Save Transaction';
+}
+
+// Function to open add transaction modal
+function openAddModal(tx = null) {
+  // Reset form
+  form.reset();
+  txIdInput.value = "";
+  transactionModalLabel.textContent = tx ? "Edit Transaction" : "Add Transaction";
+  
+  // Set current date as default
+  const today = new Date().toISOString().split('T')[0];
+  formDATE.value = today;
+  
+  // Generate voucher number based on selected type
+  const defaultVoucherType = formVOUCHERTYPE.value || "Payment";
+  getNextVoucherNumber(defaultVoucherType).then(voucherNo => {
+    formSINO.value = voucherNo;
+  });
+  
+  // Set default currency from user preferences
+  if (tx) {
+    // Fill form with existing transaction data
+    txIdInput.value = tx.id;
+    formDATE.value = tx.DATE || today;
+    formSINO.value = tx.SINO || "";
+    formACCOUNTHEADER.value = tx.ACCOUNT_HEADER || "";
+    formVOUCHERTYPE.value = tx.VOUCHER_TYPE || "Payment";
+    formTYPE.value = tx.TYPE || "Expense";
+    formBANKNAME.value = tx.BANK_NAME || tx.MODE || "";
+    formINCOME.value = tx.INCOME || 0;
+    formEXPENSE.value = tx.EXPENSE || 0;
+    formBALANCE.value = tx.BALANCE || 0;
+    formDESCRIPTION.value = tx.DESCRIPTION || "";
+    formNOTES.value = tx.NOTES || "";
+    formSTATUS.value = tx.STATUS || "completed";
+    formCURRENCY.value = tx.CURRENCY || "USD";
+    formTAGS.value = (tx.TAGS && Array.isArray(tx.TAGS)) ? tx.TAGS.join(", ") : "";
+    formATTACH.value = tx.ATTACHMENT || "";
+    
+    if (tx.TIME) {
+      includeTimeCheckbox.checked = true;
+      formTIME.value = tx.TIME;
+      formTIME.disabled = false;
+    } else {
+      includeTimeCheckbox.checked = false;
+      formTIME.value = "";
+      formTIME.disabled = true;
+    }
+    
+    // Show/hide recurring options
+    if (tx.RECURRING) {
+      recurringOptions.style.display = "block";
+      document.getElementById("formRECURRING_FREQ").value = tx.RECURRING.frequency || "monthly";
+      document.getElementById("formRECURRING_INTERVAL").value = tx.RECURRING.interval || 1;
+      document.getElementById("formRECURRING_ENDDATE").value = tx.RECURRING.endDate || "";
+    } else {
+      recurringOptions.style.display = "none";
+    }
+    
+    // Update tags preview
+    updateTagsPreview();
+    
+    // Show attachment if exists
+    if (tx.ATTACHMENT) {
+      attachmentInfo.textContent = "File attached";
+      if (tx.ATTACHMENT.match(/\.(jpg|jpeg|png|gif)$/i)) {
+        attachmentPreview.src = tx.ATTACHMENT;
+        attachmentPreview.style.display = "block";
+      }
+    } else {
+      attachmentInfo.textContent = "";
+      attachmentPreview.style.display = "none";
+    }
+    
+    // Update form fields based on type
+    updateFormFields();
+  } else {
+    // Reset to defaults for new transaction
+    includeTimeCheckbox.checked = false;
+    formTIME.value = "";
+    formTIME.disabled = true;
+    recurringOptions.style.display = "none";
+    attachmentInfo.textContent = "";
+    attachmentPreview.style.display = "none";
+    tagsPreview.innerHTML = "";
+    
+    // Set default values
+    formTYPE.value = "Expense";
+    formVOUCHERTYPE.value = "Payment";
+    formSTATUS.value = "completed";
+    formINCOME.value = "";
+    formEXPENSE.value = "";
+    formBALANCE.value = "";
+    updateFormFields();
+  }
+  
+  transactionModal.show();
+}
+
+// Function to update form fields based on transaction type
+function updateFormFields() {
+  const type = formTYPE.value;
+  
+  // Show/hide fields based on type
+  if (type === "Income") {
+    formEXPENSE.value = "";
+    formEXPENSE.disabled = true;
+    formINCOME.disabled = false;
+  } else if (type === "Expense") {
+    formINCOME.value = "";
+    formINCOME.disabled = true;
+    formEXPENSE.disabled = false;
+  } else {
+    // For Transfer or Adjustment
+    formINCOME.disabled = false;
+    formEXPENSE.disabled = false;
+  }
+}
+
+// Function to update tags preview
+function updateTagsPreview() {
+  const tags = formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+  tagsPreview.innerHTML = "";
+  
+  tags.forEach(tag => {
+    const tagElement = document.createElement("span");
+    tagElement.className = "tag";
+    tagElement.innerHTML = `
+      ${tag}
+      <button type="button" class="tag-remove" onclick="removeTag('${tag}')">
+        <i class="fa fa-times"></i>
+      </button>
+    `;
+    tagsPreview.appendChild(tagElement);
+  });
+}
+
+// Function to remove tag from preview
+function removeTag(tagToRemove) {
+  const tags = formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+  const updatedTags = tags.filter(tag => tag !== tagToRemove);
+  formTAGS.value = updatedTags.join(", ");
+  updateTagsPreview();
+}
+
+// Function to build transactions table
+function buildTable() {
+  if (filteredTransactions.length === 0) {
+    transactionsTableBody.innerHTML = `
+      <tr><td colspan="13" class="text-center py-4 text-muted">
+        <i class="fa fa-inbox fa-2x mb-2 d-block"></i>
+        No transactions found
+      </td></tr>
+    `;
+    paginationControls.innerHTML = "";
+    return;
+  }
+  
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const endIdx = startIdx + rowsPerPage;
+  const pageTransactions = filteredTransactions.slice(startIdx, endIdx);
+  const searchTerm = searchDesc.value.trim().toLowerCase();
+  
+  // Clear table body
+  transactionsTableBody.innerHTML = "";
+  
+  // Handle grouping if enabled
+  let groupedTransactions = pageTransactions;
+  let groupHeaders = [];
+  
+  if (groupBy.value !== "none") {
+    const groups = {};
+    
+    pageTransactions.forEach(tx => {
+      let groupKey;
+      switch (groupBy.value) {
+        case "date":
+          groupKey = tx.DATE || "No Date";
+          break;
+        case "category":
+          groupKey = tx.ACCOUNT_HEADER || "Uncategorized";
+          break;
+        case "bank":
+          groupKey = tx.BANK_NAME || "No Bank";
+          break;
+        case "type":
+          groupKey = tx.TYPE || "Unknown";
+          break;
+        default:
+          groupKey = "Ungrouped";
+      }
+      
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(tx);
+    });
+    
+    groupedTransactions = [];
+    groupHeaders = Object.keys(groups);
+    
+    groupHeaders.forEach(header => {
+      // Add group header row
+      const groupRow = document.createElement("tr");
+      groupRow.className = "group-header bg-light";
+      groupRow.innerHTML = `
+        <td colspan="13" class="fw-bold">
+          <i class="fa fa-folder me-2"></i>
+          ${header} (${groups[header].length} transactions)
+        </td>
+      `;
+      transactionsTableBody.appendChild(groupRow);
+      
+      // Add transactions for this group
+      groups[header].forEach(tx => {
+        const row = createTransactionRow(tx, searchTerm);
+        transactionsTableBody.appendChild(row);
+      });
+    });
+  } else {
+    // No grouping
+    pageTransactions.forEach(tx => {
+      const row = createTransactionRow(tx, searchTerm);
+      transactionsTableBody.appendChild(row);
+    });
+  }
+  
+  // Update pagination
+  updatePagination();
+  
+  // Update select all checkbox
+  updateSelectAllCheckbox();
+}
+
+// Function to create a transaction row
+function createTransactionRow(tx, searchTerm = "") {
+  const row = document.createElement("tr");
+  row.dataset.id = tx.id;
+  
+  // Check if transaction is selected
+  const isSelected = selectedTransactions.has(tx.id);
+  
+  // Format date
+  const date = tx.DATE ? formatDateToYyyyMmmDd(tx.DATE) : "";
+  const time = tx.TIME || "";
+  const dateTimeDisplay = time ? `${date} ${time}` : date;
+  
+  // Calculate amount and balance
+  const income = parseFloat(tx.INCOME) || 0;
+  const expense = parseFloat(tx.EXPENSE) || 0;
+  const amount = income > 0 ? income : expense;
+  const balance = parseFloat(tx.BALANCE) || 0;
+  
+  // Highlight search term in description and notes
+  let description = escapeHtml(tx.DESCRIPTION || "");
+  let notes = escapeHtml(tx.NOTES || "");
+  
+  if (searchTerm) {
+    description = highlightText(description, searchTerm);
+    notes = highlightText(notes, searchTerm);
+  }
+  
+  // Create type badge
+  let typeBadge = "";
+  if (tx.RECURRING) {
+    typeBadge = '<span class="badge-recurring me-1"><i class="fa fa-redo me-1"></i>Recurring</span>';
+  }
+  
+  switch (tx.TYPE) {
+    case "Income":
+      typeBadge += '<span class="badge-income">Income</span>';
+      break;
+    case "Expense":
+      typeBadge += '<span class="badge-expense">Expense</span>';
+      break;
+    case "Transfer":
+      typeBadge += '<span class="badge-transfer">Transfer</span>';
+      break;
+    case "Adjustment":
+      typeBadge += '<span class="badge-transfer">Adjustment</span>';
+      break;
+  }
+  
+  // Create tags display
+  let tagsHtml = "";
+  if (tx.TAGS && Array.isArray(tx.TAGS) && tx.TAGS.length > 0) {
+    tagsHtml = tx.TAGS.map(tag => {
+      const highlightedTag = searchTerm ? highlightText(tag, searchTerm) : tag;
+      return `<span class="badge bg-secondary me-1">${highlightedTag}</span>`;
+    }).join("");
+  }
+  
+  // Create attachment button
+  let attachmentHtml = "";
+  if (tx.ATTACHMENT) {
+    const fileExt = tx.ATTACHMENT.split('.').pop().toLowerCase();
+    let fileIcon = "fa-file";
+    if (fileExt.match(/^(jpg|jpeg|png|gif)$/)) fileIcon = "fa-file-image";
+    else if (fileExt === "pdf") fileIcon = "fa-file-pdf";
+    else if (fileExt.match(/^(doc|docx)$/)) fileIcon = "fa-file-word";
+    else if (fileExt.match(/^(xls|xlsx)$/)) fileIcon = "fa-file-excel";
+    
+    attachmentHtml = `
+      <button class="btn btn-sm btn-outline-info" onclick="viewAttachment('${tx.id}')" title="View attachment">
+        <i class="fa ${fileIcon}"></i>
+      </button>
+    `;
+  }
+  
+  // Format currency
+  const currency = tx.CURRENCY || "USD";
+  const currencySymbol = getCurrencySymbol(currency);
+  
+  // Create row HTML
+  row.innerHTML = `
+    <td>
+      <input type="checkbox" class="transaction-checkbox" data-id="${tx.id}" ${isSelected ? "checked" : ""}>
+      <i class="fa fa-grip-vertical drag-handle ms-1" title="Drag to reorder"></i>
+    </td>
+    <td>
+      <div class="small">${dateTimeDisplay}</div>
+      <div class="small text-muted">${tx.STATUS || "completed"}</div>
+    </td>
+    <td style="text-align:right;">
+      <div class="fw-bold">${escapeHtml(tx.ACCOUNT_HEADER || "")}</div>
+      <div class="small text-muted">${tx.VOUCHER_TYPE || ""}</div>
+    </td>
+    <td>
+      <div class="fw-bold">${description}</div>
+      <div class="small text-muted">${notes}</div>
+    </td>
+    <td>${typeBadge}</td>
+    <td class="fw-bold">${escapeHtml(tx.SINO || "")}</td>
+    <td>${escapeHtml(tx.BANK_NAME || tx.MODE || "")}</td>
+    <td style="text-align:right; color: var(--success); font-weight:600;">
+      ${income > 0 ? `${currencySymbol}${income.toFixed(2)}` : "-"}
+    </td>
+    <td style="text-align:right; color: var(--danger); font-weight:600;">
+      ${expense > 0 ? `${currencySymbol}${expense.toFixed(2)}` : "-"}
+    </td>
+    <td style="text-align:right; font-weight:600;">
+      ${balanceVisible ? `${currencySymbol}${balance.toFixed(2)}` : "••••"}
+    </td>
+    <td>${tagsHtml}</td>
+    <td>${attachmentHtml}</td>
+    <td>
+      <div class="d-flex gap-1">
+        <button class="action-btn btn-view" onclick="viewTransaction('${tx.id}')" title="View">
+          <i class="fa fa-eye"></i>
+        </button>
+        <button class="action-btn btn-edit" onclick="editTransaction('${tx.id}')" title="Edit">
+          <i class="fa fa-edit"></i>
+        </button>
+        <button class="action-btn btn-duplicate" onclick="duplicateTransaction('${tx.id}')" title="Duplicate">
+          <i class="fa fa-copy"></i>
+        </button>
+        <button class="action-btn btn-del" onclick="deleteTransaction('${tx.id}')" title="Delete">
+          <i class="fa fa-trash"></i>
+        </button>
+      </div>
+    </td>
+  `;
+  
+  // Add click event for checkbox
+  const checkbox = row.querySelector('.transaction-checkbox');
+  checkbox.addEventListener('change', (e) => {
+    toggleTransactionSelection(tx.id, e.target.checked);
+  });
+  
+  // Add hover effect
+  row.addEventListener('mouseenter', () => {
+    row.classList.add('hover');
+  });
+  
+  row.addEventListener('mouseleave', () => {
+    row.classList.remove('hover');
+  });
+  
+  return row;
+}
+
+// Function to highlight search terms
+function highlightText(text, searchTerm) {
+  if (!searchTerm || !text) return escapeHtml(text);
+  
+  const escapedText = escapeHtml(text);
+  const regex = new RegExp(`(${searchTerm})`, 'gi');
+  return escapedText.replace(regex, '<span class="highlight">$1</span>');
+}
+
+// Function to get currency symbol
+function getCurrencySymbol(currencyCode) {
+  const symbols = {
+    'USD': '$',
+    'EUR': '€',
+    'GBP': '£',
+    'INR': '₹',
+    'JPY': '¥',
+    'CAD': 'C$',
+    'AUD': 'A$'
+  };
+  return symbols[currencyCode] || '$';
+}
+
+// Function to update pagination
+function updatePagination() {
+  const totalPages = Math.ceil(filteredTransactions.length / rowsPerPage);
+  
+  if (totalPages <= 1) {
+    paginationControls.innerHTML = "";
+    return;
+  }
+  
+  let paginationHtml = `
+    <nav aria-label="Transaction pagination">
+      <ul class="pagination justify-content-center">
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+          <a class="page-link" href="#" onclick="changePage(${currentPage - 1})" aria-label="Previous">
+            <span aria-hidden="true">&laquo;</span>
+          </a>
+        </li>
+  `;
+  
+  // Show first page, current page, and last page
+  const maxVisiblePages = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+  
+  if (endPage - startPage + 1 < maxVisiblePages) {
+    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+  }
+  
+  for (let i = startPage; i <= endPage; i++) {
+    paginationHtml += `
+      <li class="page-item ${i === currentPage ? 'active' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+      </li>
+    `;
+  }
+  
+  paginationHtml += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+          <a class="page-link" href="#" onclick="changePage(${currentPage + 1})" aria-label="Next">
+            <span aria-hidden="true">&raquo;</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  `;
+  
+  paginationControls.innerHTML = paginationHtml;
+}
+
+// Function to change page
+function changePage(page) {
+  if (page < 1 || page > Math.ceil(filteredTransactions.length / rowsPerPage)) return;
+  
+  currentPage = page;
+  buildTable();
+  
+  // Scroll to top of table
+  transactionsTableBody.parentElement.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Function to view transaction
+function viewTransaction(id) {
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  openAddModal(tx);
+}
+
+// Function to edit transaction
+function editTransaction(id) {
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  openAddModal(tx);
+}
+
+// Function to delete transaction
+function deleteTransaction(id) {
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  txToDelete = id;
+  
+  Swal.fire({
+    title: 'Delete Transaction?',
+    text: `Are you sure you want to delete this transaction: ${tx.DESCRIPTION || "Untitled"}?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'Delete',
+    cancelButtonText: 'Cancel'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      confirmDeleteTransaction();
+    }
+  });
+}
+
+// Function to confirm delete transaction
+async function confirmDeleteTransaction() {
+  if (!txToDelete) return;
+  
+  try {
+    loadingMessage.textContent = "Deleting transaction...";
+    loadingModal.show();
+    
+    await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
+    
+    loadingModal.hide();
+    showToast("Transaction deleted successfully", "success");
+    
+    // Remove from selected transactions if it was selected
+    selectedTransactions.delete(txToDelete);
+    updateBulkActions();
+    
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("deleteTransaction", err);
+    showToast("Failed to delete transaction", "error");
+  }
+}
+
+// Function to view attachment
+function viewAttachment(id) {
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx || !tx.ATTACHMENT) return;
+  
+  const fileUrl = tx.ATTACHMENT;
+  const fileExt = fileUrl.split('.').pop().toLowerCase();
+  
+  let content = "";
+  
+  if (fileExt.match(/^(jpg|jpeg|png|gif)$/)) {
+    content = `<img src="${fileUrl}" class="img-fluid" alt="Attachment">`;
+  } else if (fileExt === "pdf") {
+    content = `<iframe src="${fileUrl}" width="100%" height="600px"></iframe>`;
+  } else {
+    content = `
+      <div class="text-center">
+        <i class="fa fa-file fa-4x mb-3"></i>
+        <p>${fileUrl}</p>
+        <a href="${fileUrl}" target="_blank" class="btn btn-primary mt-2">
+          <i class="fa fa-download me-2"></i>Download File
+        </a>
+      </div>
+    `;
+  }
+  
+  attachmentModalBody.innerHTML = content;
+  attachmentModal.show();
+}
+
+// Grid View Functions
+let gridCurrentPage = 1;
+const gridItemsPerPage = 12;
+
+function renderGridView() {
+  if (filteredTransactions.length === 0) {
+    gridViewContainer.innerHTML = `
+      <div class="col-12 text-center py-5">
+        <i class="fa fa-inbox fa-3x mb-3 text-muted"></i>
+        <h5>No transactions found</h5>
+        <p class="text-muted">Try adjusting your filters or add a new transaction</p>
+      </div>
+    `;
+    gridPaginationControls.innerHTML = "";
+    return;
+  }
+  
+  const startIdx = (gridCurrentPage - 1) * gridItemsPerPage;
+  const endIdx = startIdx + gridItemsPerPage;
+  const pageTransactions = filteredTransactions.slice(startIdx, endIdx);
+  
+  gridViewContainer.innerHTML = "";
+  
+  pageTransactions.forEach(tx => {
+    const gridCard = createGridCard(tx);
+    gridViewContainer.appendChild(gridCard);
+  });
+  
+  updateGridPagination();
+}
+
+function createGridCard(tx) {
+  const col = document.createElement("div");
+  col.className = "col-md-4 col-lg-3 mb-3";
+  
+  const income = parseFloat(tx.INCOME) || 0;
+  const expense = parseFloat(tx.EXPENSE) || 0;
+  const amount = income > 0 ? income : expense;
+  const currency = tx.CURRENCY || "USD";
+  const currencySymbol = getCurrencySymbol(currency);
+  
+  let cardClass = "grid-card ";
+  if (tx.RECURRING) {
+    cardClass += "grid-card-recurring";
+  } else {
+    switch (tx.TYPE) {
+      case "Income":
+        cardClass += "grid-card-income";
+        break;
+      case "Expense":
+        cardClass += "grid-card-expense";
+        break;
+      case "Transfer":
+        cardClass += "grid-card-transfer";
+        break;
+    }
+  }
+  
+  let typeBadge = "";
+  switch (tx.TYPE) {
+    case "Income":
+      typeBadge = '<span class="badge-income grid-badge">Income</span>';
+      break;
+    case "Expense":
+      typeBadge = '<span class="badge-expense grid-badge">Expense</span>';
+      break;
+    case "Transfer":
+      typeBadge = '<span class="badge-transfer grid-badge">Transfer</span>';
+      break;
+  }
+  
+  if (tx.RECURRING) {
+    typeBadge += '<span class="badge-recurring grid-badge ms-1"><i class="fa fa-redo"></i></span>';
+  }
+  
+  const date = tx.DATE ? formatDateToYyyyMmmDd(tx.DATE) : "";
+  const description = escapeHtml(tx.DESCRIPTION || "").substring(0, 50) + (tx.DESCRIPTION && tx.DESCRIPTION.length > 50 ? "..." : "");
+  const notes = escapeHtml(tx.NOTES || "").substring(0, 30) + (tx.NOTES && tx.NOTES.length > 30 ? "..." : "");
+  
+  let tagsHtml = "";
+  if (tx.TAGS && Array.isArray(tx.TAGS) && tx.TAGS.length > 0) {
+    tagsHtml = tx.TAGS.slice(0, 3).map(tag => 
+      `<span class="badge bg-secondary me-1 mb-1">${escapeHtml(tag)}</span>`
+    ).join("");
+  }
+  
+  col.innerHTML = `
+    <div class="${cardClass}" onclick="editTransaction('${tx.id}')" style="cursor: pointer;">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="grid-date">${date}</div>
+          <div class="small text-muted">${escapeHtml(tx.BANK_NAME || "")}</div>
+        </div>
+        <div class="text-end">
+          ${typeBadge}
+          <div class="grid-amount ${tx.TYPE === 'Income' ? 'income-color' : 'expense-color'}">
+            ${tx.TYPE === 'Income' ? '+' : '-'}${currencySymbol}${amount.toFixed(2)}
+          </div>
+        </div>
+      </div>
+      
+      <div class="mb-2">
+        <div class="fw-bold mb-1">${description}</div>
+        ${notes ? `<div class="small text-muted">${notes}</div>` : ''}
+      </div>
+      
+      <div class="mb-2">
+        <div class="small">
+          <strong>Voucher:</strong> ${escapeHtml(tx.SINO || "")}
+        </div>
+        <div class="small">
+          <strong>Account:</strong> ${escapeHtml(tx.ACCOUNT_HEADER || "")}
+        </div>
+      </div>
+      
+      ${tagsHtml ? `<div class="mb-2">${tagsHtml}</div>` : ''}
+      
+      <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+        <span class="badge bg-light text-dark">${tx.STATUS || "completed"}</span>
+        <div>
+          <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); editTransaction('${tx.id}')">
+            <i class="fa fa-edit"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger ms-1" onclick="event.stopPropagation(); deleteTransaction('${tx.id}')">
+            <i class="fa fa-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  return col;
+}
+
+function updateGridPagination() {
+  const totalPages = Math.ceil(filteredTransactions.length / gridItemsPerPage);
+  
+  if (totalPages <= 1) {
+    gridPaginationControls.innerHTML = "";
+    return;
+  }
+  
+  let paginationHtml = `
+    <nav aria-label="Grid pagination">
+      <ul class="pagination justify-content-center">
+        <li class="page-item ${gridCurrentPage === 1 ? 'disabled' : ''}">
+          <a class="page-link" href="#" onclick="changeGridPage(${gridCurrentPage - 1})" aria-label="Previous">
+            <span aria-hidden="true">&laquo;</span>
+          </a>
+        </li>
+  `;
+  
+  const maxVisiblePages = 5;
+  let startPage = Math.max(1, gridCurrentPage - Math.floor(maxVisiblePages / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+  
+  if (endPage - startPage + 1 < maxVisiblePages) {
+    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+  }
+  
+  for (let i = startPage; i <= endPage; i++) {
+    paginationHtml += `
+      <li class="page-item ${i === gridCurrentPage ? 'active' : ''}">
+        <a class="page-link" href="#" onclick="changeGridPage(${i})">${i}</a>
+      </li>
+    `;
+  }
+  
+  paginationHtml += `
+        <li class="page-item ${gridCurrentPage === totalPages ? 'disabled' : ''}">
+          <a class="page-link" href="#" onclick="changeGridPage(${gridCurrentPage + 1})" aria-label="Next">
+            <span aria-hidden="true">&raquo;</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  `;
+  
+  gridPaginationControls.innerHTML = paginationHtml;
+}
+
+function changeGridPage(page) {
+  if (page < 1 || page > Math.ceil(filteredTransactions.length / gridItemsPerPage)) return;
+  
+  gridCurrentPage = page;
+  renderGridView();
+  
+  // Scroll to top of grid
+  gridViewContainer.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Calendar View Functions
+function renderCalendarView() {
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  
+  const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  
+  // Get first day of month and number of days
+  const firstDay = new Date(currentCalendarYear, currentCalendarMonth, 1);
+  const lastDay = new Date(currentCalendarYear, currentCalendarMonth + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startingDay = firstDay.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  
+  // Get transactions for this month
+  const monthTransactions = filteredTransactions.filter(tx => {
+    try {
+      const txDate = new Date(tx.DATE);
+      return txDate.getMonth() === currentCalendarMonth && 
+             txDate.getFullYear() === currentCalendarYear;
+    } catch (e) {
+      return false;
+    }
+  });
+  
+  // Group transactions by day
+  const transactionsByDay = {};
+  monthTransactions.forEach(tx => {
+    const txDate = new Date(tx.DATE);
+    const day = txDate.getDate();
+    
+    if (!transactionsByDay[day]) {
+      transactionsByDay[day] = [];
+    }
+    
+    transactionsByDay[day].push(tx);
+  });
+  
+  let calendarHtml = `
+    <div class="calendar">
+      <div class="calendar-header">
+        <button class="calendar-nav-btn" onclick="prevMonth()">
+          <i class="fa fa-chevron-left"></i>
+        </button>
+        <h4 class="mb-0">${monthNames[currentCalendarMonth]} ${currentCalendarYear}</h4>
+        <button class="calendar-nav-btn" onclick="nextMonth()">
+          <i class="fa fa-chevron-right"></i>
+        </button>
+      </div>
+      
+      <div class="calendar-grid">
+  `;
+  
+  // Add day headers
+  daysOfWeek.forEach(day => {
+    calendarHtml += `<div class="calendar-day-header">${day}</div>`;
+  });
+  
+  // Add empty cells for days before the first day of month
+  for (let i = 0; i < startingDay; i++) {
+    calendarHtml += `<div class="calendar-day empty"></div>`;
+  }
+  
+  // Add days of month
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayTransactions = transactionsByDay[day] || [];
+    const totalIncome = dayTransactions
+      .filter(tx => tx.TYPE === 'Income')
+      .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    
+    const totalExpense = dayTransactions
+      .filter(tx => tx.TYPE === 'Expense')
+      .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+    
+    const netAmount = totalIncome - totalExpense;
+    
+    let transactionsHtml = "";
+    dayTransactions.slice(0, 3).forEach(tx => {
+      const amount = (parseFloat(tx.INCOME) || 0) - (parseFloat(tx.EXPENSE) || 0);
+      const amountClass = amount >= 0 ? 'calendar-transaction-income' : 'calendar-transaction-expense';
+      const sign = amount >= 0 ? '+' : '-';
+      const absAmount = Math.abs(amount);
+      const currency = tx.CURRENCY || "USD";
+      const currencySymbol = getCurrencySymbol(currency);
+      
+      transactionsHtml += `
+        <div class="calendar-transaction ${amountClass}" title="${escapeHtml(tx.DESCRIPTION || '')}">
+          ${sign}${currencySymbol}${absAmount.toFixed(0)}
+        </div>
+      `;
+    });
+    
+    if (dayTransactions.length > 3) {
+      transactionsHtml += `<div class="calendar-transaction text-muted">+${dayTransactions.length - 3} more</div>`;
+    }
+    
+    const today = new Date();
+    const isToday = today.getDate() === day && 
+                    today.getMonth() === currentCalendarMonth && 
+                    today.getFullYear() === currentCalendarYear;
+    
+    calendarHtml += `
+      <div class="calendar-day ${isToday ? 'bg-light' : ''}" onclick="showDayTransactions(${day})">
+        <div class="calendar-day-number ${isToday ? 'text-primary fw-bold' : ''}">
+          ${day}
+          ${netAmount !== 0 ? `
+            <span class="float-end small ${netAmount > 0 ? 'text-success' : 'text-danger'}">
+              ${netAmount > 0 ? '+' : ''}${netAmount.toFixed(0)}
+            </span>
+          ` : ''}
+        </div>
+        <div class="calendar-day-transactions">
+          ${transactionsHtml}
+        </div>
+      </div>
+    `;
+  }
+  
+  // Calculate total empty cells needed to complete the grid (multiple of 7)
+  const totalCells = startingDay + daysInMonth;
+  const emptyCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  
+  for (let i = 0; i < emptyCells; i++) {
+    calendarHtml += `<div class="calendar-day empty"></div>`;
+  }
+  
+  calendarHtml += `
+      </div>
+    </div>
+  `;
+  
+  calendarContainer.innerHTML = calendarHtml;
+}
+
+function prevMonth() {
+  currentCalendarMonth--;
+  if (currentCalendarMonth < 0) {
+    currentCalendarMonth = 11;
+    currentCalendarYear--;
+  }
+  renderCalendarView();
+}
+
+function nextMonth() {
+  currentCalendarMonth++;
+  if (currentCalendarMonth > 11) {
+    currentCalendarMonth = 0;
+    currentCalendarYear++;
+  }
+  renderCalendarView();
+}
+
+function showDayTransactions(day) {
+  const date = new Date(currentCalendarYear, currentCalendarMonth, day);
+  const dateStr = date.toISOString().split('T')[0];
+  
+  // Set date filter to this day
+  dateFilter.value = "custom";
+  startDateInput.value = dateStr;
+  endDateInput.value = dateStr;
+  customRangeControls.style.display = "flex";
+  
+  // Apply filters
+  applyFilters();
+  
+  // Switch to list view
+  document.querySelector('#viewTabs a[href="#listView"]').click();
+}
+
+// Theme Functions
+function toggleTheme() {
+  currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  
+  // Update icon
+  themeToggle.innerHTML = currentTheme === 'dark' ? 
+    '<i class="fa fa-sun"></i>' : '<i class="fa fa-moon"></i>';
+  
+  // Save to localStorage
+  localStorage.setItem('theme', currentTheme);
+}
+
+function loadThemePreference() {
+  const savedTheme = localStorage.getItem('theme') || 'light';
+  currentTheme = savedTheme;
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  
+  // Update icon
+  themeToggle.innerHTML = currentTheme === 'dark' ? 
+    '<i class="fa fa-sun"></i>' : '<i class="fa fa-moon"></i>';
+}
+
+// Quick Add Functions
+async function processQuickAdd() {
+  const text = quickAddInput.value.trim();
+  if (!text) {
+    showToast("Please enter transaction details", "error");
+    return;
+  }
+  
+  loadingMessage.textContent = "Processing your request...";
+  loadingModal.show();
+  
+  try {
+    // Parse natural language
+    const parsed = parseNaturalLanguage(text);
+    
+    if (!parsed) {
+      loadingModal.hide();
+      showToast("Could not understand your input. Please check the format examples.", "error");
+      return;
+    }
+    
+    // Create transaction from parsed data
+    const txData = {
+      DATE: parsed.date || new Date().toISOString().split('T')[0],
+      SINO: await getNextVoucherNumber(parsed.voucherType || "Payment"),
+      ACCOUNT_HEADER: parsed.category || "Uncategorized",
+      BANK_NAME: parsed.bank || "",
+      VOUCHER_TYPE: parsed.voucherType || "Payment",
+      TYPE: parsed.type || "Expense",
+      INCOME: parsed.type === "Income" ? parsed.amount : 0,
+      EXPENSE: parsed.type === "Expense" ? parsed.amount : 0,
+      DESCRIPTION: parsed.description || text.substring(0, 100),
+      NOTES: `Quick add: ${text}`,
+      TAGS: parsed.tags || [],
+      STATUS: "completed",
+      CURRENCY: formCURRENCY.value,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: currentUser.uid
+    };
+    
+    // Calculate balance
+    txData.BALANCE = getTransactionBalance(txData);
+    
+    // Save transaction
+    await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+    
+    loadingModal.hide();
+    quickAddModal.hide();
+    showToast("Transaction added successfully!", "success");
+    
+    // Reload transactions
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Quick add error:", error);
+    showToast("Failed to add transaction", "error");
+  }
+}
+
+function parseNaturalLanguage(text) {
+  const lowerText = text.toLowerCase();
+  
+  // Initialize result
+  const result = {
+    amount: 0,
+    type: "Expense",
+    description: text
+  };
+  
+  // Extract amount (look for numbers with currency symbols or words)
+  const amountMatch = lowerText.match(/(\d+(\.\d{1,2})?)/);
+  if (amountMatch) {
+    result.amount = parseFloat(amountMatch[1]);
+  }
+  
+  // Determine type based on keywords
+  if (lowerText.includes("add") || lowerText.includes("receive") || 
+      lowerText.includes("income") || lowerText.includes("deposit")) {
+    result.type = "Income";
+  } else if (lowerText.includes("spent") || lowerText.includes("pay") || 
+             lowerText.includes("expense") || lowerText.includes("cost")) {
+    result.type = "Expense";
+  } else if (lowerText.includes("transfer")) {
+    result.type = "Transfer";
+  }
+  
+  // Extract bank names
+  const banks = ["axis", "bom", "hdfc", "sbi", "icici", "cash"];
+  for (const bank of banks) {
+    if (lowerText.includes(bank)) {
+      result.bank = bank.charAt(0).toUpperCase() + bank.slice(1);
+      break;
+    }
+  }
+  
+  // Extract categories
+  const categories = ["rent", "food", "fuel", "shopping", "entertainment", "travel"];
+  for (const category of categories) {
+    if (lowerText.includes(category)) {
+      result.category = category.charAt(0).toUpperCase() + category.slice(1);
+      break;
+    }
+  }
+  
+  // Extract date keywords
+  const today = new Date();
+  if (lowerText.includes("yesterday")) {
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    result.date = yesterday.toISOString().split('T')[0];
+  } else if (lowerText.includes("tomorrow")) {
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    result.date = tomorrow.toISOString().split('T')[0];
+  } else if (lowerText.includes("last friday") || lowerText.includes("last friday")) {
+    // Simple date parsing - in real app you'd want more robust parsing
+    result.date = today.toISOString().split('T')[0];
+  }
+  
+  // Determine voucher type based on transaction type
+  if (result.type === "Income") {
+    result.voucherType = "Receipt";
+  } else if (result.type === "Expense") {
+    result.voucherType = "Payment";
+  } else if (result.type === "Transfer") {
+    result.voucherType = "Transfer";
+  }
+  
+  return result;
+}
+
+// Selection and Bulk Actions
+function toggleTransactionSelection(id, selected) {
+  if (selected) {
+    selectedTransactions.add(id);
+  } else {
+    selectedTransactions.delete(id);
+  }
+  
+  updateBulkActions();
+  updateSelectedSummary();
+  updateSelectAllCheckbox();
+  
+  // Update row appearance
+  const row = document.querySelector(`tr[data-id="${id}"]`);
+  if (row) {
+    if (selected) {
+      row.classList.add('selected');
+    } else {
+      row.classList.remove('selected');
+    }
+  }
+}
+
+function selectAllTransactions() {
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const endIdx = startIdx + rowsPerPage;
+  const pageTransactions = filteredTransactions.slice(startIdx, endIdx);
+  
+  pageTransactions.forEach(tx => {
+    selectedTransactions.add(tx.id);
+  });
+  
+  updateBulkActions();
+  updateSelectedSummary();
+  updateSelectAllCheckbox();
+  buildTable();
+}
+
+function deselectAllTransactions() {
+  selectedTransactions.clear();
+  updateBulkActions();
+  updateSelectedSummary();
+  updateSelectAllCheckbox();
+  buildTable();
+}
+
+function toggleSelectAll() {
+  if (selectAllCheckbox.checked) {
+    selectAllTransactions();
+  } else {
+    deselectAllTransactions();
+  }
+}
+
+function updateSelectAllCheckbox() {
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const endIdx = startIdx + rowsPerPage;
+  const pageTransactions = filteredTransactions.slice(startIdx, endIdx);
+  
+  if (pageTransactions.length === 0) {
+    selectAllCheckbox.checked = false;
+    selectAllCheckbox.disabled = true;
+    return;
+  }
+  
+  selectAllCheckbox.disabled = false;
+  
+  const allSelected = pageTransactions.every(tx => selectedTransactions.has(tx.id));
+  selectAllCheckbox.checked = allSelected;
+}
+
+function updateBulkActions() {
+  const count = selectedTransactions.size;
+  
+  if (count > 0) {
+    bulkActions.classList.remove('hidden');
+    selectedCount.textContent = `${count} transaction${count !== 1 ? 's' : ''} selected`;
+    
+    // Update button states
+    bulkDeleteBtn.disabled = false;
+    bulkEditBtn.disabled = false;
+    bulkTagBtn.disabled = false;
+    bulkCategoryBtn.disabled = false;
+  } else {
+    bulkActions.classList.add('hidden');
+  }
+}
+
+function clearSelection() {
+  selectedTransactions.clear();
+  updateBulkActions();
+  updateSelectedSummary();
+  updateSelectAllCheckbox();
+  buildTable();
+}
+
+function confirmBulkDelete() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkDeleteCount.textContent = count;
+  confirmBulkDeleteModal.show();
+}
+
+async function processBulkDelete() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  loadingMessage.textContent = `Deleting ${count} transactions...`;
+  loadingModal.show();
+  confirmBulkDeleteModal.hide();
+  
+  try {
+    const batch = writeBatch(db);
+    
+    for (const id of selectedTransactions) {
+      const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+      batch.delete(txRef);
+    }
+    
+    await batch.commit();
+    
+    // Clear selection
+    selectedTransactions.clear();
+    
+    loadingModal.hide();
+    showToast(`${count} transactions deleted successfully`, "success");
+    
+    // Reload transactions
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Bulk delete error:", error);
+    showToast("Failed to delete transactions", "error");
+  }
+}
+
+function openBulkEditModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkEditCount.textContent = count;
+  bulkEditValue.value = "";
+  bulkEditModal.show();
+}
+
+async function processBulkEdit() {
+  const field = bulkEditField.value;
+  const value = bulkEditValue.value.trim();
+  
+  if (!value) {
+    showToast("Please enter a value", "error");
+    return;
+  }
+  
+  const count = selectedTransactions.size;
+  loadingMessage.textContent = `Updating ${count} transactions...`;
+  loadingModal.show();
+  bulkEditModal.hide();
+  
+  try {
+    const batch = writeBatch(db);
+    const fieldMap = {
+      'BANK_NAME': 'BANK_NAME',
+      'ACCOUNT_HEADER': 'ACCOUNT_HEADER',
+      'TYPE': 'TYPE',
+      'VOUCHER_TYPE': 'VOUCHER_TYPE',
+      'STATUS': 'STATUS'
+    };
+    
+    const fieldName = fieldMap[field];
+    
+    for (const id of selectedTransactions) {
+      const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+      batch.update(txRef, { 
+        [fieldName]: value,
+        updatedAt: new Date()
+      });
+    }
+    
+    await batch.commit();
+    
+    loadingModal.hide();
+    showToast(`${count} transactions updated successfully`, "success");
+    
+    // Reload transactions
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Bulk edit error:", error);
+    showToast("Failed to update transactions", "error");
+  }
+}
+
+function openBulkTagModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkTagCount.textContent = count;
+  bulkTagsInput.value = "";
+  bulkTagModal.show();
+}
+
+async function processBulkTags() {
+  const tagsInput = bulkTagsInput.value.trim();
+  if (!tagsInput) {
+    showToast("Please enter at least one tag", "error");
+    return;
+  }
+  
+  const newTags = tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+  if (newTags.length === 0) {
+    showToast("Please enter valid tags", "error");
+    return;
+  }
+  
+  const count = selectedTransactions.size;
+  loadingMessage.textContent = `Adding tags to ${count} transactions...`;
+  loadingModal.show();
+  bulkTagModal.hide();
+  
+  try {
+    // Get current transactions to preserve existing tags
+    const transactionsToUpdate = allTransactions.filter(tx => selectedTransactions.has(tx.id));
+    
+    const batch = writeBatch(db);
+    
+    for (const tx of transactionsToUpdate) {
+      const existingTags = tx.TAGS || [];
+      const updatedTags = [...new Set([...existingTags, ...newTags])];
+      
+      const txRef = doc(db, "users", currentUser.uid, "transactions", tx.id);
+      batch.update(txRef, { 
+        TAGS: updatedTags,
+        updatedAt: new Date()
+      });
+    }
+    
+    await batch.commit();
+    
+    // Update tags collection
+    await updateTagsCollection(newTags);
+    
+    loadingModal.hide();
+    showToast(`Tags added to ${count} transactions`, "success");
+    
+    // Reload transactions
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Bulk tag error:", error);
+    showToast("Failed to add tags", "error");
+  }
+}
+
+function openBulkCategoryModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  Swal.fire({
+    title: 'Change Category',
+    input: 'select',
+    inputOptions: coaAccounts.reduce((obj, account) => {
+      obj[account] = account;
+      return obj;
+    }, {}),
+    inputPlaceholder: 'Select category',
+    showCancelButton: true,
+    confirmButtonText: 'Update',
+    cancelButtonText: 'Cancel',
+    preConfirm: (category) => {
+      if (!category) {
+        Swal.showValidationMessage('Please select a category');
+      }
+      return category;
+    }
+  }).then(async (result) => {
+    if (result.isConfirmed) {
+      loadingMessage.textContent = `Updating category for ${count} transactions...`;
+      loadingModal.show();
+      
+      try {
+        const batch = writeBatch(db);
+        
+        for (const id of selectedTransactions) {
+          const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+          batch.update(txRef, { 
+            ACCOUNT_HEADER: result.value,
+            updatedAt: new Date()
+          });
+        }
+        
+        await batch.commit();
+        
+        loadingModal.hide();
+        showToast(`Category updated for ${count} transactions`, "success");
+        
+        // Reload transactions
+        await loadTransactions();
+      } catch (error) {
+        loadingModal.hide();
+        console.error("Bulk category error:", error);
+        showToast("Failed to update category", "error");
+      }
+    }
+  });
+}
+
+// Split Income Functions
+function openSplitIncomeModal() {
+  splitIncomeModal.show();
+  splitExpensesContainer.innerHTML = "";
+  splitSummary.innerHTML = "";
+  splitIncomeAmount.value = "";
+  splitIncomeDescription.value = "";
+  splitIncomeBank.value = "";
+  
+  // Add first expense
+  addSplitExpense();
+}
+
+function addSplitExpense() {
+  const expenseId = Date.now() + Math.random();
+  const expenseItem = document.createElement("div");
+  expenseItem.className = "split-transaction-item";
+  expenseItem.id = `split-expense-${expenseId}`;
+  
+  expenseItem.innerHTML = `
+    <div class="split-header">
+      <h6 class="mb-0">Expense #${document.querySelectorAll('.split-transaction-item').length + 1}</h6>
+      <button type="button" class="remove-split" onclick="removeSplitExpense(${expenseId})">
+        <i class="fa fa-times"></i>
+      </button>
+    </div>
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">Description *</label>
+        <input type="text" class="form-control split-expense-desc" placeholder="Expense description" required />
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Amount *</label>
+        <input type="number" class="form-control split-expense-amount" placeholder="0.00" step="0.01" required />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Bank</label>
+        <select class="form-select split-expense-bank">
+          <option value="">Select Bank</option>
+          ${coaBanks.map(bank => `<option value="${bank}">${bank}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="row g-2 mt-2">
+      <div class="col-md-6">
+        <label class="form-label">Category</label>
+        <select class="form-select split-expense-category">
+          <option value="">Select Category</option>
+          ${coaAccounts.map(account => `<option value="${account}">${account}</option>`).join('')}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-control split-expense-date" value="${new Date().toISOString().split('T')[0]}" />
+      </div>
+    </div>
+  `;
+  
+  splitExpensesContainer.appendChild(expenseItem);
+  
+  // Update summary
+  updateSplitSummary();
+}
+
+function removeSplitExpense(id) {
+  const expenseItem = document.getElementById(`split-expense-${id}`);
+  if (expenseItem) {
+    expenseItem.remove();
+    updateSplitSummary();
+    
+    // Renumber remaining expenses
+    const expenses = document.querySelectorAll('.split-transaction-item');
+    expenses.forEach((expense, index) => {
+      const header = expense.querySelector('h6');
+      if (header) {
+        header.textContent = `Expense #${index + 1}`;
+      }
+    });
+  }
+}
+
+function updateSplitSummary() {
+  const totalIncome = parseFloat(splitIncomeAmount.value) || 0;
+  const expenses = document.querySelectorAll('.split-transaction-item');
+  
+  let totalExpenses = 0;
+  expenses.forEach(expense => {
+    const amountInput = expense.querySelector('.split-expense-amount');
+    const amount = parseFloat(amountInput?.value) || 0;
+    totalExpenses += amount;
+  });
+  
+  const remaining = totalIncome - totalExpenses;
+  
+  let summaryHtml = `
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <strong>Total Income:</strong> $${totalIncome.toFixed(2)}
+      </div>
+      <div>
+        <strong>Total Expenses:</strong> $${totalExpenses.toFixed(2)}
+      </div>
+      <div class="${remaining >= 0 ? 'amount-remaining' : 'amount-exceeded'}">
+        <strong>Remaining:</strong> $${remaining.toFixed(2)}
+      </div>
+    </div>
+  `;
+  
+  if (remaining < 0) {
+    summaryHtml += `
+      <div class="alert alert-danger mt-2 mb-0">
+        <i class="fa fa-exclamation-triangle me-2"></i>
+        Total expenses exceed income by $${Math.abs(remaining).toFixed(2)}
+      </div>
+    `;
+  } else if (remaining > 0) {
+    summaryHtml += `
+      <div class="alert alert-warning mt-2 mb-0">
+        <i class="fa fa-info-circle me-2"></i>
+        $${remaining.toFixed(2)} of income is not allocated
+      </div>
+    `;
+  } else {
+    summaryHtml += `
+      <div class="alert alert-success mt-2 mb-0">
+        <i class="fa fa-check-circle me-2"></i>
+        Income fully allocated
+      </div>
+    `;
+  }
+  
+  splitSummary.innerHTML = summaryHtml;
+}
+
+// Add event listeners for split income form
+addSplitExpenseBtn.addEventListener("click", addSplitExpense);
+splitIncomeAmount.addEventListener("input", updateSplitSummary);
+
+// Listen for changes in expense amounts
+document.addEventListener("input", (e) => {
+  if (e.target.classList.contains('split-expense-amount')) {
+    updateSplitSummary();
+  }
+});
+
+saveSplitTransactionsBtn.addEventListener("click", async () => {
+  const totalIncome = parseFloat(splitIncomeAmount.value) || 0;
+  const incomeDescription = splitIncomeDescription.value.trim();
+  const incomeBank = splitIncomeBank.value;
+  
+  if (!totalIncome) {
+    showToast("Please enter income amount", "error");
+    return;
+  }
+  
+  if (!incomeDescription) {
+    showToast("Please enter income description", "error");
+    return;
+  }
+  
+  if (!incomeBank) {
+    showToast("Please select income bank account", "error");
+    return;
+  }
+  
+  const expenses = document.querySelectorAll('.split-transaction-item');
+  if (expenses.length === 0) {
+    showToast("Please add at least one expense", "error");
+    return;
+  }
+  
+  let totalExpenses = 0;
+  const expenseData = [];
+  
+  // Validate expenses
+  for (const expense of expenses) {
+    const description = expense.querySelector('.split-expense-desc').value.trim();
+    const amount = parseFloat(expense.querySelector('.split-expense-amount').value) || 0;
+    const bank = expense.querySelector('.split-expense-bank').value;
+    const category = expense.querySelector('.split-expense-category').value;
+    const date = expense.querySelector('.split-expense-date').value;
+    
+    if (!description) {
+      showToast("Please enter description for all expenses", "error");
+      return;
+    }
+    
+    if (!amount) {
+      showToast("Please enter amount for all expenses", "error");
+      return;
+    }
+    
+    totalExpenses += amount;
+    expenseData.push({ description, amount, bank, category, date });
+  }
+  
+  if (totalExpenses > totalIncome) {
+    showToast("Total expenses cannot exceed income amount", "error");
+    return;
+  }
+  
+  loadingMessage.textContent = "Saving split transactions...";
+  loadingModal.show();
+  
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 1. Save income transaction
+    const incomeTxData = {
+      DATE: today,
+      SINO: await getNextVoucherNumber("Receipt"),
+      ACCOUNT_HEADER: "Income",
+      BANK_NAME: incomeBank,
+      VOUCHER_TYPE: "Receipt",
+      TYPE: "Income",
+      INCOME: totalIncome,
+      EXPENSE: 0,
+      DESCRIPTION: incomeDescription,
+      NOTES: `Split income into ${expenses.length} expense${expenses.length !== 1 ? 's' : ''}`,
+      TAGS: ["split-income"],
+      STATUS: "completed",
+      CURRENCY: formCURRENCY.value,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: currentUser.uid
+    };
+    
+    incomeTxData.BALANCE = getTransactionBalance(incomeTxData);
+    
+    await addDoc(collection(db, "users", currentUser.uid, "transactions"), incomeTxData);
+    
+    // 2. Save expense transactions
+    for (const expense of expenseData) {
+      const expenseTxData = {
+        DATE: expense.date || today,
+        SINO: await getNextVoucherNumber("Payment"),
+        ACCOUNT_HEADER: expense.category || "Uncategorized",
+        BANK_NAME: expense.bank || "",
+        VOUCHER_TYPE: "Payment",
+        TYPE: "Expense",
+        INCOME: 0,
+        EXPENSE: expense.amount,
+        DESCRIPTION: expense.description,
+        NOTES: `Part of split income: ${incomeDescription}`,
+        TAGS: ["split-expense"],
+        STATUS: "completed",
+        CURRENCY: formCURRENCY.value,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        userId: currentUser.uid
+      };
+      
+      expenseTxData.BALANCE = getTransactionBalance(expenseTxData);
+      
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), expenseTxData);
+    }
+    
+    loadingModal.hide();
+    splitIncomeModal.hide();
+    showToast(`${expenses.length + 1} transactions saved successfully`, "success");
+    
+    // Reload transactions
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Split income error:", error);
+    showToast("Failed to save split transactions", "error");
+  }
+});
+
+// Recurring Transactions
+function toggleRecurringOptions() {
+  const isVisible = recurringOptions.style.display === "block";
+  recurringOptions.style.display = isVisible ? "none" : "block";
+  
+  makeRecurringBtn.innerHTML = isVisible ? 
+    '<i class="fa fa-redo me-1"></i> Make Recurring' :
+    '<i class="fa fa-times me-1"></i> Cancel Recurring';
+}
+
+function calculateNextRecurringDate(startDate, recurringConfig) {
+  const start = new Date(startDate);
+  const { frequency, interval } = recurringConfig;
+  
+  const nextDate = new Date(start);
+  
+  switch (frequency) {
+    case "daily":
+      nextDate.setDate(start.getDate() + interval);
+      break;
+    case "weekly":
+      nextDate.setDate(start.getDate() + (7 * interval));
+      break;
+    case "monthly":
+      nextDate.setMonth(start.getMonth() + interval);
+      break;
+    case "quarterly":
+      nextDate.setMonth(start.getMonth() + (3 * interval));
+      break;
+    case "yearly":
+      nextDate.setFullYear(start.getFullYear() + interval);
+      break;
+  }
+  
+  return nextDate.toISOString().split('T')[0];
+}
+
+async function processRecurringTransactions() {
+  const today = new Date().toISOString().split('T')[0];
+  
+  for (const recurringTx of recurringTransactions) {
+    const nextDate = recurringTx.RECURRING.nextDate;
+    const endDate = recurringTx.RECURRING.endDate;
+    
+    // Check if transaction is due
+    if (nextDate <= today && (!endDate || nextDate <= endDate)) {
+      // Create new transaction
+      const newTxData = { ...recurringTx };
+      delete newTxData.id;
+      delete newTxData.RECURRING.nextDate;
+      
+      newTxData.DATE = nextDate;
+      newTxData.SINO = await getNextVoucherNumber(newTxData.VOUCHER_TYPE);
+      newTxData.createdAt = new Date();
+      newTxData.updatedAt = new Date();
+      
+      // Save new transaction
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), newTxData);
+      
+      // Update next date in recurring transaction
+      const txRef = doc(db, "users", currentUser.uid, "transactions", recurringTx.id);
+      await updateDoc(txRef, {
+        'RECURRING.nextDate': calculateNextRecurringDate(nextDate, recurringTx.RECURRING)
+      });
+    }
+  }
+}
+
+// Sidebar Functions
+function toggleSidebar() {
+  sidebar.classList.toggle('collapsed');
+  mainContent.classList.toggle('expanded');
+  
+  const icon = sidebarToggle.querySelector('i');
+  if (sidebar.classList.contains('collapsed')) {
+    icon.className = 'fa fa-chevron-right';
+  } else {
+    icon.className = 'fa fa-chevron-left';
+  }
+  
+  // Save state
+  localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+}
+
+function toggleMobileMenu() {
+  sidebar.classList.toggle('show');
+}
+
+// Load sidebar state
+function loadSidebarState() {
+  const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+  if (collapsed) {
+    sidebar.classList.add('collapsed');
+    mainContent.classList.add('expanded');
+    sidebarToggle.querySelector('i').className = 'fa fa-chevron-right';
+  }
+}
+
+// AI Assistant Functions
+function toggleAIPanel() {
+  aiPanel.classList.toggle('show');
+}
+
+function sendAIMessage() {
+  const message = aiInput.value.trim();
+  if (!message) return;
+  
+  // Add user message
+  addAIMessage(message, 'user');
+  aiInput.value = '';
+  
+  // Simulate AI response (in a real app, you would call an AI API)
+  setTimeout(() => {
+    const response = generateAIResponse(message);
+    addAIMessage(response, 'bot');
+  }, 1000);
+}
+
+function addAIMessage(text, sender) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `ai-message ${sender}`;
+  messageDiv.textContent = text;
+  
+  aiChat.appendChild(messageDiv);
+  aiChat.scrollTop = aiChat.scrollHeight;
+}
+
+function generateAIResponse(message) {
+  const lowerMessage = message.toLowerCase();
+  
+  if (lowerMessage.includes('balance') || lowerMessage.includes('total')) {
+    const balance = calculateTotalBalance();
+    return `Your current total balance is $${balance.toFixed(2)}.`;
+  }
+  
+  if (lowerMessage.includes('income') || lowerMessage.includes('revenue')) {
+    const totalIncome = allTransactions
+      .filter(tx => tx.TYPE === 'Income')
+      .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    return `Your total income is $${totalIncome.toFixed(2)}.`;
+  }
+  
+  if (lowerMessage.includes('expense') || lowerMessage.includes('spending')) {
+    const totalExpense = allTransactions
+      .filter(tx => tx.TYPE === 'Expense')
+      .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+    return `Your total expenses are $${totalExpense.toFixed(2)}.`;
+  }
+  
+  if (lowerMessage.includes('help') || lowerMessage.includes('what can you do')) {
+    return `I can help you with:
+• Check your balance and financial stats
+• Analyze your income and expenses
+• Find transactions by description
+• Give financial tips
+• Help categorize transactions
+• Calculate totals for specific periods`;
+  }
+  
+  if (lowerMessage.includes('transaction') && lowerMessage.includes('find')) {
+    // Try to find transactions
+    const searchTerm = message.toLowerCase().replace(/find|transaction|search/g, '').trim();
+    if (searchTerm) {
+      const matching = allTransactions.filter(tx => 
+        (tx.DESCRIPTION && tx.DESCRIPTION.toLowerCase().includes(searchTerm)) ||
+        (tx.NOTES && tx.NOTES.toLowerCase().includes(searchTerm))
+      ).slice(0, 5);
+      
+      if (matching.length > 0) {
+        return `Found ${matching.length} transaction${matching.length !== 1 ? 's' : ''}:
+${matching.map(tx => `• ${tx.DATE}: ${tx.DESCRIPTION} - $${(parseFloat(tx.INCOME) || parseFloat(tx.EXPENSE) || 0).toFixed(2)}`).join('\n')}`;
+      }
+    }
+  }
+  
+  // Default response
+  const tips = [
+    "Consider setting up a budget for your main spending categories.",
+    "Review your recurring transactions regularly to cancel unused subscriptions.",
+    "Try to save at least 20% of your income each month.",
+    "Use tags to better categorize and track your expenses.",
+    "Set up reminders for bill payments to avoid late fees.",
+    "Consider automating your savings with recurring transfers."
+  ];
+  
+  return `I understand you said: "${message}". Here's a financial tip: ${tips[Math.floor(Math.random() * tips.length)]}`;
+}
+
+// Tags Functions
+async function updateTagsCollection(tags) {
+  try {
+    for (const tag of tags) {
+      if (!allTags.has(tag)) {
+        allTags.add(tag);
+        
+        // Add to Firestore
+        await setDoc(doc(db, "users", currentUser.uid, "tags", tag.toLowerCase().replace(/\s+/g, '-')), {
+          name: tag,
+          count: 1,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      } else {
+        // Update count
+        const tagRef = doc(db, "users", currentUser.uid, "tags", tag.toLowerCase().replace(/\s+/g, '-'));
+        const tagSnap = await getDoc(tagRef);
+        
+        if (tagSnap.exists()) {
+          await updateDoc(tagRef, {
+            count: (tagSnap.data().count || 0) + 1,
+            updatedAt: new Date()
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.warn("Error updating tags collection:", error);
+  }
+}
+
+async function loadTagManager() {
+  // Load tags for tag manager
+  const tagsRef = collection(db, "users", currentUser.uid, "tags");
+  const tagsSnap = await getDocs(tagsRef);
+  
+  const tagList = document.getElementById('tagList');
+  const tagStats = document.getElementById('tagStats');
+  
+  tagList.innerHTML = '';
+  tagStats.innerHTML = '';
+  
+  const tags = [];
+  tagsSnap.forEach(doc => {
+    tags.push(doc.data());
+  });
+  
+  // Sort by count
+  tags.sort((a, b) => b.count - a.count);
+  
+  // Display tags
+  tags.forEach(tag => {
+    const tagElement = document.createElement('div');
+    tagElement.className = 'd-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded';
+    tagElement.innerHTML = `
+      <span>
+        <span class="badge bg-primary me-2">${tag.count}</span>
+        ${tag.name}
+      </span>
+      <div>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteTag('${tag.name}')">
+          <i class="fa fa-trash"></i>
+        </button>
+      </div>
+    `;
+    tagList.appendChild(tagElement);
+  });
+  
+  // Display statistics
+  const totalTaggedTransactions = allTransactions.filter(tx => tx.TAGS && tx.TAGS.length > 0).length;
+  const totalTransactions = allTransactions.length;
+  const tagUsagePercent = totalTransactions > 0 ? ((totalTaggedTransactions / totalTransactions) * 100).toFixed(1) : 0;
+  
+  tagStats.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-title">Tag Statistics</h6>
+        <div class="mb-2">
+          <div class="small">Total Tags: <strong>${tags.length}</strong></div>
+          <div class="small">Tagged Transactions: <strong>${totalTaggedTransactions}/${totalTransactions}</strong></div>
+          <div class="small">Tag Usage: <strong>${tagUsagePercent}%</strong></div>
+        </div>
+        <div class="progress mb-2" style="height: 10px;">
+          <div class="progress-bar bg-success" style="width: ${tagUsagePercent}%"></div>
+        </div>
+        <div class="small text-muted">
+          Tags help you organize and filter transactions more effectively.
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function addNewTag() {
+  const newTagInput = document.getElementById('newTagInput');
+  const tagName = newTagInput.value.trim();
+  
+  if (!tagName) {
+    showToast("Please enter a tag name", "error");
+    return;
+  }
+  
+  if (allTags.has(tagName)) {
+    showToast("Tag already exists", "warning");
+    return;
+  }
+  
+  try {
+    await updateTagsCollection([tagName]);
+    newTagInput.value = "";
+    showToast("Tag added successfully", "success");
+    await loadTagManager();
+  } catch (error) {
+    showToast("Failed to add tag", "error");
+  }
+}
+
+async function deleteTag(tagName) {
+  const result = await Swal.fire({
+    title: 'Delete Tag?',
+    text: `Are you sure you want to delete the tag "${tagName}"? This will remove it from all transactions.`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'Delete',
+    cancelButtonText: 'Cancel'
+  });
+  
+  if (result.isConfirmed) {
+    try {
+      // Remove from tags collection
+      const tagRef = doc(db, "users", currentUser.uid, "tags", tagName.toLowerCase().replace(/\s+/g, '-'));
+      await deleteDoc(tagRef);
+      
+      // Remove from all transactions
+      const batch = writeBatch(db);
+      const transactionsWithTag = allTransactions.filter(tx => tx.TAGS && tx.TAGS.includes(tagName));
+      
+      for (const tx of transactionsWithTag) {
+        const updatedTags = tx.TAGS.filter(t => t !== tagName);
+        const txRef = doc(db, "users", currentUser.uid, "transactions", tx.id);
+        batch.update(txRef, { TAGS: updatedTags });
+      }
+      
+      await batch.commit();
+      
+      // Update local state
+      allTags.delete(tagName);
+      
+      showToast("Tag deleted successfully", "success");
+      await loadTransactions();
+      await loadTagManager();
+    } catch (error) {
+      console.error("Delete tag error:", error);
+      showToast("Failed to delete tag", "error");
+    }
+  }
+}
+
+// Duplicate transaction function
+async function duplicateTransaction(id = null) {
+  let txToDuplicate;
+  
+  if (id) {
+    // Duplicate specific transaction
+    txToDuplicate = allTransactions.find(t => t.id === id);
+  } else {
+    // Duplicate current form transaction
+    if (!formSINO.value) {
+      showToast("Please save the transaction first", "warning");
+      return;
+    }
+    
+    txToDuplicate = {
+      DATE: formDATE.value,
+      ACCOUNT_HEADER: formACCOUNTHEADER.value,
+      BANK_NAME: formBANKNAME.value,
+      VOUCHER_TYPE: formVOUCHERTYPE.value,
+      TYPE: formTYPE.value,
+      INCOME: parseFloat(formINCOME.value) || 0,
+      EXPENSE: parseFloat(formEXPENSE.value) || 0,
+      DESCRIPTION: formDESCRIPTION.value,
+      NOTES: formNOTES.value,
+      TAGS: formTAGS.value.split(',').map(tag => tag.trim()).filter(tag => tag),
+      STATUS: formSTATUS.value,
+      ATTACHMENT: formATTACH.value,
+      CURRENCY: formCURRENCY.value
+    };
+  }
+  
+  if (!txToDuplicate) return;
+  
+  try {
+    // Generate new voucher number
+    const newSINO = await getNextVoucherNumber(txToDuplicate.VOUCHER_TYPE || "Payment");
+    
+    const duplicatedTx = {
+      ...txToDuplicate,
+      SINO: newSINO,
+      DATE: new Date().toISOString().split('T')[0], // Today's date for duplicate
+      DESCRIPTION: `${txToDuplicate.DESCRIPTION} (Copy)`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: currentUser.uid
+    };
+    
+    // Calculate balance
+    duplicatedTx.BALANCE = getTransactionBalance(duplicatedTx);
+    
+    loadingMessage.textContent = "Duplicating transaction...";
+    loadingModal.show();
+    
+    await addDoc(collection(db, "users", currentUser.uid, "transactions"), duplicatedTx);
+    
+    loadingModal.hide();
+    
+    if (id) {
+      showToast("Transaction duplicated successfully", "success");
+      transactionModal.hide();
+    } else {
+      // If duplicating from form, show success and keep modal open
+      showToast("Transaction duplicated. You can now edit the duplicate.", "success");
+      // Reset form with duplicated data
+      formSINO.value = await getNextVoucherNumber(formVOUCHERTYPE.value);
+      formDESCRIPTION.value = `${formDESCRIPTION.value} (Copy)`;
+    }
+    
+    await loadTransactions();
+  } catch (error) {
+    loadingModal.hide();
+    console.error("Duplicate error:", error);
+    showToast("Failed to duplicate transaction", "error");
+  }
+}
+
+// Update selected summary
+function updateSelectedSummary() {
+  const count = selectedTransactions.size;
+  
+  if (count === 0) {
+    selectedSummary.innerHTML = "No transactions selected";
+    return;
+  }
+  
+  let totalIncome = 0;
+  let totalExpense = 0;
+  
+  for (const id of selectedTransactions) {
+    const tx = allTransactions.find(t => t.id === id);
+    if (tx) {
+      totalIncome += parseFloat(tx.INCOME) || 0;
+      totalExpense += parseFloat(tx.EXPENSE) || 0;
+    }
+  }
+  
+  const net = totalIncome - totalExpense;
+  
+  selectedSummary.innerHTML = `
+    <div class="row">
+      <div class="col-6">
+        <div class="small">Count: <strong>${count}</strong></div>
+        <div class="small text-success">Income: <strong>$${totalIncome.toFixed(2)}</strong></div>
+      </div>
+      <div class="col-6">
+        <div class="small text-danger">Expense: <strong>$${totalExpense.toFixed(2)}</strong></div>
+        <div class="small ${net >= 0 ? 'text-success' : 'text-danger'}">
+          Net: <strong>$${net.toFixed(2)}</strong>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Update filter summary
+function updateFilterSummary() {
+  const total = filteredTransactions.length;
+  const totalAll = allTransactions.length;
+  const percent = totalAll > 0 ? ((total / totalAll) * 100).toFixed(1) : 0;
+  
+  // Calculate totals for filtered transactions
+  const totalIncome = filteredTransactions.reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+  const totalExpense = filteredTransactions.reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+  const net = totalIncome - totalExpense;
+  
+  filterSummary.innerHTML = `
+    <div class="row">
+      <div class="col-md-4">
+        <div class="small">Showing: <strong>${total}</strong> of ${totalAll} (${percent}%)</div>
+      </div>
+      <div class="col-md-4">
+        <div class="small text-success">Income: <strong>$${totalIncome.toFixed(2)}</strong></div>
+        <div class="small text-danger">Expense: <strong>$${totalExpense.toFixed(2)}</strong></div>
+      </div>
+      <div class="col-md-4">
+        <div class="small ${net >= 0 ? 'text-success' : 'text-danger'}">
+          Net: <strong>$${net.toFixed(2)}</strong>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Show transaction details
+function showIncomeDetails() {
+  const incomeTransactions = allTransactions.filter(tx => tx.TYPE === 'Income');
+  const totalIncome = incomeTransactions.reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+  const count = incomeTransactions.length;
+  const avgIncome = count > 0 ? totalIncome / count : 0;
+  
+  Swal.fire({
+    title: 'Income Details',
+    html: `
+      <div class="text-start">
+        <p><strong>Total Income:</strong> $${totalIncome.toFixed(2)}</p>
+        <p><strong>Number of Transactions:</strong> ${count}</p>
+        <p><strong>Average Income per Transaction:</strong> $${avgIncome.toFixed(2)}</p>
+        <p><strong>Top Categories:</strong></p>
+        <ul>
+          ${getTopCategories('Income').map(cat => `<li>${cat.name}: $${cat.total.toFixed(2)}</li>`).join('')}
+        </ul>
+      </div>
+    `,
+    icon: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function showExpenseDetails() {
+  const expenseTransactions = allTransactions.filter(tx => tx.TYPE === 'Expense');
+  const totalExpense = expenseTransactions.reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+  const count = expenseTransactions.length;
+  const avgExpense = count > 0 ? totalExpense / count : 0;
+  
+  Swal.fire({
+    title: 'Expense Details',
+    html: `
+      <div class="text-start">
+        <p><strong>Total Expenses:</strong> $${totalExpense.toFixed(2)}</p>
+        <p><strong>Number of Transactions:</strong> ${count}</p>
+        <p><strong>Average Expense per Transaction:</strong> $${avgExpense.toFixed(2)}</p>
+        <p><strong>Top Categories:</strong></p>
+        <ul>
+          ${getTopCategories('Expense').map(cat => `<li>${cat.name}: $${cat.total.toFixed(2)}</li>`).join('')}
+        </ul>
+      </div>
+    `,
+    icon: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function getTopCategories(type) {
+  const transactions = allTransactions.filter(tx => tx.TYPE === type);
+  const categoryTotals = {};
+  
+  transactions.forEach(tx => {
+    const category = tx.ACCOUNT_HEADER || 'Uncategorized';
+    const amount = type === 'Income' ? (parseFloat(tx.INCOME) || 0) : (parseFloat(tx.EXPENSE) || 0);
+    
+    if (!categoryTotals[category]) {
+      categoryTotals[category] = 0;
+    }
+    categoryTotals[category] += amount;
+  });
+  
+  return Object.entries(categoryTotals)
+    .map(([name, total]) => ({ name, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+}
+
+function showTransactionStats() {
+  const totalTransactions = allTransactions.length;
+  const incomeCount = allTransactions.filter(tx => tx.TYPE === 'Income').length;
+  const expenseCount = allTransactions.filter(tx => tx.TYPE === 'Expense').length;
+  const transferCount = allTransactions.filter(tx => tx.TYPE === 'Transfer').length;
+  
+  const totalAmount = allTransactions.reduce((sum, tx) => {
+    const income = parseFloat(tx.INCOME) || 0;
+    const expense = parseFloat(tx.EXPENSE) || 0;
+    return sum + income + expense;
+  }, 0);
+  
+  const avgTransaction = totalTransactions > 0 ? totalAmount / totalTransactions : 0;
+  
+  Swal.fire({
+    title: 'Transaction Statistics',
+    html: `
+      <div class="text-start">
+        <p><strong>Total Transactions:</strong> ${totalTransactions}</p>
+        <p><strong>Income Transactions:</strong> ${incomeCount} (${totalTransactions > 0 ? ((incomeCount/totalTransactions)*100).toFixed(1) : 0}%)</p>
+        <p><strong>Expense Transactions:</strong> ${expenseCount} (${totalTransactions > 0 ? ((expenseCount/totalTransactions)*100).toFixed(1) : 0}%)</p>
+        <p><strong>Transfer Transactions:</strong> ${transferCount} (${totalTransactions > 0 ? ((transferCount/totalTransactions)*100).toFixed(1) : 0}%)</p>
+        <hr>
+        <p><strong>Total Amount:</strong> $${totalAmount.toFixed(2)}</p>
+        <p><strong>Average Transaction:</strong> $${avgTransaction.toFixed(2)}</p>
+      </div>
+    `,
+    icon: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function showCashflowChart() {
+  // This would show a more detailed cashflow chart
+  // For now, just show a message
+  Swal.fire({
+    title: 'Cash Flow Analysis',
+    text: 'Cash flow chart shows your income vs expenses over time. Green bars represent income, red bars represent expenses.',
+    icon: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function showRecurringTransactions() {
+  if (recurringTransactions.length === 0) {
+    Swal.fire({
+      title: 'Recurring Transactions',
+      text: 'No recurring transactions found.',
+      icon: 'info',
+      confirmButtonText: 'OK'
+    });
+    return;
+  }
+  
+  let html = '<div class="text-start"><ul>';
+  
+  recurringTransactions.forEach(tx => {
+    const amount = (parseFloat(tx.INCOME) || 0) - (parseFloat(tx.EXPENSE) || 0);
+    const sign = amount >= 0 ? '+' : '-';
+    const absAmount = Math.abs(amount);
+    
+    html += `
+      <li class="mb-2">
+        <strong>${tx.DESCRIPTION}</strong><br>
+        <small>
+          ${tx.RECURRING.frequency} | Next: ${tx.RECURRING.nextDate}<br>
+          Amount: ${sign}$${absAmount.toFixed(2)} | Bank: ${tx.BANK_NAME}
+        </small>
+      </li>
+    `;
+  });
+  
+  html += '</ul></div>';
+  
+  Swal.fire({
+    title: 'Recurring Transactions',
+    html: html,
+    icon: 'info',
+    confirmButtonText: 'OK',
+    width: '600px'
+  });
+}
+
+// Export functions
+function exportToCSV() {
+  if (filteredTransactions.length === 0) {
+    showToast("No transactions to export", "warning");
+    return;
+  }
+  
+  const headers = ['Date', 'Voucher #', 'Account Header', 'Bank Name', 'Type', 'Income', 'Expense', 'Balance', 'Description', 'Notes', 'Tags', 'Status'];
+  
+  const csvRows = [
+    headers.join(','),
+    ...filteredTransactions.map(tx => [
+      tx.DATE || '',
+      `"${tx.SINO || ''}"`,
+      `"${tx.ACCOUNT_HEADER || ''}"`,
+      `"${tx.BANK_NAME || ''}"`,
+      tx.TYPE || '',
+      tx.INCOME || 0,
+      tx.EXPENSE || 0,
+      tx.BALANCE || 0,
+      `"${(tx.DESCRIPTION || '').replace(/"/g, '""')}"`,
+      `"${(tx.NOTES || '').replace(/"/g, '""')}"`,
+      `"${(tx.TAGS || []).join(', ')}"`,
+      tx.STATUS || ''
+    ].join(','))
+  ];
+  
+  const csvString = csvRows.join('\n');
+  const blob = new Blob([csvString], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.setAttribute('href', url);
+  a.setAttribute('download', `transactions_${new Date().toISOString().slice(0, 10)}.csv`);
+  a.click();
+  
+  showToast("CSV exported successfully", "success");
+}
+
+function exportToExcel() {
+  if (filteredTransactions.length === 0) {
+    showToast("No transactions to export", "warning");
+    return;
+  }
+  
+  try {
+    const wsData = filteredTransactions.map(tx => ({
+      'Date': tx.DATE || '',
+      'Voucher #': tx.SINO || '',
+      'Account Header': tx.ACCOUNT_HEADER || '',
+      'Bank Name': tx.BANK_NAME || '',
+      'Type': tx.TYPE || '',
+      'Income': tx.INCOME || 0,
+      'Expense': tx.EXPENSE || 0,
+      'Balance': tx.BALANCE || 0,
+      'Description': tx.DESCRIPTION || '',
+      'Notes': tx.NOTES || '',
+      'Tags': (tx.TAGS || []).join(', '),
+      'Status': tx.STATUS || ''
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+    XLSX.writeFile(wb, `transactions_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    
+    showToast("Excel file exported successfully", "success");
+  } catch (error) {
+    console.error("Excel export error:", error);
+    showToast("Failed to export Excel file", "error");
+  }
+}
+
+// App state management
+function saveAppState() {
+  const state = {
+    filters: {
+      date: dateFilter.value,
+      type: typeFilter.value,
+      bank: bankFilter.value,
+      category: categoryFilter.value,
+      status: statusFilter.value,
+      search: searchDesc.value,
+      startDate: startDateInput.value,
+      endDate: endDateInput.value,
+      minAmount: minAmount.value,
+      maxAmount: maxAmount.value,
+      tagFilter: tagFilter.value,
+      sortBy: sortBy.value,
+      groupBy: groupBy.value
+    },
+    currentPage: currentPage,
+    gridCurrentPage: gridCurrentPage,
+    balanceVisible: balanceVisible,
+    theme: currentTheme,
+    sidebarCollapsed: sidebar.classList.contains('collapsed'),
+    selectedTransactions: Array.from(selectedTransactions)
+  };
+  
+  localStorage.setItem('budgetAppState', JSON.stringify(state));
+}
+
+function loadAppState() {
+  const savedState = localStorage.getItem('budgetAppState');
+  if (!savedState) return;
+  
+  try {
+    const state = JSON.parse(savedState);
+    
+    // Apply filters
+    dateFilter.value = state.filters.date || 'all';
+    typeFilter.value = state.filters.type || 'all';
+    bankFilter.value = state.filters.bank || 'all';
+    categoryFilter.value = state.filters.category || 'all';
+    statusFilter.value = state.filters.status || 'all';
+    searchDesc.value = state.filters.search || '';
+    startDateInput.value = state.filters.startDate || '';
+    endDateInput.value = state.filters.endDate || '';
+    minAmount.value = state.filters.minAmount || '';
+    maxAmount.value = state.filters.maxAmount || '';
+    tagFilter.value = state.filters.tagFilter || '';
+    sortBy.value = state.filters.sortBy || 'date-desc';
+    groupBy.value = state.filters.groupBy || 'none';
+    
+    // Show custom range controls if needed
+    if (dateFilter.value === 'custom' && (startDateInput.value || endDateInput.value)) {
+      customRangeControls.style.display = 'flex';
+    }
+    
+    // Apply pagination
+    currentPage = state.currentPage || 1;
+    gridCurrentPage = state.gridCurrentPage || 1;
+    
+    // Apply theme
+    if (state.theme) {
+      currentTheme = state.theme;
+      document.documentElement.setAttribute('data-theme', currentTheme);
+      themeToggle.innerHTML = currentTheme === 'dark' ? 
+        '<i class="fa fa-sun"></i>' : '<i class="fa fa-moon"></i>';
+    }
+    
+    // Apply sidebar state
+    if (state.sidebarCollapsed) {
+      sidebar.classList.add('collapsed');
+      mainContent.classList.add('expanded');
+      sidebarToggle.querySelector('i').className = 'fa fa-chevron-right';
+    }
+    
+    // Apply balance visibility
+    balanceVisible = state.balanceVisible || false;
+    updateBalanceDisplay();
+    
+    // Apply selected transactions
+    if (state.selectedTransactions && Array.isArray(state.selectedTransactions)) {
+      selectedTransactions = new Set(state.selectedTransactions);
+    }
+    
+    hasLoadedSavedState = true;
+  } catch (error) {
+    console.error("Error loading app state:", error);
+  }
+}
+
+// Update last sync time
+function updateLastSync() {
+  const now = new Date();
+  const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  lastSync.textContent = `Last sync: ${timeString}`;
+  
+  // Update dynamic tip
+  const tips = [
+    "Tip: Use tags to categorize transactions for better filtering.",
+    "Tip: You can split income into multiple expense transactions.",
+    "Tip: Use recurring transactions for regular bills and income.",
+    "Tip: Export your transactions to CSV or Excel for backup.",
+    "Tip: Use the calendar view to see transactions by date.",
+    "Tip: Try the AI assistant for financial insights and help.",
+    "Tip: Use bulk actions to edit or delete multiple transactions.",
+    "Tip: Set up different bank accounts for better tracking.",
+    "Tip: Use the quick add feature for fast transaction entry.",
+    "Tip: Regularly review and categorize uncategorized transactions."
+  ];
+  
+  const randomTip = tips[Math.floor(Math.random() * tips.length)];
+  dynamicTip.textContent = randomTip;
+}
+
+function showNextTip() {
+  const tips = [
+    "Tip: Use tags to categorize transactions for better filtering.",
+    "Tip: You can split income into multiple expense transactions.",
+    "Tip: Use recurring transactions for regular bills and income.",
+    "Tip: Export your transactions to CSV or Excel for backup.",
+    "Tip: Use the calendar view to see transactions by date.",
+    "Tip: Try the AI assistant for financial insights and help.",
+    "Tip: Use bulk actions to edit or delete multiple transactions.",
+    "Tip: Set up different bank accounts for better tracking.",
+    "Tip: Use the quick add feature for fast transaction entry.",
+    "Tip: Regularly review and categorize uncategorized transactions.",
+    "Tip: Use the search feature to find transactions quickly.",
+    "Tip: Filter by date range to analyze specific periods.",
+    "Tip: Set transaction status to track pending payments.",
+    "Tip: Use attachments to keep receipts and documents.",
+    "Tip: Monitor your bank balances in the dashboard.",
+    "Tip: Use the chart to visualize income vs expenses.",
+    "Tip: Try different views (list, grid, calendar) for better overview.",
+    "Tip: Use voucher numbering to keep track of transactions.",
+    "Tip: Set default currency in user preferences.",
+    "Tip: Use the tag manager to organize your tags."
+  ];
+  
+  const randomTip = tips[Math.floor(Math.random() * tips.length)];
+  dynamicTip.textContent = randomTip;
+}
+
+// Periodic sync
+function startPeriodicSync() {
+  // Update sync time every minute
+  setInterval(updateLastSync, 60000);
+  
+  // Check for recurring transactions every hour
+  setInterval(async () => {
+    await processRecurringTransactions();
+    await loadTransactions();
+  }, 3600000);
+}
+
+// Save filter preset
+function saveFilterPreset() {
+  Swal.fire({
+    title: 'Save Filter Preset',
+    input: 'text',
+    inputLabel: 'Preset Name',
+    inputPlaceholder: 'Enter a name for this filter',
+    showCancelButton: true,
+    confirmButtonText: 'Save',
+    cancelButtonText: 'Cancel',
+    inputValidator: (value) => {
+      if (!value) {
+        return 'Please enter a name for the preset';
+      }
+    }
+  }).then(async (result) => {
+    if (result.isConfirmed) {
+      const presetName = result.value;
+      const presetData = {
+        date: dateFilter.value,
+        type: typeFilter.value,
+        bank: bankFilter.value,
+        category: categoryFilter.value,
+        status: statusFilter.value,
+        search: searchDesc.value,
+        startDate: startDateInput.value,
+        endDate: endDateInput.value,
+        minAmount: minAmount.value,
+        maxAmount: maxAmount.value,
+        tagFilter: tagFilter.value,
+        sortBy: sortBy.value,
+        groupBy: groupBy.value,
+        name: presetName,
+        createdAt: new Date()
+      };
+      
+      try {
+        await addDoc(collection(db, "users", currentUser.uid, "filterPresets"), presetData);
+        showToast("Filter preset saved successfully", "success");
+      } catch (error) {
+        console.error("Save filter preset error:", error);
+        showToast("Failed to save filter preset", "error");
+      }
+    }
+  });
+}
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialize tooltips
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[title]'));
+  tooltipTriggerList.map(function (tooltipTriggerEl) {
+    return new bootstrap.Tooltip(tooltipTriggerEl);
+  });
+  
+  // Initialize flatpickr for date inputs
+  flatpickr("#startDate", {
+    dateFormat: "Y-m-d",
+    defaultDate: new Date()
+  });
+  
+  flatpickr("#endDate", {
+    dateFormat: "Y-m-d",
+    defaultDate: new Date()
+  });
+  
+  // Load sidebar state
+  loadSidebarState();
+  
+  // Add input event listeners for real-time filtering
+  searchDesc.addEventListener('input', debounce(() => {
+    if (searchDesc.value.length === 0 || searchDesc.value.length >= 3) {
+      applyFilters();
+    }
+  }, 500));
+  
+  // Add change event listeners for filters
+  [dateFilter, typeFilter, bankFilter, categoryFilter, statusFilter, 
+   minAmount, maxAmount, tagFilter, sortBy, groupBy].forEach(element => {
+    element.addEventListener('change', () => {
+      applyFilters();
+      saveAppState();
+    });
+  });
+  
+  // Add input event listeners for amount filters
+  [minAmount, maxAmount].forEach(element => {
+    element.addEventListener('input', debounce(() => {
+      applyFilters();
+      saveAppState();
+    }, 500));
+  });
+  
+  // Add event listener for date inputs
+  [startDateInput, endDateInput].forEach(element => {
+    element.addEventListener('change', () => {
+      if (dateFilter.value === 'custom') {
+        applyFilters();
+        saveAppState();
+      }
+    });
+  });
+});
+
+// Debounce function for search
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Add this to make functions available globally
+window.editTransaction = editTransaction;
+window.deleteTransaction = deleteTransaction;
+window.viewAttachment = viewAttachment;
+window.duplicateTransaction = duplicateTransaction;
+window.showIncomeDetails = showIncomeDetails;
+window.showExpenseDetails = showExpenseDetails;
+window.showTransactionStats = showTransactionStats;
+window.showCashflowChart = showCashflowChart;
+window.showRecurringTransactions = showRecurringTransactions;
+window.showNextTip = showNextTip;
+window.toggleBalanceVisibility = toggleBalanceVisibility;
+window.removeTag = removeTag;
+window.addNewTag = addNewTag;
+window.deleteTag = deleteTag;
+window.changePage = changePage;
+window.changeGridPage = changeGridPage;
+window.prevMonth = prevMonth;
+window.nextMonth = nextMonth;
+window.showDayTransactions = showDayTransactions;
+window.toggleAIPanel = toggleAIPanel;
+window.sendAIMessage = sendAIMessage;
+window.removeSplitExpense = removeSplitExpense;
+
+// Initialize when page loads
+setTimeout(() => {
+  // Check if user is logged in
+  if (!currentUser) {
+    // User not logged in, Firebase auth will handle redirect
+    return;
+  }
+  
+  // User is logged in, initialize the rest
+  updateLastSync();
+  
+  // Add resize listener for sidebar
+  window.addEventListener('resize', () => {
+    if (window.innerWidth <= 1200) {
+      sidebar.classList.remove('collapsed');
+      mainContent.classList.remove('expanded');
+    }
+  });
+}, 1000);
+</script>
+</body>
+</html>
