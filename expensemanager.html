@@ -4168,3 +4168,1536 @@ function loadAppState() {
     hasLoadedSavedState = true;
   }
 }
+// Multiple Selection Functions
+function selectAllTransactions() {
+  const pageTransactions = filteredTransactions.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
+  
+  pageTransactions.forEach(tx => {
+    selectedTransactions.add(tx.id);
+  });
+  
+  buildTable();
+  updateBulkActions();
+  updateSelectedSummary();
+}
+
+function deselectAllTransactions() {
+  selectedTransactions.clear();
+  buildTable();
+  updateBulkActions();
+  updateSelectedSummary();
+}
+
+function toggleSelectAll() {
+  if (selectAllCheckbox.checked) {
+    selectAllTransactions();
+  } else {
+    deselectAllTransactions();
+  }
+}
+
+function clearSelection() {
+  selectedTransactions.clear();
+  buildTable();
+  updateBulkActions();
+  updateSelectedSummary();
+}
+
+function updateBulkActions() {
+  const count = selectedTransactions.size;
+  selectedCount.textContent = `${count} transaction${count !== 1 ? 's' : ''} selected`;
+  
+  if (count > 0) {
+    bulkActions.classList.remove('hidden');
+  } else {
+    bulkActions.classList.add('hidden');
+  }
+}
+
+function confirmBulkDelete() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkDeleteCount.textContent = count;
+  confirmBulkDeleteModal.show();
+}
+
+async function processBulkDelete() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  try {
+    loadingMessage.textContent = `Deleting ${count} transactions...`;
+    loadingModal.show();
+    
+    const batch = writeBatch(db);
+    Array.from(selectedTransactions).forEach(id => {
+      const docRef = doc(db, "users", currentUser.uid, "transactions", id);
+      batch.delete(docRef);
+    });
+    
+    await batch.commit();
+    
+    loadingModal.hide();
+    showToast(`${count} transaction${count !== 1 ? 's' : ''} deleted successfully`, "success");
+    
+    selectedTransactions.clear();
+    confirmBulkDeleteModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("bulkDeleteTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transactions' });
+  }
+}
+
+function openBulkEditModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkEditCount.textContent = count;
+  bulkEditValue.value = "";
+  bulkEditModal.show();
+}
+
+async function processBulkEdit() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  const field = bulkEditField.value;
+  const value = bulkEditValue.value.trim();
+  
+  if (!value) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a value' });
+    return;
+  }
+  
+  try {
+    loadingMessage.textContent = `Updating ${count} transactions...`;
+    loadingModal.show();
+    
+    const batch = writeBatch(db);
+    Array.from(selectedTransactions).forEach(id => {
+      const docRef = doc(db, "users", currentUser.uid, "transactions", id);
+      const updateData = {};
+      updateData[field] = value;
+      updateData.updatedAt = new Date();
+      batch.update(docRef, updateData);
+    });
+    
+    await batch.commit();
+    
+    loadingModal.hide();
+    showToast(`${count} transaction${count !== 1 ? 's' : ''} updated successfully`, "success");
+    
+    selectedTransactions.clear();
+    bulkEditModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("bulkEditTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions' });
+  }
+}
+
+function openBulkTagModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  bulkTagCount.textContent = count;
+  bulkTagsInput.value = "";
+  bulkTagModal.show();
+}
+
+async function processBulkTags() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  const tagsInput = bulkTagsInput.value.trim();
+  if (!tagsInput) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter at least one tag' });
+    return;
+  }
+  
+  const newTags = tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+  
+  try {
+    loadingMessage.textContent = `Adding tags to ${count} transactions...`;
+    loadingModal.show();
+    
+    // Update tags collection
+    await updateTagsCollection(newTags);
+    
+    // Update each transaction
+    const batch = writeBatch(db);
+    Array.from(selectedTransactions).forEach(id => {
+      const tx = allTransactions.find(t => t.id === id);
+      if (tx) {
+        const existingTags = tx.TAGS || [];
+        const updatedTags = [...new Set([...existingTags, ...newTags])];
+        
+        const docRef = doc(db, "users", currentUser.uid, "transactions", id);
+        batch.update(docRef, {
+          TAGS: updatedTags,
+          updatedAt: new Date()
+        });
+      }
+    });
+    
+    await batch.commit();
+    
+    loadingModal.hide();
+    showToast(`Tags added to ${count} transaction${count !== 1 ? 's' : ''} successfully`, "success");
+    
+    selectedTransactions.clear();
+    bulkTagModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("bulkTagTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add tags' });
+  }
+}
+
+async function updateTagsCollection(tags) {
+  try {
+    const tagsRef = collection(db, "users", currentUser.uid, "tags");
+    const tagsSnapshot = await getDocs(tagsRef);
+    const existingTags = new Set();
+    
+    tagsSnapshot.forEach(doc => {
+      existingTags.add(doc.data().name);
+    });
+    
+    const batch = writeBatch(db);
+    tags.forEach(tag => {
+      if (!existingTags.has(tag)) {
+        const newTagRef = doc(tagsRef);
+        batch.set(newTagRef, {
+          name: tag,
+          createdAt: new Date(),
+          userId: currentUser.uid
+        });
+      }
+    });
+    
+    if (batch._mutations.length > 0) {
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn('Error updating tags collection:', error.message);
+  }
+}
+
+function openBulkCategoryModal() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  Swal.fire({
+    title: 'Change Category',
+    input: 'select',
+    inputOptions: coaAccounts.reduce((options, account) => {
+      options[account] = account;
+      return options;
+    }, {}),
+    inputPlaceholder: 'Select new category',
+    showCancelButton: true,
+    confirmButtonText: 'Update',
+    cancelButtonText: 'Cancel',
+    preConfirm: (category) => {
+      if (!category) {
+        Swal.showValidationMessage('Please select a category');
+      }
+      return category;
+    }
+  }).then(async (result) => {
+    if (result.isConfirmed) {
+      try {
+        loadingMessage.textContent = `Updating categories for ${count} transactions...`;
+        loadingModal.show();
+        
+        const batch = writeBatch(db);
+        Array.from(selectedTransactions).forEach(id => {
+          const docRef = doc(db, "users", currentUser.uid, "transactions", id);
+          batch.update(docRef, {
+            ACCOUNT_HEADER: result.value,
+            updatedAt: new Date()
+          });
+        });
+        
+        await batch.commit();
+        
+        loadingModal.hide();
+        showToast(`Category updated for ${count} transaction${count !== 1 ? 's' : ''}`, "success");
+        
+        selectedTransactions.clear();
+        await loadTransactions();
+      } catch (err) {
+        loadingModal.hide();
+        console.error("bulkCategoryUpdate", err);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update categories' });
+      }
+    }
+  });
+}
+
+// Split Income Functions
+function openSplitIncomeModal() {
+  splitIncomeAmount.value = "";
+  splitIncomeDescription.value = "";
+  splitIncomeBank.value = "";
+  splitExpensesContainer.innerHTML = "";
+  splitSummary.innerHTML = "";
+  
+  addSplitExpense();
+  
+  splitIncomeModal.show();
+}
+
+function addSplitExpense() {
+  const expenseId = 'expense-' + Date.now();
+  const expenseHtml = `
+    <div class="split-transaction-item" id="${expenseId}">
+      <div class="split-header">
+        <h6>Expense</h6>
+        <button type="button" class="remove-split" onclick="removeSplitExpense('${expenseId}')">
+          <i class="fa fa-times"></i>
+        </button>
+      </div>
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label">Amount</label>
+          <input type="number" step="0.01" class="form-control split-amount-input" placeholder="0.00" oninput="updateSplitSummary()">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Description</label>
+          <input type="text" class="form-control split-description-input" placeholder="Expense description">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Bank Account</label>
+          <select class="form-select split-bank-input">
+            <option value="">Select Bank</option>
+            ${coaBanks.map(bank => `<option value="${bank}">${bank}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="row g-2 mt-2">
+        <div class="col-md-12">
+          <label class="form-label">Account Header</label>
+          <select class="form-select split-account-input">
+            <option value="">Select Account Header</option>
+            ${coaAccounts.map(account => `<option value="${account}">${account}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  splitExpensesContainer.insertAdjacentHTML('beforeend', expenseHtml);
+  updateSplitSummary();
+}
+
+function removeSplitExpense(id) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.remove();
+    updateSplitSummary();
+  }
+}
+
+function updateSplitSummary() {
+  const incomeAmount = parseFloat(splitIncomeAmount.value) || 0;
+  const expenseElements = splitExpensesContainer.querySelectorAll('.split-transaction-item');
+  
+  let totalExpenses = 0;
+  expenseElements.forEach(element => {
+    const amountInput = element.querySelector('.split-amount-input');
+    const amount = parseFloat(amountInput.value) || 0;
+    totalExpenses += amount;
+  });
+  
+  const remaining = incomeAmount - totalExpenses;
+  
+  let summaryHtml = '';
+  if (incomeAmount > 0) {
+    summaryHtml = `
+      <div class="d-flex justify-content-between">
+        <span>Total Income:</span>
+        <span>$${incomeAmount.toFixed(2)}</span>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>Total Expenses:</span>
+        <span>$${totalExpenses.toFixed(2)}</span>
+      </div>
+      <div class="d-flex justify-content-between ${remaining >= 0 ? 'amount-remaining' : 'amount-exceeded'}">
+        <span>Remaining:</span>
+        <span>$${remaining.toFixed(2)}</span>
+      </div>
+    `;
+    
+    if (remaining < 0) {
+      summaryHtml += `<div class="text-danger small mt-1">Warning: Expenses exceed income by $${Math.abs(remaining).toFixed(2)}</div>`;
+    } else if (remaining > 0) {
+      summaryHtml += `<div class="text-warning small mt-1">Note: $${remaining.toFixed(2)} of income not allocated</div>`;
+    } else {
+      summaryHtml += `<div class="text-success small mt-1">Perfect! All income allocated to expenses</div>`;
+    }
+  }
+  
+  splitSummary.innerHTML = summaryHtml;
+}
+
+async function saveSplitTransactions() {
+  const incomeAmount = parseFloat(splitIncomeAmount.value) || 0;
+  const incomeDescription = splitIncomeDescription.value.trim();
+  const incomeBank = splitIncomeBank.value;
+  
+  if (!incomeAmount || incomeAmount <= 0) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a valid income amount' });
+    return;
+  }
+  
+  if (!incomeDescription) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter an income description' });
+    return;
+  }
+  
+  if (!incomeBank) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please select an income bank account' });
+    return;
+  }
+  
+  const expenseElements = splitExpensesContainer.querySelectorAll('.split-transaction-item');
+  if (expenseElements.length === 0) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please add at least one expense' });
+    return;
+  }
+  
+  let totalExpenses = 0;
+  const expenses = [];
+  
+  for (const element of expenseElements) {
+    const amountInput = element.querySelector('.split-amount-input');
+    const descriptionInput = element.querySelector('.split-description-input');
+    const bankInput = element.querySelector('.split-bank-input');
+    const accountInput = element.querySelector('.split-account-input');
+    
+    const amount = parseFloat(amountInput.value) || 0;
+    const description = descriptionInput.value.trim();
+    const bank = bankInput.value;
+    const account = accountInput.value;
+    
+    if (amount <= 0) {
+      Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a positive amount' });
+      return;
+    }
+    
+    if (!description) {
+      Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a description' });
+      return;
+    }
+    
+    if (!bank) {
+      Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have a bank account selected' });
+      return;
+    }
+    
+    if (!account) {
+      Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'All expenses must have an account header selected' });
+      return;
+    }
+    
+    totalExpenses += amount;
+    expenses.push({ amount, description, bank, account });
+  }
+  
+  const remaining = incomeAmount - totalExpenses;
+  if (remaining < 0) {
+    const result = await Swal.fire({
+      icon: 'warning',
+      title: 'Expenses Exceed Income',
+      text: `Your expenses ($${totalExpenses.toFixed(2)}) exceed your income ($${incomeAmount.toFixed(2)}) by $${Math.abs(remaining).toFixed(2)}. Do you want to continue?`,
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Continue',
+      cancelButtonText: 'No, Cancel'
+    });
+    
+    if (!result.isConfirmed) {
+      return;
+    }
+  }
+  
+  try {
+    loadingMessage.textContent = "Saving split transactions...";
+    loadingModal.show();
+    
+    const today = new Date().toISOString().split('T')[0];
+    const batch = writeBatch(db);
+    
+    // Save income transaction
+    const incomeVoucher = await getNextVoucherNumber("Receipt");
+    const incomeData = {
+      DATE: today,
+      SINO: incomeVoucher,
+      ACCOUNT_HEADER: "Income",
+      BANK_NAME: incomeBank,
+      MODE: incomeBank,
+      VOUCHER_TYPE: "Receipt",
+      TYPE: "Income",
+      INCOME: incomeAmount,
+      EXPENSE: 0,
+      BALANCE: 0,
+      DESCRIPTION: incomeDescription,
+      NOTES: "Split income transaction",
+      TAGS: ["split-income"],
+      STATUS: "completed",
+      CURRENCY: "USD",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: currentUser.uid
+    };
+    
+    const incomeRef = doc(collection(db, "users", currentUser.uid, "transactions"));
+    batch.set(incomeRef, incomeData);
+    
+    // Save all expense transactions
+    for (const expense of expenses) {
+      const expenseVoucher = await getNextVoucherNumber("Payment");
+      const expenseData = {
+        DATE: today,
+        SINO: expenseVoucher,
+        ACCOUNT_HEADER: expense.account,
+        BANK_NAME: expense.bank,
+        MODE: expense.bank,
+        VOUCHER_TYPE: "Payment",
+        TYPE: "Expense",
+        INCOME: 0,
+        EXPENSE: expense.amount,
+        BALANCE: 0,
+        DESCRIPTION: expense.description,
+        NOTES: "Split from income",
+        TAGS: ["split-expense"],
+        STATUS: "completed",
+        CURRENCY: "USD",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        userId: currentUser.uid
+      };
+      
+      const expenseRef = doc(collection(db, "users", currentUser.uid, "transactions"));
+      batch.set(expenseRef, expenseData);
+    }
+    
+    await batch.commit();
+    
+    loadingModal.hide();
+    showToast(`Created ${1 + expenses.length} transactions successfully`, "success");
+    
+    splitIncomeModal.hide();
+    await loadTransactions();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("saveSplitTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save transactions' });
+  }
+}
+
+// Sidebar functions
+function toggleSidebar() {
+  sidebar.classList.toggle('collapsed');
+  mainContent.classList.toggle('expanded');
+  sidebarToggle.innerHTML = sidebar.classList.contains('collapsed') ? 
+    '<i class="fa fa-chevron-right"></i>' : '<i class="fa fa-chevron-left"></i>';
+}
+
+function toggleMobileMenu() {
+  sidebar.classList.toggle('show');
+}
+
+// AI Assistant functions
+function toggleAIPanel() {
+  aiPanel.classList.toggle('show');
+}
+
+async function sendAIMessage() {
+  const message = aiInput.value.trim();
+  if (!message) return;
+  
+  // Add user message to chat
+  addAIMessage(message, 'user');
+  aiInput.value = '';
+  
+  try {
+    // Simulate AI response (in a real app, this would call an AI API)
+    setTimeout(() => {
+      const responses = [
+        "Based on your transaction history, I recommend reviewing your monthly subscriptions to identify potential savings.",
+        "Your spending on dining out has increased by 15% compared to last month. Consider setting a budget for this category.",
+        "I notice you have several pending transactions. Would you like me to help you categorize them?",
+        "Your cash flow looks healthy this month. You've saved 20% more than your target!",
+        "Consider setting up automatic transfers to your savings account to build your emergency fund faster."
+      ];
+      
+      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+      addAIMessage(randomResponse, 'bot');
+    }, 1000);
+  } catch (error) {
+    addAIMessage("I'm having trouble processing your request. Please try again later.", 'bot');
+  }
+}
+
+function addAIMessage(text, sender) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `ai-message ${sender}`;
+  messageDiv.textContent = text;
+  aiChat.appendChild(messageDiv);
+  aiChat.scrollTop = aiChat.scrollHeight;
+}
+
+// Grid View functions
+let gridCurrentPage = 1;
+const gridRowsPerPage = 12;
+
+function renderGridView() {
+  if (filteredTransactions.length === 0) {
+    gridViewContainer.innerHTML = `
+      <div class="col-12 text-center py-5">
+        <div class="empty-state">
+          <div class="empty-state-icon">
+            <i class="fa fa-exchange-alt"></i>
+          </div>
+          <h5>No transactions found</h5>
+          <p class="text-muted">Try changing your filters or add a new transaction.</p>
+          <button class="btn btn-primary mt-2" onclick="openAddModal()">
+            <i class="fa fa-plus me-1"></i> Add Transaction
+          </button>
+        </div>
+      </div>
+    `;
+    gridPaginationControls.innerHTML = "";
+    return;
+  }
+
+  const startIndex = (gridCurrentPage - 1) * gridRowsPerPage;
+  const endIndex = Math.min(startIndex + gridRowsPerPage, filteredTransactions.length);
+  const pageTransactions = filteredTransactions.slice(startIndex, endIndex);
+
+  let html = '';
+  pageTransactions.forEach(tx => {
+    const date = tx.DATE ? formatDateToYyyyMmmDd(tx.DATE) : "";
+    const income = parseFloat(tx.INCOME) || 0;
+    const expense = parseFloat(tx.EXPENSE) || 0;
+    const amount = income > 0 ? income : expense;
+    
+    let cardClass = 'grid-card';
+    let typeIcon = '';
+    let amountColor = '';
+    
+    if (tx.TYPE === 'Income') {
+      cardClass += ' grid-card-income';
+      typeIcon = '<i class="fa fa-arrow-up text-success"></i>';
+      amountColor = 'text-success';
+    } else if (tx.TYPE === 'Expense') {
+      cardClass += ' grid-card-expense';
+      typeIcon = '<i class="fa fa-arrow-down text-danger"></i>';
+      amountColor = 'text-danger';
+    } else if (tx.TYPE === 'Transfer') {
+      cardClass += ' grid-card-transfer';
+      typeIcon = '<i class="fa fa-exchange-alt text-info"></i>';
+      amountColor = 'text-info';
+    }
+    
+    if (tx.RECURRING) {
+      cardClass += ' grid-card-recurring';
+    }
+    
+    html += `
+      <div class="col-md-6 col-lg-4 col-xl-3 mb-3">
+        <div class="${cardClass}">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h6 class="card-title mb-0" style="font-size: 14px;">${escapeHtml(tx.DESCRIPTION || tx.NOTES || "").substring(0, 50)}${(tx.DESCRIPTION || tx.NOTES || "").length > 50 ? '...' : ''}</h6>
+            ${tx.RECURRING ? '<span class="badge bg-warning text-dark grid-badge">Recurring</span>' : ''}
+          </div>
+          <p class="card-text small text-muted mb-2">
+            ${escapeHtml(tx.ACCOUNT_HEADER || "")} • ${escapeHtml(tx.BANK_NAME || tx.MODE || "")}
+          </p>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="fw-bold ${amountColor}" style="font-size: 16px;">
+              ${typeIcon} $${amount.toFixed(2)}
+            </span>
+            <small class="text-muted">${date}</small>
+          </div>
+          ${tx.TAGS && tx.TAGS.length > 0 ? `
+            <div class="mb-3">
+              ${tx.TAGS.map(tag => `<span class="badge bg-secondary me-1 grid-badge">${escapeHtml(tag)}</span>`).join('')}
+            </div>
+          ` : ''}
+          <div class="d-flex justify-content-between mt-2">
+            <button class="btn btn-sm btn-outline-primary view-tx" data-id="${tx.id}">
+              <i class="fa fa-eye"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-warning edit-tx" data-id="${tx.id}">
+              <i class="fa fa-edit"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary duplicate-tx" data-id="${tx.id}">
+              <i class="fa fa-copy"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger delete-tx" data-id="${tx.id}">
+              <i class="fa fa-trash"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  gridViewContainer.innerHTML = html;
+  
+  // Add event listeners for grid view buttons
+  gridViewContainer.addEventListener("click", handleGridViewClick);
+  
+  // Build pagination for grid view
+  buildGridPagination();
+}
+
+function handleGridViewClick(e) {
+  const target = e.target;
+  const button = target.closest("button");
+  
+  if (!button) return;
+  
+  if (button.classList.contains("view-tx")) {
+    const id = button.getAttribute("data-id");
+    viewTransaction(id);
+  } else if (button.classList.contains("edit-tx")) {
+    const id = button.getAttribute("data-id");
+    editTransaction(id);
+  } else if (button.classList.contains("delete-tx")) {
+    const id = button.getAttribute("data-id");
+    confirmDelete(id);
+  } else if (button.classList.contains("duplicate-tx")) {
+    const id = button.getAttribute("data-id");
+    duplicateTransactionById(id);
+  }
+}
+
+function buildGridPagination() {
+  const totalPages = Math.ceil(filteredTransactions.length / gridRowsPerPage);
+  if (totalPages <= 1) {
+    gridPaginationControls.innerHTML = "";
+    return;
+  }
+
+  let html = `<nav><ul class="pagination pagination-sm">`;
+
+  html += `
+    <li class="page-item ${gridCurrentPage === 1 ? 'disabled' : ''}">
+      <a class="page-link" href="#" data-page="${gridCurrentPage - 1}">Previous</a>
+    </li>
+  `;
+
+  const startPage = Math.max(1, gridCurrentPage - 2);
+  const endPage = Math.min(totalPages, startPage + 4);
+
+  for (let i = startPage; i <= endPage; i++) {
+    html += `
+      <li class="page-item ${i === gridCurrentPage ? 'active' : ''}">
+        <a class="page-link" href="#" data-page="${i}">${i}</a>
+      </li>
+    `;
+  }
+
+  html += `
+    <li class="page-item ${gridCurrentPage === totalPages ? 'disabled' : ''}">
+      <a class="page-link" href="#" data-page="${gridCurrentPage + 1}">Next</a>
+    </li>
+  `;
+
+  gridPaginationControls.innerHTML = html;
+
+  // Event delegation for pagination
+  gridPaginationControls.addEventListener("click", function(e) {
+    const link = e.target.closest(".page-link");
+    if (link) {
+      e.preventDefault();
+      const page = parseInt(link.getAttribute("data-page"));
+      if (page && page !== gridCurrentPage && page > 0 && page <= totalPages) {
+        gridCurrentPage = page;
+        renderGridView();
+      }
+    }
+  });
+}
+
+// Calendar View functions
+function renderCalendarView() {
+  const now = new Date();
+  const year = currentCalendarYear;
+  const month = currentCalendarMonth;
+  
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  
+  // Get transactions for the current month
+  const monthTransactions = filteredTransactions.filter(tx => {
+    try {
+      if (!tx.DATE) return false;
+      const txDate = new Date(tx.DATE);
+      return txDate.getMonth() === month && txDate.getFullYear() === year;
+    } catch (e) {
+      return false;
+    }
+  });
+  
+  // Group transactions by date
+  const transactionsByDate = {};
+  monthTransactions.forEach(tx => {
+    try {
+      const date = new Date(tx.DATE);
+      const dateStr = date.toISOString().split('T')[0];
+      if (!transactionsByDate[dateStr]) {
+        transactionsByDate[dateStr] = [];
+      }
+      transactionsByDate[dateStr].push(tx);
+    } catch (e) {
+      // Skip invalid dates
+    }
+  });
+  
+  let html = `
+    <div class="calendar">
+      <div class="calendar-header">
+        <button class="calendar-nav-btn" onclick="changeCalendarMonth(-1)">
+          <i class="fa fa-chevron-left"></i>
+        </button>
+        <h5 class="mb-0">${firstDay.toLocaleString('default', { month: 'long', year: 'numeric' })}</h5>
+        <button class="calendar-nav-btn" onclick="changeCalendarMonth(1)">
+          <i class="fa fa-chevron-right"></i>
+        </button>
+      </div>
+      <div class="calendar-grid">
+        <div class="calendar-day-header">Sun</div>
+        <div class="calendar-day-header">Mon</div>
+        <div class="calendar-day-header">Tue</div>
+        <div class="calendar-day-header">Wed</div>
+        <div class="calendar-day-header">Thu</div>
+        <div class="calendar-day-header">Fri</div>
+        <div class="calendar-day-header">Sat</div>
+  `;
+  
+  // Empty cells for days before the first day of the month
+  const startDay = firstDay.getDay();
+  for (let i = 0; i < startDay; i++) {
+    html += '<div class="calendar-day empty"></div>';
+  }
+  
+  // Days of the month
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const date = new Date(year, month, day);
+    const dateStr = date.toISOString().split('T')[0];
+    const dayTransactions = transactionsByDate[dateStr] || [];
+    
+    const totalIncome = dayTransactions
+      .filter(tx => tx.TYPE === 'Income')
+      .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+      
+    const totalExpense = dayTransactions
+      .filter(tx => tx.TYPE === 'Expense')
+      .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+    
+    let transactionsHtml = '';
+    if (dayTransactions.length > 0) {
+      // Show up to 2 transactions per day in calendar
+      const displayTransactions = dayTransactions.slice(0, 2);
+      displayTransactions.forEach(tx => {
+        const amount = tx.INCOME > 0 ? tx.INCOME : tx.EXPENSE;
+        const isIncome = tx.TYPE === 'Income';
+        transactionsHtml += `
+          <div class="calendar-transaction ${isIncome ? 'calendar-transaction-income' : 'calendar-transaction-expense'}">
+            ${isIncome ? '+' : '-'}$${amount.toFixed(0)}
+          </div>
+        `;
+      });
+      
+      if (dayTransactions.length > 2) {
+        transactionsHtml += `<div class="calendar-transaction text-muted">+${dayTransactions.length - 2} more</div>`;
+      }
+    }
+    
+    html += `
+      <div class="calendar-day ${dayTransactions.length > 0 ? 'has-transactions' : ''}" 
+           onclick="showDayTransactions('${dateStr}')">
+        <div class="calendar-day-number">${day}</div>
+        <div class="calendar-day-transactions">
+          ${transactionsHtml}
+        </div>
+        ${dayTransactions.length > 0 ? `
+          <div class="small text-muted mt-1">
+            <span class="text-success">+$${totalIncome.toFixed(0)}</span>
+            <span class="text-danger"> -$${totalExpense.toFixed(0)}</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+  
+  // Empty cells for days after the last day of the month
+  const endDay = lastDay.getDay();
+  for (let i = endDay + 1; i < 7; i++) {
+    html += '<div class="calendar-day empty"></div>';
+  }
+  
+  html += `
+      </div>
+    </div>
+  `;
+  
+  calendarContainer.innerHTML = html;
+}
+
+function changeCalendarMonth(delta) {
+  currentCalendarMonth += delta;
+  
+  // Handle year rollover
+  if (currentCalendarMonth < 0) {
+    currentCalendarMonth = 11;
+    currentCalendarYear--;
+  } else if (currentCalendarMonth > 11) {
+    currentCalendarMonth = 0;
+    currentCalendarYear++;
+  }
+  
+  renderCalendarView();
+}
+
+function showDayTransactions(dateStr) {
+  const dayTransactions = filteredTransactions.filter(tx => tx.DATE === dateStr);
+  
+  if (dayTransactions.length === 0) return;
+  
+  const date = new Date(dateStr);
+  const formattedDate = date.toLocaleDateString('en-US', { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+  
+  const totalIncome = dayTransactions
+    .filter(tx => tx.TYPE === 'Income')
+    .reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+    
+  const totalExpense = dayTransactions
+    .filter(tx => tx.TYPE === 'Expense')
+    .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+  
+  let transactionsHtml = dayTransactions.map(tx => {
+    const amount = tx.INCOME > 0 ? tx.INCOME : tx.EXPENSE;
+    const isIncome = tx.TYPE === 'Income';
+    const badgeClass = isIncome ? 'badge-income' : 'badge-expense';
+    
+    return `
+      <div class="card mb-2">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <div style="flex: 1;">
+              <strong>${escapeHtml(tx.DESCRIPTION || tx.NOTES || "")}</strong>
+              <div class="small text-muted">
+                ${escapeHtml(tx.ACCOUNT_HEADER || "")} • ${escapeHtml(tx.BANK_NAME || tx.MODE || "")}
+                ${tx.TAGS && tx.TAGS.length > 0 ? `• ${tx.TAGS.map(tag => `<span class="badge bg-secondary">${tag}</span>`).join(' ')}` : ''}
+              </div>
+            </div>
+            <div class="text-end ms-3">
+              <span class="${isIncome ? 'text-success' : 'text-danger'} fw-bold">
+                ${isIncome ? '+' : '-'}$${amount.toFixed(2)}
+              </span>
+              <div class="small mt-1">
+                <span class="badge ${badgeClass}">${tx.TYPE}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  Swal.fire({
+    title: `Transactions for ${formattedDate}`,
+    html: `
+      <div class="mb-3">
+        <div class="row">
+          <div class="col-6">
+            <div class="text-success">
+              <strong>Total Income:</strong>
+              <div>$${totalIncome.toFixed(2)}</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="text-danger">
+              <strong>Total Expense:</strong>
+              <div>$${totalExpense.toFixed(2)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="max-height: 400px; overflow-y: auto;">
+        ${transactionsHtml}
+      </div>
+    `,
+    width: 700,
+    showCloseButton: true
+  });
+}
+
+// Dynamic tips
+const tips = [
+  "Try using the Quick Add feature to add transactions in natural language.",
+  "Use tags to categorize transactions for better reporting.",
+  "Set up recurring transactions for regular bills and income.",
+  "Export your data regularly for backup purposes.",
+  "Use the AI assistant for financial insights and recommendations.",
+  "Try different view modes (List, Grid, Calendar) to visualize your transactions differently.",
+  "Use the split income feature to allocate income to multiple expense categories.",
+  "Take advantage of bulk actions to manage multiple transactions at once."
+];
+
+let currentTipIndex = 0;
+
+function showNextTip() {
+  currentTipIndex = (currentTipIndex + 1) % tips.length;
+  dynamicTip.textContent = tips[currentTipIndex];
+}
+
+// Last sync time
+function updateLastSync() {
+  const now = new Date();
+  lastSync.textContent = `Last sync: ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+}
+
+function startPeriodicSync() {
+  // Update sync time every minute
+  setInterval(updateLastSync, 60000);
+  
+  // Auto-sync every 5 minutes
+  setInterval(async () => {
+    try {
+      await loadTransactions();
+      showToast("Data synced automatically", "info");
+    } catch (error) {
+      console.warn("Auto-sync failed:", error);
+    }
+  }, 300000);
+}
+
+// Filter presets
+async function saveFilterPreset() {
+  const { value: name } = await Swal.fire({
+    title: 'Save Filter Preset',
+    input: 'text',
+    inputLabel: 'Enter a name for this filter preset',
+    showCancelButton: true,
+    confirmButtonText: 'Save',
+    cancelButtonText: 'Cancel'
+  });
+  
+  if (name) {
+    try {
+      const presetData = {
+        name,
+        dateFilter: dateFilter.value,
+        typeFilter: typeFilter.value,
+        bankFilter: bankFilter.value,
+        categoryFilter: categoryFilter.value,
+        statusFilter: statusFilter.value,
+        searchDesc: searchDesc.value,
+        startDate: startDateInput.value,
+        endDate: endDateInput.value,
+        minAmount: minAmount.value,
+        maxAmount: maxAmount.value,
+        tagFilter: tagFilter.value,
+        sortBy: sortBy.value,
+        groupBy: groupBy.value,
+        createdAt: new Date(),
+        userId: currentUser.uid
+      };
+      
+      await addDoc(collection(db, "users", currentUser.uid, "filterPresets"), presetData);
+      showToast("Filter preset saved successfully", "success");
+    } catch (error) {
+      console.error("Error saving filter preset:", error);
+      showToast("Failed to save filter preset", "error");
+    }
+  }
+}
+
+// Tag manager
+async function addNewTag() {
+  const tagInput = document.getElementById('newTagInput');
+  const tagName = tagInput.value.trim();
+  
+  if (!tagName) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a tag name' });
+    return;
+  }
+  
+  try {
+    const tagRef = doc(collection(db, "users", currentUser.uid, "tags"));
+    await setDoc(tagRef, {
+      name: tagName,
+      createdAt: new Date(),
+      userId: currentUser.uid
+    });
+    
+    tagInput.value = '';
+    await loadTags();
+    showToast("Tag added successfully", "success");
+  } catch (error) {
+    console.error("Error adding tag:", error);
+    showToast("Failed to add tag", "error");
+  }
+}
+
+// Duplicate transaction
+function duplicateTransaction() {
+  if (!txIdInput.value) return;
+  
+  // Clear the ID to create a new transaction
+  txIdInput.value = "";
+  formSINO.value = "";
+  document.getElementById("transactionModalLabel").textContent = "Duplicate Transaction";
+  duplicateTransactionBtn.style.display = "none";
+  makeRecurringBtn.style.display = "inline-block";
+}
+
+function duplicateTransactionById(id) {
+  const tx = allTransactions.find(t => t.id === id);
+  if (!tx) return;
+  
+  editTransaction(id);
+  duplicateTransaction(); // This will clear the ID and prepare for duplication
+}
+
+// Recurring transactions
+function toggleRecurringOptions() {
+  recurringOptions.style.display = recurringOptions.style.display === "none" ? "block" : "none";
+}
+
+function calculateNextRecurringDate(startDate, recurringConfig) {
+  const date = new Date(startDate);
+  const { frequency, interval } = recurringConfig;
+  
+  switch (frequency) {
+    case 'daily':
+      date.setDate(date.getDate() + interval);
+      break;
+    case 'weekly':
+      date.setDate(date.getDate() + (interval * 7));
+      break;
+    case 'monthly':
+      date.setMonth(date.getMonth() + interval);
+      break;
+    case 'quarterly':
+      date.setMonth(date.getMonth() + (interval * 3));
+      break;
+    case 'yearly':
+      date.setFullYear(date.getFullYear() + interval);
+      break;
+  }
+  
+  return date.toISOString().split('T')[0];
+}
+
+function showRecurringTransactions() {
+  if (recurringTransactions.length === 0) {
+    Swal.fire({ icon: 'info', title: 'No Recurring Transactions', text: 'You don\'t have any recurring transactions set up.' });
+    return;
+  }
+  
+  let html = `
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Frequency</th>
+            <th>Next Date</th>
+            <th>Amount</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  
+  recurringTransactions.forEach(tx => {
+    const amount = tx.INCOME > 0 ? tx.INCOME : tx.EXPENSE;
+    const nextDate = tx.RECURRING && tx.RECURRING.nextDate ? tx.RECURRING.nextDate : 
+                    calculateNextRecurringDate(tx.DATE, tx.RECURRING || { frequency: 'monthly', interval: 1 });
+    
+    html += `
+      <tr>
+        <td>${escapeHtml(tx.DESCRIPTION || '')}</td>
+        <td>${tx.RECURRING ? `${tx.RECURRING.frequency} (every ${tx.RECURRING.interval})` : 'Monthly'}</td>
+        <td>${nextDate}</td>
+        <td class="${tx.TYPE === 'Income' ? 'text-success' : 'text-danger'}">
+          $${parseFloat(amount).toFixed(2)}
+        </td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary" onclick="editTransaction('${tx.id}')">
+            <i class="fa fa-edit"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  });
+  
+  html += `
+        </tbody>
+      </table>
+    </div>
+  `;
+  
+  Swal.fire({
+    title: 'Recurring Transactions',
+    html: html,
+    width: 800,
+    showCloseButton: true
+  });
+}
+
+// Dashboard functions
+function showIncomeDetails() {
+  const incomeTransactions = allTransactions.filter(tx => tx.TYPE === 'Income');
+  const totalIncome = incomeTransactions.reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+  const avgIncome = incomeTransactions.length > 0 ? totalIncome / incomeTransactions.length : 0;
+  
+  Swal.fire({
+    title: 'Income Details',
+    html: `
+      <div class="text-center">
+        <h1 class="text-success">$${totalIncome.toFixed(2)}</h1>
+        <p>Total Income from ${incomeTransactions.length} transactions</p>
+        <p>Average: $${avgIncome.toFixed(2)} per transaction</p>
+        <hr>
+        <div class="text-start">
+          <h6>Top Income Sources:</h6>
+          ${getTopCategories(incomeTransactions, 5)}
+        </div>
+      </div>
+    `,
+    width: 500
+  });
+}
+
+function showExpenseDetails() {
+  const expenseTransactions = allTransactions.filter(tx => tx.TYPE === 'Expense');
+  const totalExpense = expenseTransactions.reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+  const avgExpense = expenseTransactions.length > 0 ? totalExpense / expenseTransactions.length : 0;
+  
+  Swal.fire({
+    title: 'Expense Details',
+    html: `
+      <div class="text-center">
+        <h1 class="text-danger">$${totalExpense.toFixed(2)}</h1>
+        <p>Total Expenses from ${expenseTransactions.length} transactions</p>
+        <p>Average: $${avgExpense.toFixed(2)} per transaction</p>
+        <hr>
+        <div class="text-start">
+          <h6>Top Expense Categories:</h6>
+          ${getTopCategories(expenseTransactions, 5)}
+        </div>
+      </div>
+    `,
+    width: 500
+  });
+}
+
+function getTopCategories(transactions, limit = 5) {
+  const categories = {};
+  
+  transactions.forEach(tx => {
+    const category = tx.ACCOUNT_HEADER || 'Uncategorized';
+    const amount = parseFloat(tx.INCOME) || parseFloat(tx.EXPENSE) || 0;
+    
+    if (!categories[category]) {
+      categories[category] = 0;
+    }
+    categories[category] += amount;
+  });
+  
+  const sortedCategories = Object.entries(categories)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+  
+  return sortedCategories.map(([category, amount]) => `
+    <div class="d-flex justify-content-between mb-1">
+      <span>${escapeHtml(category)}</span>
+      <span>$${amount.toFixed(2)}</span>
+    </div>
+  `).join('');
+}
+
+function showTransactionStats() {
+  const totalTransactions = allTransactions.length;
+  const incomeCount = allTransactions.filter(tx => tx.TYPE === 'Income').length;
+  const expenseCount = allTransactions.filter(tx => tx.TYPE === 'Expense').length;
+  const transferCount = allTransactions.filter(tx => tx.TYPE === 'Transfer').length;
+  
+  const incomePercentage = totalTransactions > 0 ? (incomeCount / totalTransactions * 100).toFixed(1) : 0;
+  const expensePercentage = totalTransactions > 0 ? (expenseCount / totalTransactions * 100).toFixed(1) : 0;
+  const transferPercentage = totalTransactions > 0 ? (transferCount / totalTransactions * 100).toFixed(1) : 0;
+  
+  Swal.fire({
+    title: 'Transaction Statistics',
+    html: `
+      <div class="text-center">
+        <h1>${totalTransactions}</h1>
+        <p>Total Transactions</p>
+        <div class="row mt-3">
+          <div class="col-4">
+            <div class="text-success">
+              <h3>${incomeCount}</h3>
+              <small>Income (${incomePercentage}%)</small>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="text-danger">
+              <h3>${expenseCount}</h3>
+              <small>Expense (${expensePercentage}%)</small>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="text-info">
+              <h3>${transferCount}</h3>
+              <small>Transfer (${transferPercentage}%)</small>
+            </div>
+          </div>
+        </div>
+        <hr>
+        <div class="text-start">
+          <h6>Transaction Timeline:</h6>
+          <div class="small">
+            <div>Oldest: ${getOldestTransactionDate()}</div>
+            <div>Newest: ${getNewestTransactionDate()}</div>
+            <div>Time Span: ${getTransactionTimeSpan()} days</div>
+          </div>
+        </div>
+      </div>
+    `,
+    width: 600
+  });
+}
+
+function getOldestTransactionDate() {
+  if (allTransactions.length === 0) return 'N/A';
+  const dates = allTransactions.map(tx => new Date(tx.DATE)).filter(date => !isNaN(date.getTime()));
+  if (dates.length === 0) return 'N/A';
+  const oldest = new Date(Math.min(...dates));
+  return oldest.toLocaleDateString();
+}
+
+function getNewestTransactionDate() {
+  if (allTransactions.length === 0) return 'N/A';
+  const dates = allTransactions.map(tx => new Date(tx.DATE)).filter(date => !isNaN(date.getTime()));
+  if (dates.length === 0) return 'N/A';
+  const newest = new Date(Math.max(...dates));
+  return newest.toLocaleDateString();
+}
+
+function getTransactionTimeSpan() {
+  if (allTransactions.length === 0) return 0;
+  const dates = allTransactions.map(tx => new Date(tx.DATE)).filter(date => !isNaN(date.getTime()));
+  if (dates.length < 2) return 0;
+  const oldest = new Date(Math.min(...dates));
+  const newest = new Date(Math.max(...dates));
+  const diffTime = Math.abs(newest - oldest);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
+function showCashflowChart() {
+  // Show detailed cash flow analysis
+  const now = new Date();
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+  
+  const monthlyCashflow = {};
+  for (let i = 0; i < 6; i++) {
+    const date = new Date();
+    date.setMonth(date.getMonth() - i);
+    const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+    monthlyCashflow[monthYear] = { income: 0, expense: 0, cashflow: 0 };
+  }
+  
+  allTransactions.forEach(tx => {
+    if (tx.DATE) {
+      try {
+        const txDate = new Date(tx.DATE);
+        if (txDate >= sixMonthsAgo) {
+          const monthYear = `${txDate.getFullYear()}-${(txDate.getMonth() + 1).toString().padStart(2, '0')}`;
+          if (monthlyCashflow[monthYear]) {
+            if (tx.TYPE === 'Income') {
+              monthlyCashflow[monthYear].income += (parseFloat(tx.INCOME) || 0);
+            } else if (tx.TYPE === 'Expense') {
+              monthlyCashflow[monthYear].expense += (parseFloat(tx.EXPENSE) || 0);
+            }
+            monthlyCashflow[monthYear].cashflow = monthlyCashflow[monthYear].income - monthlyCashflow[monthYear].expense;
+          }
+        }
+      } catch (e) {
+        // Skip invalid dates
+      }
+    }
+  });
+  
+  const sortedMonths = Object.keys(monthlyCashflow).sort();
+  const cashflowData = sortedMonths.map(month => monthlyCashflow[month].cashflow);
+  
+  const monthLabels = sortedMonths.map(month => {
+    const [year, monthNum] = month.split('-');
+    const date = new Date(year, monthNum - 1);
+    return date.toLocaleString('default', { month: 'short', year: '2-digit' });
+  });
+  
+  Swal.fire({
+    title: 'Cash Flow Analysis (Last 6 Months)',
+    html: `
+      <div style="height: 300px;">
+        <canvas id="cashflowChart"></canvas>
+      </div>
+      <div class="mt-3">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Income</th>
+              <th>Expense</th>
+              <th>Cash Flow</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedMonths.map(month => {
+              const data = monthlyCashflow[month];
+              const cashflowClass = data.cashflow >= 0 ? 'text-success' : 'text-danger';
+              return `
+                <tr>
+                  <td>${monthLabels[sortedMonths.indexOf(month)]}</td>
+                  <td class="text-success">$${data.income.toFixed(2)}</td>
+                  <td class="text-danger">$${data.expense.toFixed(2)}</td>
+                  <td class="${cashflowClass}">$${data.cashflow.toFixed(2)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `,
+    width: 800,
+    didOpen: () => {
+      const ctx = document.getElementById('cashflowChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: monthLabels,
+          datasets: [{
+            label: 'Cash Flow',
+            data: cashflowData,
+            borderColor: 'rgb(111, 66, 193)',
+            backgroundColor: 'rgba(111, 66, 193, 0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(0, 0, 0, 0.1)'
+              },
+              ticks: {
+                callback: function(value) {
+                  return '$' + value;
+                }
+              }
+            },
+            x: {
+              grid: {
+                display: false
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return 'Cash Flow: $' + context.raw.toFixed(2);
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+  });
+}
+
+// Make functions available globally for inline event handlers
+window.removeSplitExpense = removeSplitExpense;
+window.updateSplitSummary = updateSplitSummary;
+window.removeTagFromInput = removeTagFromInput;
+window.removeTagFromTransaction = removeTagFromTransaction;
+window.toggleBalanceVisibility = toggleBalanceVisibility;
+window.showIncomeDetails = showIncomeDetails;
+window.showExpenseDetails = showExpenseDetails;
+window.showTransactionStats = showTransactionStats;
+window.showCashflowChart = showCashflowChart;
+window.showRecurringTransactions = showRecurringTransactions;
+window.showNextTip = showNextTip;
+window.addNewTag = addNewTag;
+window.changeCalendarMonth = changeCalendarMonth;
+window.showDayTransactions = showDayTransactions;
+window.duplicateTransactionById = duplicateTransactionById;
+window.editTransaction = editTransaction;
+window.toggleAIPanel = toggleAIPanel;
+window.sendAIMessage = sendAIMessage;
+
+// Initialize add split expense button
+addSplitExpenseBtn.addEventListener("click", addSplitExpense);
+saveSplitTransactionsBtn.addEventListener("click", saveSplitTransactions);
+
+// Initialize the application when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  // Set current date for date inputs
+  const today = new Date().toISOString().split('T')[0];
+  formDATE.value = today;
+  startDateInput.value = today;
+  endDateInput.value = today;
+  
+  // Initialize Flatpickr for date range
+  if (typeof flatpickr !== 'undefined') {
+    flatpickr("#startDate", {
+      dateFormat: "Y-m-d",
+      defaultDate: today
+    });
+    
+    flatpickr("#endDate", {
+      dateFormat: "Y-m-d",
+      defaultDate: today
+    });
+  }
+});
+
+// Bootstrap JS for modals
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
