@@ -1237,6 +1237,9 @@
                 <button class="action-btn warning" onclick="openNewCustomerModal()">
                     <i class="fas fa-user-plus"></i> Add Customer
                 </button>
+                <button class="action-btn info" onclick="createTestSale()">
+                    <i class="fas fa-vial"></i> Test Data
+                </button>
             </div>
         </div>
 
@@ -2235,6 +2238,13 @@
                     loadCategories()
                 ]);
                 
+                console.log('Data loaded:', {
+                    inventory: inventoryItems.length,
+                    customers: customers.length,
+                    sales: sales.length,
+                    categories: categories.length
+                });
+                
                 // Update UI
                 updateDashboardStats();
                 initializeCharts();
@@ -2277,11 +2287,11 @@
                     inventoryItems.push({
                         id: doc.id,
                         ...data,
-                        currentStock: data.currentStock || 0,
-                        costPrice: data.costPrice || 0,
-                        sellingPrice: data.sellingPrice || 0,
-                        minStock: data.minStock || 5,
-                        maxStock: data.maxStock || 100,
+                        currentStock: parseFloat(data.currentStock) || 0,
+                        costPrice: parseFloat(data.costPrice) || 0,
+                        sellingPrice: parseFloat(data.sellingPrice) || 0,
+                        minStock: parseFloat(data.minStock) || 5,
+                        maxStock: parseFloat(data.maxStock) || 100,
                         category: data.category || 'Other',
                         sku: data.sku || 'SKU-' + doc.id.substring(0, 8),
                         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
@@ -2291,6 +2301,8 @@
                 
                 // Extract unique categories
                 categories = [...new Set(inventoryItems.map(item => item.category).filter(Boolean))];
+                
+                console.log(`Loaded ${inventoryItems.length} inventory items`);
                 
             } catch (error) {
                 console.error('Error loading inventory:', error);
@@ -2318,6 +2330,8 @@
                     });
                 });
                 
+                console.log(`Loaded ${customers.length} customers`);
+                
             } catch (error) {
                 console.error('Error loading customers:', error);
                 showToast('Failed to load customers', 'error');
@@ -2329,21 +2343,35 @@
             try {
                 const userId = currentUser.uid;
                 const snapshot = await db.collection('users').doc(userId).collection('sales')
-                    .orderBy('date', 'desc')
+                    .orderBy('createdAt', 'desc')
                     .get();
                 
                 sales = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
                     
-                    // Convert Firestore timestamp to Date object
-                    let dateObj;
-                    if (data.date && data.date.toDate) {
-                        dateObj = data.date.toDate();
-                    } else if (data.date) {
-                        dateObj = new Date(data.date);
-                    } else {
-                        dateObj = new Date();
+                    // Handle Firestore timestamps
+                    let dateObj = new Date();
+                    let createdAtObj = new Date();
+                    
+                    if (data.date) {
+                        if (data.date.toDate && typeof data.date.toDate === 'function') {
+                            dateObj = data.date.toDate();
+                        } else if (typeof data.date === 'string') {
+                            dateObj = new Date(data.date);
+                        } else if (data.date.seconds) {
+                            dateObj = new Date(data.date.seconds * 1000);
+                        }
+                    }
+                    
+                    if (data.createdAt) {
+                        if (data.createdAt.toDate && typeof data.createdAt.toDate === 'function') {
+                            createdAtObj = data.createdAt.toDate();
+                        } else if (typeof data.createdAt === 'string') {
+                            createdAtObj = new Date(data.createdAt);
+                        } else if (data.createdAt.seconds) {
+                            createdAtObj = new Date(data.createdAt.seconds * 1000);
+                        }
                     }
                     
                     sales.push({
@@ -2351,6 +2379,7 @@
                         ...data,
                         invoiceNumber: data.invoiceNumber || 'INV-' + doc.id.substring(0, 8),
                         customerName: data.customerName || 'Walk-in Customer',
+                        customerId: data.customerId || null,
                         items: data.items || [],
                         subtotal: parseFloat(data.subtotal) || 0,
                         discount: parseFloat(data.discount) || 0,
@@ -2359,7 +2388,7 @@
                         status: data.status || 'completed',
                         paymentMethod: data.paymentMethod || 'cash',
                         date: dateObj,
-                        createdAt: data.createdAt ? data.createdAt.toDate() : new Date()
+                        createdAt: createdAtObj
                     });
                 });
                 
@@ -3083,9 +3112,6 @@
             const customerFilter = document.getElementById('salesFilterCustomer').value;
             const statusFilter = document.getElementById('salesFilterStatus').value;
             
-            console.log('Loading sales table...');
-            console.log('Total sales:', sales.length);
-            
             // Filter sales based on current tab
             let filteredSales = sales;
             
@@ -3095,7 +3121,6 @@
                     if (!sale.date) return false;
                     return sale.date.toDateString() === today;
                 });
-                console.log('Today sales:', filteredSales.length);
             } else if (currentSalesTab === 'weeklySales') {
                 const weekAgo = new Date();
                 weekAgo.setDate(weekAgo.getDate() - 7);
@@ -3134,8 +3159,6 @@
                 if (!a.date || !b.date) return 0;
                 return b.date - a.date;
             });
-            
-            console.log('Filtered sales:', filteredSales.length);
             
             // Pagination
             const totalPages = Math.ceil(filteredSales.length / itemsPerPage);
@@ -3195,8 +3218,6 @@
             updatePagination('salesPagination', page, totalPages, (newPage) => {
                 loadSalesTable(newPage);
             });
-            
-            console.log('Sales table loaded');
         }
 
         // Update Customers Table
@@ -3471,8 +3492,6 @@
 
         // Generate Invoice Preview
         function generateInvoicePreview(saleData) {
-            console.log('Generating invoice for sale:', saleData);
-            
             let itemsHtml = '';
             saleData.items.forEach((item, index) => {
                 itemsHtml += `
@@ -3977,29 +3996,202 @@
             }
         }
 
+        // Create Test Sale Data
+        async function createTestSale() {
+            try {
+                showToast('Creating test data...', 'info');
+                
+                const userId = currentUser.uid;
+                
+                // First, create test inventory items if needed
+                if (inventoryItems.length < 2) {
+                    const testItems = [
+                        {
+                            name: 'Test Laptop',
+                            category: 'Electronics',
+                            sku: 'TEST-LAPTOP-001',
+                            costPrice: 50000,
+                            sellingPrice: 65000,
+                            currentStock: 10,
+                            minStock: 2,
+                            maxStock: 20,
+                            unit: 'Pieces',
+                            brand: 'Test Brand',
+                            description: 'Test laptop for demonstration',
+                            taxRate: 18
+                        },
+                        {
+                            name: 'Test Mouse',
+                            category: 'Accessories',
+                            sku: 'TEST-MOUSE-001',
+                            costPrice: 500,
+                            sellingPrice: 800,
+                            currentStock: 50,
+                            minStock: 10,
+                            maxStock: 100,
+                            unit: 'Pieces',
+                            brand: 'Test Brand',
+                            description: 'Test mouse for demonstration',
+                            taxRate: 18
+                        }
+                    ];
+                    
+                    for (const item of testItems) {
+                        await db.collection('users').doc(userId).collection('inventory').add({
+                            ...item,
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+                
+                // Create test sales data
+                const testSales = [
+                    {
+                        invoiceNumber: 'INV-TEST-001',
+                        customerName: 'John Doe',
+                        items: [
+                            { name: 'Test Laptop', price: 65000, quantity: 1, total: 65000 },
+                            { name: 'Test Mouse', price: 800, quantity: 2, total: 1600 }
+                        ],
+                        subtotal: 66600,
+                        discount: 0,
+                        gstAmount: 11988,
+                        total: 78588,
+                        status: 'completed',
+                        paymentMethod: 'card',
+                        date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+                    },
+                    {
+                        invoiceNumber: 'INV-TEST-002',
+                        customerName: 'Jane Smith',
+                        items: [
+                            { name: 'Test Laptop', price: 65000, quantity: 1, total: 65000 }
+                        ],
+                        subtotal: 65000,
+                        discount: 1000,
+                        gstAmount: 11520,
+                        total: 75520,
+                        status: 'completed',
+                        paymentMethod: 'upi',
+                        date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) // 1 day ago
+                    },
+                    {
+                        invoiceNumber: 'INV-TEST-003',
+                        customerName: 'Walk-in Customer',
+                        items: [
+                            { name: 'Test Mouse', price: 800, quantity: 5, total: 4000 }
+                        ],
+                        subtotal: 4000,
+                        discount: 0,
+                        gstAmount: 720,
+                        total: 4720,
+                        status: 'completed',
+                        paymentMethod: 'cash',
+                        date: new Date() // Today
+                    }
+                ];
+                
+                for (const sale of testSales) {
+                    await db.collection('users').doc(userId).collection('sales').add({
+                        ...sale,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+                
+                // Create test customer
+                await db.collection('users').doc(userId).collection('customers').add({
+                    name: 'John Doe',
+                    email: 'john@example.com',
+                    phone: '9876543210',
+                    address: '123 Test Street, Test City',
+                    customerType: 'regular',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // Reload all data
+                await Promise.all([
+                    loadInventory(),
+                    loadCustomers(),
+                    loadSales()
+                ]);
+                
+                // Update UI
+                updateDashboardStats();
+                updateRecentSalesTable();
+                updateLowStockTable();
+                updateBadges();
+                populateCustomerSelect();
+                
+                // If on sales page, reload the table
+                if (document.getElementById('salesContent').style.display !== 'none') {
+                    loadSalesTable();
+                }
+                
+                showToast('Test data created successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error creating test data:', error);
+                showToast('Failed to create test data: ' + error.message, 'error');
+            }
+        }
+
         // Utility Functions
         function formatDate(date) {
             if (!date) return 'N/A';
             try {
-                return new Date(date).toLocaleDateString('en-IN', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric'
-                });
-            } catch (e) {
+                // Handle Firestore Timestamp
+                if (date.toDate && typeof date.toDate === 'function') {
+                    date = date.toDate();
+                }
+                
+                // Handle string dates
+                if (typeof date === 'string') {
+                    date = new Date(date);
+                }
+                
+                // Handle Date object
+                if (date instanceof Date) {
+                    return date.toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                    });
+                }
+                
                 return 'Invalid Date';
+            } catch (e) {
+                console.error('Date formatting error:', e, date);
+                return 'N/A';
             }
         }
 
         function formatTime(date) {
             if (!date) return 'N/A';
             try {
-                return new Date(date).toLocaleTimeString('en-IN', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            } catch (e) {
+                // Handle Firestore Timestamp
+                if (date.toDate && typeof date.toDate === 'function') {
+                    date = date.toDate();
+                }
+                
+                // Handle string dates
+                if (typeof date === 'string') {
+                    date = new Date(date);
+                }
+                
+                // Handle Date object
+                if (date instanceof Date) {
+                    return date.toLocaleTimeString('en-IN', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+                
                 return 'Invalid Time';
+            } catch (e) {
+                console.error('Time formatting error:', e, date);
+                return 'N/A';
             }
         }
 
