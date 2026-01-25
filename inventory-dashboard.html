@@ -1039,11 +1039,117 @@
         input:checked + .toggle-slider:before {
             transform: translateX(26px);
         }
+        
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 99999;
+            animation: slideIn 0.3s ease;
+            max-width: 400px;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .toast.success {
+            border-left: 5px solid var(--success);
+        }
+        
+        .toast.error {
+            border-left: 5px solid var(--danger);
+        }
+        
+        .toast.info {
+            border-left: 5px solid var(--info);
+        }
+        
+        .toast i {
+            font-size: 24px;
+        }
+        
+        .toast.success i {
+            color: var(--success);
+        }
+        
+        .toast.error i {
+            color: var(--danger);
+        }
+        
+        .toast.info i {
+            color: var(--info);
+        }
+        
+        .toast-content {
+            flex: 1;
+        }
+        
+        .toast-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .toast-message {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .toast-close {
+            background: none;
+            border: none;
+            color: #999;
+            cursor: pointer;
+            font-size: 18px;
+        }
+        
+        /* Print Styles */
+        @media print {
+            .sidebar, .top-bar, .action-btn, .modal-overlay, .close-modal, 
+            .table-actions button, .pagination, .search-box, .filter-controls,
+            .tabs, .report-cards, .modal-header button {
+                display: none !important;
+            }
+            
+            .main-content {
+                margin-left: 0 !important;
+                padding: 0 !important;
+            }
+            
+            .table-card, .chart-card, .invoice-container {
+                box-shadow: none !important;
+                border: 1px solid #ddd !important;
+                border-radius: 0 !important;
+            }
+            
+            body {
+                background: white !important;
+                color: black !important;
+            }
+        }
     </style>
 </head>
 <body>
     <!-- Animated Background -->
     <div class="background-animation"></div>
+    
+    <!-- Toast Container -->
+    <div id="toastContainer"></div>
     
     <!-- Sidebar -->
     <div class="sidebar">
@@ -1118,7 +1224,7 @@
         <div class="top-bar">
             <div>
                 <h1 class="page-title" id="pageTitle">Dashboard</h1>
-                <p class="pageSubtitle" id="pageSubtitle">Welcome to your inventory management system</p>
+                <p class="page-subtitle" id="pageSubtitle">Welcome to your inventory management system</p>
             </div>
             
             <div class="top-actions">
@@ -2119,6 +2225,8 @@
         // Initialize Application
         async function initializeApp() {
             try {
+                showToast('Loading data...', 'info');
+                
                 // Load all data
                 await Promise.all([
                     loadInventory(),
@@ -2140,15 +2248,20 @@
                 
                 // Set default dates
                 const today = new Date().toISOString().split('T')[0];
-                document.getElementById('salesDateFrom').value = getDateDaysAgo(30);
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                
+                document.getElementById('salesDateFrom').value = thirtyDaysAgo.toISOString().split('T')[0];
                 document.getElementById('salesDateTo').value = today;
                 
-                document.getElementById('salesFilterDateFrom').value = getDateDaysAgo(30);
+                document.getElementById('salesFilterDateFrom').value = thirtyDaysAgo.toISOString().split('T')[0];
                 document.getElementById('salesFilterDateTo').value = today;
+                
+                showToast('System loaded successfully!', 'success');
                 
             } catch (error) {
                 console.error('Error initializing app:', error);
-                showError('Failed to initialize application');
+                showToast('Failed to initialize application', 'error');
             }
         }
 
@@ -2181,7 +2294,7 @@
                 
             } catch (error) {
                 console.error('Error loading inventory:', error);
-                showError('Failed to load inventory items');
+                showToast('Failed to load inventory items', 'error');
             }
         }
 
@@ -2207,11 +2320,11 @@
                 
             } catch (error) {
                 console.error('Error loading customers:', error);
-                showError('Failed to load customers');
+                showToast('Failed to load customers', 'error');
             }
         }
 
-        // Load Sales
+        // Load Sales - FIXED VERSION
         async function loadSales() {
             try {
                 const userId = currentUser.uid;
@@ -2222,26 +2335,39 @@
                 sales = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
+                    
+                    // Convert Firestore timestamp to Date object
+                    let dateObj;
+                    if (data.date && data.date.toDate) {
+                        dateObj = data.date.toDate();
+                    } else if (data.date) {
+                        dateObj = new Date(data.date);
+                    } else {
+                        dateObj = new Date();
+                    }
+                    
                     sales.push({
                         id: doc.id,
                         ...data,
                         invoiceNumber: data.invoiceNumber || 'INV-' + doc.id.substring(0, 8),
                         customerName: data.customerName || 'Walk-in Customer',
                         items: data.items || [],
-                        subtotal: data.subtotal || 0,
-                        discount: data.discount || 0,
-                        gstAmount: data.gstAmount || 0,
-                        total: data.total || 0,
+                        subtotal: parseFloat(data.subtotal) || 0,
+                        discount: parseFloat(data.discount) || 0,
+                        gstAmount: parseFloat(data.gstAmount) || 0,
+                        total: parseFloat(data.total) || 0,
                         status: data.status || 'completed',
                         paymentMethod: data.paymentMethod || 'cash',
-                        date: data.date ? data.date.toDate() : new Date(),
+                        date: dateObj,
                         createdAt: data.createdAt ? data.createdAt.toDate() : new Date()
                     });
                 });
                 
+                console.log(`Loaded ${sales.length} sales`);
+                
             } catch (error) {
                 console.error('Error loading sales:', error);
-                showError('Failed to load sales');
+                showToast('Failed to load sales', 'error');
             }
         }
 
@@ -2252,23 +2378,28 @@
 
         // Update Dashboard Statistics with Real Data
         function updateDashboardStats() {
+            console.log('Updating dashboard stats...');
+            
             // Total Items
             document.getElementById('totalItemsStat').textContent = inventoryItems.length;
             
             // Today's Sales
             const today = new Date().toDateString();
-            const todaySales = sales.filter(sale => 
-                sale.date.toDateString() === today
-            );
+            const todaySales = sales.filter(sale => {
+                if (!sale.date) return false;
+                return sale.date.toDateString() === today;
+            });
+            
             const todaySalesTotal = todaySales.reduce((sum, sale) => sum + (sale.total || 0), 0);
             document.getElementById('todaySalesStat').textContent = `₹${todaySalesTotal.toLocaleString('en-IN')}`;
             
             // Calculate sales change
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdaySales = sales.filter(sale => 
-                sale.date.toDateString() === yesterday.toDateString()
-            ).reduce((sum, sale) => sum + (sale.total || 0), 0);
+            const yesterdaySales = sales.filter(sale => {
+                if (!sale.date) return false;
+                return sale.date.toDateString() === yesterday.toDateString();
+            }).reduce((sum, sale) => sum + (sale.total || 0), 0);
             
             const salesChange = yesterdaySales > 0 ? 
                 ((todaySalesTotal - yesterdaySales) / yesterdaySales * 100).toFixed(1) : '100';
@@ -2300,10 +2431,11 @@
             
             // Update change percentages
             updateChangePercentages();
+            
+            console.log('Dashboard stats updated');
         }
 
         function updateChangePercentages() {
-            // Calculate month-over-month changes
             const now = new Date();
             const thisMonth = now.getMonth();
             const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1;
@@ -2446,9 +2578,10 @@
                 labels.push(date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }));
                 
                 const dateStr = date.toDateString();
-                const daySales = sales.filter(sale => 
-                    sale.date.toDateString() === dateStr
-                ).reduce((sum, sale) => sum + (sale.total || 0), 0);
+                const daySales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date.toDateString() === dateStr;
+                }).reduce((sum, sale) => sum + (sale.total || 0), 0);
                 
                 salesData.push(daySales);
             }
@@ -2473,15 +2606,24 @@
             
             if (period === 'today') {
                 const today = new Date().toDateString();
-                filteredSales = sales.filter(sale => sale.date.toDateString() === today);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date.toDateString() === today;
+                });
             } else if (period === 'week') {
                 const weekAgo = new Date();
                 weekAgo.setDate(weekAgo.getDate() - 7);
-                filteredSales = sales.filter(sale => sale.date >= weekAgo);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date >= weekAgo;
+                });
             } else if (period === 'month') {
                 const monthAgo = new Date();
                 monthAgo.setMonth(monthAgo.getMonth() - 1);
-                filteredSales = sales.filter(sale => sale.date >= monthAgo);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date >= monthAgo;
+                });
             }
             
             // Aggregate item sales
@@ -2559,6 +2701,7 @@
             const monthlyProfit = Array(12).fill(0);
             
             sales.forEach(sale => {
+                if (!sale.date) return;
                 const month = sale.date.getMonth();
                 const year = sale.date.getFullYear();
                 
@@ -2653,9 +2796,10 @@
             
             // Sales badge (today's sales count)
             const today = new Date().toDateString();
-            const todaySalesCount = sales.filter(sale => 
-                sale.date.toDateString() === today
-            ).length;
+            const todaySalesCount = sales.filter(sale => {
+                if (!sale.date) return false;
+                return sale.date.toDateString() === today;
+            }).length;
             document.getElementById('salesBadge').textContent = todaySalesCount;
             
             // Customers badge
@@ -2930,7 +3074,7 @@
             table.innerHTML = html;
         }
 
-        // Load Sales Table with Tabs
+        // Load Sales Table with Tabs - FIXED VERSION
         function loadSalesTable(page = 1, itemsPerPage = 10) {
             const table = document.getElementById('salesTable');
             const searchTerm = document.getElementById('searchSales').value.toLowerCase();
@@ -2939,20 +3083,33 @@
             const customerFilter = document.getElementById('salesFilterCustomer').value;
             const statusFilter = document.getElementById('salesFilterStatus').value;
             
+            console.log('Loading sales table...');
+            console.log('Total sales:', sales.length);
+            
             // Filter sales based on current tab
             let filteredSales = sales;
             
             if (currentSalesTab === 'todaySales') {
                 const today = new Date().toDateString();
-                filteredSales = sales.filter(sale => sale.date.toDateString() === today);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date.toDateString() === today;
+                });
+                console.log('Today sales:', filteredSales.length);
             } else if (currentSalesTab === 'weeklySales') {
                 const weekAgo = new Date();
                 weekAgo.setDate(weekAgo.getDate() - 7);
-                filteredSales = sales.filter(sale => sale.date >= weekAgo);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date >= weekAgo;
+                });
             } else if (currentSalesTab === 'monthlySales') {
                 const monthAgo = new Date();
                 monthAgo.setMonth(monthAgo.getMonth() - 1);
-                filteredSales = sales.filter(sale => sale.date >= monthAgo);
+                filteredSales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date >= monthAgo;
+                });
             } else if (currentSalesTab === 'pendingSales') {
                 filteredSales = sales.filter(sale => sale.status === 'pending');
             }
@@ -2963,8 +3120,8 @@
                     (sale.invoiceNumber || '').toLowerCase().includes(searchTerm) ||
                     (sale.customerName || '').toLowerCase().includes(searchTerm);
                 
-                const matchesDate = (!dateFrom || new Date(sale.date) >= new Date(dateFrom)) &&
-                                   (!dateTo || new Date(sale.date) <= new Date(dateTo));
+                const matchesDate = (!dateFrom || (sale.date && new Date(sale.date) >= new Date(dateFrom))) &&
+                                   (!dateTo || (sale.date && new Date(sale.date) <= new Date(dateTo)));
                 
                 const matchesCustomer = !customerFilter || sale.customerId === customerFilter;
                 const matchesStatus = !statusFilter || sale.status === statusFilter;
@@ -2973,7 +3130,12 @@
             });
             
             // Sort by date (newest first)
-            filteredSales.sort((a, b) => b.date - a.date);
+            filteredSales.sort((a, b) => {
+                if (!a.date || !b.date) return 0;
+                return b.date - a.date;
+            });
+            
+            console.log('Filtered sales:', filteredSales.length);
             
             // Pagination
             const totalPages = Math.ceil(filteredSales.length / itemsPerPage);
@@ -3033,6 +3195,8 @@
             updatePagination('salesPagination', page, totalPages, (newPage) => {
                 loadSalesTable(newPage);
             });
+            
+            console.log('Sales table loaded');
         }
 
         // Update Customers Table
@@ -3134,17 +3298,17 @@
             
             // Previous button
             if (currentPage > 1) {
-                html += `<div class="page-item" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${currentPage - 1})">&laquo;</div>`;
+                html += `<div class="page-item" onclick="${onPageChange.name}(${currentPage - 1})">&laquo;</div>`;
             }
             
             // Page numbers
             for (let i = startPage; i <= endPage; i++) {
-                html += `<div class="page-item ${i === currentPage ? 'active' : ''}" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${i})">${i}</div>`;
+                html += `<div class="page-item ${i === currentPage ? 'active' : ''}" onclick="${onPageChange.name}(${i})">${i}</div>`;
             }
             
             // Next button
             if (currentPage < totalPages) {
-                html += `<div class="page-item" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${currentPage + 1})">&raquo;</div>`;
+                html += `<div class="page-item" onclick="${onPageChange.name}(${currentPage + 1})">&raquo;</div>`;
             }
             
             container.innerHTML = html;
@@ -3170,868 +3334,30 @@
         }
 
         function resetSalesFilters() {
-            document.getElementById('salesFilterDateFrom').value = getDateDaysAgo(30);
-            document.getElementById('salesFilterDateTo').value = new Date().toISOString().split('T')[0];
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const today = new Date().toISOString().split('T')[0];
+            
+            document.getElementById('salesFilterDateFrom').value = thirtyDaysAgo.toISOString().split('T')[0];
+            document.getElementById('salesFilterDateTo').value = today;
             document.getElementById('salesFilterCustomer').value = '';
             document.getElementById('salesFilterStatus').value = '';
             document.getElementById('searchSales').value = '';
             loadSalesTable();
         }
 
-        // Report Functions
-        function showReportTab(tabName) {
-            currentReportType = tabName;
-            
-            // Update active tab
-            document.querySelectorAll('#reportsContent .tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            event.target.classList.add('active');
-        }
-
-        function generateReport() {
-            const period = document.getElementById('reportPeriod').value;
-            const format = document.getElementById('reportFormat').value;
-            
-            let reportData;
-            let reportTitle;
-            
-            switch (currentReportType) {
-                case 'salesReport':
-                    reportData = generateSalesReportData(period);
-                    reportTitle = 'Sales Report';
-                    break;
-                case 'inventoryReport':
-                    reportData = generateInventoryReportData();
-                    reportTitle = 'Inventory Report';
-                    break;
-                case 'customerReport':
-                    reportData = generateCustomerReportData(period);
-                    reportTitle = 'Customer Report';
-                    break;
-                case 'profitReport':
-                    reportData = generateProfitReportData(period);
-                    reportTitle = 'Profit & Loss Report';
-                    break;
-            }
-            
-            displayReportPreview(reportData, reportTitle);
-            
-            if (format === 'pdf') {
-                downloadReportPDF(reportData, reportTitle);
-            } else if (format === 'excel') {
-                downloadReportExcel(reportData, reportTitle);
-            } else if (format === 'csv') {
-                downloadReportCSV(reportData, reportTitle);
-            }
-        }
-
-        function generateSalesReportData(period) {
-            let filteredSales = filterSalesByPeriod(period);
-            
-            const reportData = {
-                title: 'Sales Report',
-                period: getPeriodText(period),
-                generated: new Date().toLocaleString(),
-                summary: {
-                    totalSales: filteredSales.length,
-                    totalRevenue: filteredSales.reduce((sum, sale) => sum + (sale.total || 0), 0),
-                    averageSale: filteredSales.length > 0 ? 
-                        filteredSales.reduce((sum, sale) => sum + (sale.total || 0), 0) / filteredSales.length : 0,
-                    totalTax: filteredSales.reduce((sum, sale) => sum + (sale.gstAmount || 0), 0)
-                },
-                details: filteredSales.map(sale => ({
-                    invoice: sale.invoiceNumber || 'N/A',
-                    date: formatDate(sale.date),
-                    customer: sale.customerName || 'Walk-in',
-                    items: sale.items?.length || 0,
-                    subtotal: sale.subtotal || 0,
-                    tax: sale.gstAmount || 0,
-                    total: sale.total || 0,
-                    payment: sale.paymentMethod || 'Cash'
-                }))
-            };
-            
-            return reportData;
-        }
-
-        function generateInventoryReportData() {
-            const reportData = {
-                title: 'Inventory Report',
-                generated: new Date().toLocaleString(),
-                summary: {
-                    totalItems: inventoryItems.length,
-                    totalValue: inventoryItems.reduce((sum, item) => 
-                        sum + (item.currentStock * (item.costPrice || 0)), 0),
-                    lowStockItems: inventoryItems.filter(item => 
-                        item.currentStock > 0 && item.currentStock <= (item.minStock || 5)).length,
-                    outOfStockItems: inventoryItems.filter(item => item.currentStock <= 0).length
-                },
-                details: inventoryItems.map(item => ({
-                    name: item.name,
-                    sku: item.sku || 'N/A',
-                    category: item.category || 'Uncategorized',
-                    stock: item.currentStock,
-                    unit: item.unit || 'pcs',
-                    cost: item.costPrice || 0,
-                    price: item.sellingPrice || 0,
-                    value: item.currentStock * (item.costPrice || 0),
-                    status: getStockStatus(item.currentStock, item.minStock || 5).text
-                }))
-            };
-            
-            return reportData;
-        }
-
-        function generateCustomerReportData(period) {
-            let filteredSales = filterSalesByPeriod(period);
-            
-            // Aggregate customer data
-            const customerMap = new Map();
-            
-            filteredSales.forEach(sale => {
-                const customerId = sale.customerId || 'walkin';
-                const customerName = sale.customerName || 'Walk-in Customer';
-                
-                if (!customerMap.has(customerId)) {
-                    customerMap.set(customerId, {
-                        name: customerName,
-                        orders: 0,
-                        totalSpent: 0,
-                        lastOrder: sale.date
-                    });
-                }
-                
-                const customer = customerMap.get(customerId);
-                customer.orders++;
-                customer.totalSpent += sale.total || 0;
-                if (sale.date > customer.lastOrder) {
-                    customer.lastOrder = sale.date;
-                }
-            });
-            
-            const reportData = {
-                title: 'Customer Report',
-                period: getPeriodText(period),
-                generated: new Date().toLocaleString(),
-                summary: {
-                    totalCustomers: customerMap.size,
-                    totalOrders: filteredSales.length,
-                    averageOrderValue: filteredSales.length > 0 ? 
-                        filteredSales.reduce((sum, sale) => sum + (sale.total || 0), 0) / filteredSales.length : 0
-                },
-                details: Array.from(customerMap.values()).map(customer => ({
-                    name: customer.name,
-                    orders: customer.orders,
-                    totalSpent: customer.totalSpent,
-                    lastOrder: formatDate(customer.lastOrder),
-                    averageOrder: customer.orders > 0 ? customer.totalSpent / customer.orders : 0
-                })).sort((a, b) => b.totalSpent - a.totalSpent)
-            };
-            
-            return reportData;
-        }
-
-        function generateProfitReportData(period) {
-            let filteredSales = filterSalesByPeriod(period);
-            
-            // Calculate profit (simplified: assume 30% margin on cost)
-            let totalRevenue = 0;
-            let totalCost = 0;
-            let totalProfit = 0;
-            
-            filteredSales.forEach(sale => {
-                totalRevenue += sale.total || 0;
-                // Estimate cost as 70% of revenue (30% margin)
-                totalCost += (sale.total || 0) * 0.7;
-                totalProfit += (sale.total || 0) * 0.3;
-            });
-            
-            const reportData = {
-                title: 'Profit & Loss Report',
-                period: getPeriodText(period),
-                generated: new Date().toLocaleString(),
-                summary: {
-                    totalRevenue: totalRevenue,
-                    totalCost: totalCost,
-                    totalProfit: totalProfit,
-                    profitMargin: totalRevenue > 0 ? (totalProfit / totalRevenue * 100).toFixed(2) + '%' : '0%'
-                },
-                monthlyBreakdown: getMonthlyProfitData()
-            };
-            
-            return reportData;
-        }
-
-        function filterSalesByPeriod(period) {
-            let filteredSales = sales;
-            const now = new Date();
-            
-            switch (period) {
-                case 'today':
-                    const today = now.toDateString();
-                    filteredSales = sales.filter(sale => sale.date.toDateString() === today);
-                    break;
-                case 'yesterday':
-                    const yesterday = new Date(now);
-                    yesterday.setDate(yesterday.getDate() - 1);
-                    filteredSales = sales.filter(sale => 
-                        sale.date.toDateString() === yesterday.toDateString());
-                    break;
-                case 'this_week':
-                    const weekAgo = new Date(now);
-                    weekAgo.setDate(weekAgo.getDate() - 7);
-                    filteredSales = sales.filter(sale => sale.date >= weekAgo);
-                    break;
-                case 'last_week':
-                    const twoWeeksAgo = new Date(now);
-                    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-                    const oneWeekAgo = new Date(now);
-                    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-                    filteredSales = sales.filter(sale => 
-                        sale.date >= twoWeeksAgo && sale.date < oneWeekAgo);
-                    break;
-                case 'this_month':
-                    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                    filteredSales = sales.filter(sale => sale.date >= monthStart);
-                    break;
-                case 'last_month':
-                    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-                    filteredSales = sales.filter(sale => 
-                        sale.date >= lastMonthStart && sale.date <= lastMonthEnd);
-                    break;
-                case 'this_year':
-                    const yearStart = new Date(now.getFullYear(), 0, 1);
-                    filteredSales = sales.filter(sale => sale.date >= yearStart);
-                    break;
-                case 'custom':
-                    const dateFrom = document.getElementById('reportDateFrom').value;
-                    const dateTo = document.getElementById('reportDateTo').value;
-                    if (dateFrom && dateTo) {
-                        filteredSales = sales.filter(sale => 
-                            sale.date >= new Date(dateFrom) && sale.date <= new Date(dateTo));
-                    }
-                    break;
-            }
-            
-            return filteredSales;
-        }
-
-        function getPeriodText(period) {
-            const periods = {
-                'today': 'Today',
-                'yesterday': 'Yesterday',
-                'this_week': 'This Week',
-                'last_week': 'Last Week',
-                'this_month': 'This Month',
-                'last_month': 'Last Month',
-                'this_year': 'This Year',
-                'custom': 'Custom Period'
-            };
-            return periods[period] || period;
-        }
-
-        function getMonthlyProfitData() {
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const currentYear = new Date().getFullYear();
-            
-            const monthlyData = [];
-            for (let i = 0; i < 12; i++) {
-                const monthSales = sales.filter(sale => 
-                    sale.date.getMonth() === i && sale.date.getFullYear() === currentYear);
-                
-                const revenue = monthSales.reduce((sum, sale) => sum + (sale.total || 0), 0);
-                const profit = revenue * 0.3; // 30% margin
-                
-                monthlyData.push({
-                    month: months[i],
-                    revenue: revenue,
-                    cost: revenue * 0.7,
-                    profit: profit,
-                    margin: revenue > 0 ? (profit / revenue * 100).toFixed(2) + '%' : '0%'
-                });
-            }
-            
-            return monthlyData;
-        }
-
-        function displayReportPreview(reportData, title) {
-            const preview = document.getElementById('reportPreview');
-            
-            let html = `
-                <div style="background: white; border-radius: 15px; padding: 30px; box-shadow: 0 5px 15px rgba(0,0,0,0.05);">
-                    <div style="text-align: center; margin-bottom: 30px;">
-                        <h3 style="color: var(--primary); margin-bottom: 10px;">${title}</h3>
-                        <p style="color: #666;">${reportData.period || ''} • Generated: ${reportData.generated}</p>
-                    </div>
-            `;
-            
-            // Summary section
-            if (reportData.summary) {
-                html += `
-                    <div style="background: #f8f9fa; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
-                        <h4 style="color: var(--primary); margin-bottom: 15px;">Summary</h4>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                `;
-                
-                Object.entries(reportData.summary).forEach(([key, value]) => {
-                    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                    const isCurrency = typeof value === 'number' && (key.includes('total') || key.includes('revenue') || key.includes('cost') || key.includes('profit') || key.includes('spent'));
-                    const formattedValue = isCurrency ? '₹' + value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value;
-                    
-                    html += `
-                        <div style="text-align: center;">
-                            <div style="font-size: 24px; font-weight: bold; color: var(--primary); margin-bottom: 5px;">
-                                ${formattedValue}
-                            </div>
-                            <div style="color: #666; font-size: 14px;">
-                                ${formattedKey}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += `
-                        </div>
-                    </div>
-                `;
-            }
-            
-            // Details table
-            if (reportData.details && reportData.details.length > 0) {
-                html += `
-                    <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <thead>
-                                <tr style="background: var(--primary); color: white;">
-                `;
-                
-                // Table headers
-                const headers = Object.keys(reportData.details[0]);
-                headers.forEach(header => {
-                    const formattedHeader = header.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                    html += `<th style="padding: 12px; text-align: left;">${formattedHeader}</th>`;
-                });
-                
-                html += `
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                // Table rows
-                reportData.details.forEach(row => {
-                    html += `<tr style="border-bottom: 1px solid #eee;">`;
-                    headers.forEach(header => {
-                        let cellValue = row[header];
-                        if (typeof cellValue === 'number') {
-                            if (header.includes('total') || header.includes('spent') || header.includes('revenue') || 
-                                header.includes('cost') || header.includes('profit') || header.includes('subtotal') || 
-                                header.includes('tax') || header.includes('value') || header.includes('price') || 
-                                header.includes('cost')) {
-                                cellValue = '₹' + cellValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                            } else if (header.includes('margin') && typeof cellValue === 'string') {
-                                // Keep as is
-                            } else {
-                                cellValue = cellValue.toLocaleString('en-IN');
-                            }
-                        }
-                        html += `<td style="padding: 12px;">${cellValue}</td>`;
-                    });
-                    html += `</tr>`;
-                });
-                
-                html += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-            }
-            
-            // Monthly breakdown for profit report
-            if (reportData.monthlyBreakdown) {
-                html += `
-                    <div style="margin-top: 30px;">
-                        <h4 style="color: var(--primary); margin-bottom: 15px;">Monthly Breakdown</h4>
-                        <div style="overflow-x: auto;">
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <thead>
-                                    <tr style="background: #f8f9fa;">
-                                        <th style="padding: 10px; text-align: left;">Month</th>
-                                        <th style="padding: 10px; text-align: left;">Revenue</th>
-                                        <th style="padding: 10px; text-align: left;">Cost</th>
-                                        <th style="padding: 10px; text-align: left;">Profit</th>
-                                        <th style="padding: 10px; text-align: left;">Margin</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                `;
-                
-                reportData.monthlyBreakdown.forEach(month => {
-                    html += `
-                        <tr style="border-bottom: 1px solid #eee;">
-                            <td style="padding: 10px;"><strong>${month.month}</strong></td>
-                            <td style="padding: 10px;">₹${month.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                            <td style="padding: 10px;">₹${month.cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                            <td style="padding: 10px; color: ${month.profit >= 0 ? 'green' : 'red'}; font-weight: bold;">
-                                ₹${month.profit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td style="padding: 10px;">${month.margin}</td>
-                        </tr>
-                    `;
-                });
-                
-                html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            html += `</div>`;
-            preview.innerHTML = html;
-        }
-
-        // Download Reports
-        function downloadReportPDF(reportData, title) {
-            // In a real implementation, you would use jsPDF to generate PDF
-            showSuccess(`PDF report "${title}" would be generated with jsPDF library`);
-        }
-
-        function downloadReportExcel(reportData, title) {
-            // Convert to CSV and download
-            let csv = '';
-            
-            // Add title and metadata
-            csv += `${title}\n`;
-            csv += `Period: ${reportData.period || 'All Time'}\n`;
-            csv += `Generated: ${reportData.generated}\n\n`;
-            
-            // Add summary
-            if (reportData.summary) {
-                csv += 'Summary\n';
-                Object.entries(reportData.summary).forEach(([key, value]) => {
-                    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                    csv += `${formattedKey},${value}\n`;
-                });
-                csv += '\n';
-            }
-            
-            // Add details
-            if (reportData.details && reportData.details.length > 0) {
-                csv += 'Details\n';
-                const headers = Object.keys(reportData.details[0]);
-                csv += headers.map(h => h.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())).join(',') + '\n';
-                
-                reportData.details.forEach(row => {
-                    const rowData = headers.map(header => {
-                        let value = row[header];
-                        if (typeof value === 'number') {
-                            value = value.toString();
-                        }
-                        return value;
-                    });
-                    csv += rowData.join(',') + '\n';
-                });
-            }
-            
-            // Create and download file
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${title.toLowerCase().replace(/ /g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-            
-            showSuccess(`Excel report "${title}" downloaded successfully`);
-        }
-
-        function downloadReportCSV(reportData, title) {
-            // Same as Excel for now
-            downloadReportExcel(reportData, title);
-        }
-
-        // Quick Report Generation
-        function generateSalesReport() {
-            currentReportType = 'salesReport';
-            showReports();
-            showReportTab('salesReport');
-            generateReport();
-        }
-
-        function generateInventoryReport() {
-            currentReportType = 'inventoryReport';
-            showReports();
-            showReportTab('inventoryReport');
-            generateReport();
-        }
-
-        function generateCustomerReport() {
-            currentReportType = 'customerReport';
-            showReports();
-            showReportTab('customerReport');
-            generateReport();
-        }
-
-        function generateProfitReport() {
-            currentReportType = 'profitReport';
-            showReports();
-            showReportTab('profitReport');
-            generateReport();
-        }
-
-        function generateTaxReport() {
-            showSuccess('Tax report feature would calculate GST and tax liabilities');
-        }
-
-        function generateCustomReport() {
-            showSuccess('Custom report builder would allow creating custom reports');
-        }
-
-        function downloadCurrentReport() {
-            const format = document.getElementById('reportFormat').value;
-            if (format === 'pdf') {
-                showSuccess('PDF download would be implemented with jsPDF');
-            } else if (format === 'excel' || format === 'csv') {
-                // For now, just show success message
-                showSuccess('Report download functionality would be implemented');
-            }
-        }
-
-        function printCurrentReport() {
-            window.print();
-        }
-
-        // Modal Functions
-        function openModal(modalId) {
-            document.getElementById(modalId).style.display = 'flex';
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-
-        function openNewItemModal() {
-            // Generate SKU
-            const sku = 'ITEM-' + Date.now().toString().slice(-8);
-            document.getElementById('itemSKU').value = sku;
-            
-            // Reset form
-            document.getElementById('addItemForm').reset();
-            document.getElementById('initialStock').value = 10;
-            document.getElementById('minStock').value = 5;
-            document.getElementById('maxStock').value = 100;
-            document.getElementById('itemTaxRate').value = 18;
-            
-            openModal('newItemModal');
-        }
-
-        function openNewSaleModal() {
-            saleCart = [];
-            updateSaleCart();
-            loadSaleItems();
-            updateCartTotals();
-            openModal('newSaleModal');
-        }
-
-        function openNewCustomerModal() {
-            // Generate Customer ID
-            const customerId = 'CUST-' + Date.now().toString().slice(-8);
-            document.getElementById('customerId').value = customerId;
-            
-            // Reset form
-            document.getElementById('addCustomerForm').reset();
-            
-            openModal('newCustomerModal');
-        }
-
-        // Load Sale Items for Sale Modal
-        function loadSaleItems() {
-            const container = document.getElementById('saleItemsList');
-            const searchTerm = document.getElementById('searchSaleItems').value.toLowerCase();
-            const categoryFilter = document.getElementById('filterSaleCategory').value;
-            
-            let filteredItems = inventoryItems.filter(item => {
-                const matchesSearch = searchTerm === '' || 
-                    item.name.toLowerCase().includes(searchTerm) ||
-                    (item.sku || '').toLowerCase().includes(searchTerm);
-                
-                const matchesCategory = !categoryFilter || item.category === categoryFilter;
-                const inStock = item.currentStock > 0;
-                
-                return matchesSearch && matchesCategory && inStock;
-            });
-            
-            if (filteredItems.length === 0) {
-                container.innerHTML = `
-                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
-                        <i class="fas fa-search" style="font-size: 48px; color: #ddd; margin-bottom: 15px;"></i>
-                        <p style="color: #666;">No items found</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            let html = '';
-            filteredItems.forEach(item => {
-                const stockStatus = getStockStatus(item.currentStock, item.minStock || 5);
-                
-                html += `
-                    <div style="background: white; border-radius: 12px; padding: 15px; border: 2px solid #eee; transition: all 0.3s; cursor: pointer;"
-                         onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-5px)';"
-                         onmouseout="this.style.borderColor='#eee'; this.style.transform='translateY(0)';">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                            <div>
-                                <h6 style="margin: 0 0 5px 0; font-weight: bold;">${item.name || 'Unnamed Item'}</h6>
-                                <p style="color: #666; font-size: 12px; margin: 0 0 5px 0;">${item.sku || 'No SKU'}</p>
-                                <span class="badge ${stockStatus.badgeClass}" style="font-size: 11px;">${stockStatus.text}</span>
-                            </div>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: bold; color: var(--primary);">
-                                    ₹${(item.sellingPrice || 0).toFixed(2)}
-                                </div>
-                                <div style="font-size: 12px; color: #666;">
-                                    Stock: ${item.currentStock}
-                                </div>
-                            </div>
-                        </div>
-                        <button class="action-btn" onclick="addToCart('${item.id}')" style="width: 100%; padding: 8px; font-size: 14px;">
-                            <i class="fas fa-cart-plus"></i> Add to Cart
-                        </button>
-                    </div>
-                `;
-            });
-            
-            container.innerHTML = html;
-        }
-
-        // Cart Functions
-        function addToCart(itemId) {
-            const item = inventoryItems.find(i => i.id === itemId);
-            if (!item) return;
-
-            const existingItem = saleCart.find(i => i.id === itemId);
-            
-            if (existingItem) {
-                if (existingItem.quantity < item.currentStock) {
-                    existingItem.quantity += 1;
-                } else {
-                    showError(`Only ${item.currentStock} items available in stock`);
-                    return;
-                }
-            } else {
-                if (item.currentStock > 0) {
-                    saleCart.push({
-                        id: itemId,
-                        name: item.name || 'Unnamed Item',
-                        sku: item.sku,
-                        price: item.sellingPrice || 0,
-                        quantity: 1,
-                        maxQuantity: item.currentStock,
-                        unit: item.unit,
-                        taxRate: item.taxRate || 18
-                    });
-                } else {
-                    showError('Item is out of stock');
-                    return;
-                }
-            }
-            
-            updateSaleCart();
-            updateCartTotals();
-        }
-
-        function updateSaleCart() {
-            const cartContainer = document.getElementById('saleCart');
-            
-            if (saleCart.length === 0) {
-                cartContainer.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: #666;">
-                        <i class="fas fa-shopping-cart" style="font-size: 48px; margin-bottom: 15px; opacity: 0.3;"></i>
-                        <p>Cart is empty</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            let html = '';
-            saleCart.forEach((item, index) => {
-                const itemTotal = item.price * item.quantity;
-                html += `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: bold; margin-bottom: 5px;">${item.name}</div>
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">SKU: ${item.sku || 'N/A'}</div>
-                            <div style="font-size: 14px;">₹${item.price.toFixed(2)} × ${item.quantity} ${item.unit || 'pcs'}</div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 15px;">
-                            <div style="text-align: right;">
-                                <div style="font-weight: bold; color: var(--primary); font-size: 18px;">
-                                    ₹${itemTotal.toFixed(2)}
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <button class="action-btn" style="padding: 5px 10px;" onclick="updateCartQuantity(${index}, -1)" ${item.quantity <= 1 ? 'disabled' : ''}>
-                                    <i class="fas fa-minus"></i>
-                                </button>
-                                <span style="font-weight: bold; min-width: 30px; text-align: center;">${item.quantity}</span>
-                                <button class="action-btn" style="padding: 5px 10px;" onclick="updateCartQuantity(${index}, 1)" ${item.quantity >= item.maxQuantity ? 'disabled' : ''}>
-                                    <i class="fas fa-plus"></i>
-                                </button>
-                                <button class="action-btn danger" style="padding: 5px 10px;" onclick="removeFromCart(${index})">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            cartContainer.innerHTML = html;
-        }
-
-        function updateCartQuantity(index, change) {
-            const item = saleCart[index];
-            const newQuantity = item.quantity + change;
-            
-            if (newQuantity < 1) {
-                removeFromCart(index);
-                return;
-            }
-            
-            if (newQuantity > item.maxQuantity) {
-                showError(`Only ${item.maxQuantity} items available in stock`);
-                return;
-            }
-            
-            item.quantity = newQuantity;
-            updateSaleCart();
-            updateCartTotals();
-        }
-
-        function removeFromCart(index) {
-            saleCart.splice(index, 1);
-            updateSaleCart();
-            updateCartTotals();
-        }
-
-        function updateCartTotals() {
-            const subtotal = saleCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            
-            // Calculate discount
-            const discountInput = parseFloat(document.getElementById('cartDiscount').value) || 0;
-            const discountType = document.getElementById('discountType').value;
-            let discount = discountType === 'percent' ? subtotal * (discountInput / 100) : discountInput;
-            discount = Math.min(discount, subtotal);
-            
-            // Calculate GST
-            const gstRate = parseFloat(document.getElementById('gstRate').value) / 100;
-            const taxableAmount = subtotal - discount;
-            const gstAmount = taxableAmount * gstRate;
-            const total = taxableAmount + gstAmount;
-            
-            document.getElementById('cartSubtotal').textContent = `₹${subtotal.toFixed(2)}`;
-            document.getElementById('gstAmount').textContent = `₹${gstAmount.toFixed(2)}`;
-            document.getElementById('cartTotal').textContent = `₹${total.toFixed(2)}`;
-        }
-
-        // Save New Item
-        async function saveNewItem() {
-            try {
-                const userId = currentUser.uid;
-                const itemData = {
-                    name: document.getElementById('itemName').value,
-                    category: document.getElementById('itemCategory').value,
-                    sku: document.getElementById('itemSKU').value || 'ITEM-' + Date.now().toString().slice(-8),
-                    brand: document.getElementById('itemBrand').value,
-                    costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
-                    sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
-                    currentStock: parseInt(document.getElementById('initialStock').value) || 0,
-                    minStock: parseInt(document.getElementById('minStock').value) || 5,
-                    maxStock: parseInt(document.getElementById('maxStock').value) || 100,
-                    unit: document.getElementById('itemUnit').value,
-                    description: document.getElementById('itemDescription').value,
-                    supplier: document.getElementById('itemSupplier').value,
-                    taxRate: parseFloat(document.getElementById('itemTaxRate').value) || 18,
-                    image: document.getElementById('itemImage').value,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-
-                if (!itemData.name || !itemData.category || itemData.sellingPrice <= 0) {
-                    showError('Please fill all required fields correctly');
-                    return;
-                }
-
-                await db.collection('users').doc(userId).collection('inventory').add(itemData);
-                
-                closeModal('newItemModal');
-                await loadInventory();
-                updateDashboardStats();
-                updateLowStockTable();
-                updateBadges();
-                
-                showSuccess('Item added successfully!');
-            } catch (error) {
-                console.error('Error saving item:', error);
-                showError('Failed to save item: ' + error.message);
-            }
-        }
-
-        // Save New Customer
-        async function saveNewCustomer() {
-            try {
-                const userId = currentUser.uid;
-                const customerData = {
-                    name: document.getElementById('customerName').value,
-                    customerId: document.getElementById('customerId').value || 'CUST-' + Date.now().toString().slice(-8),
-                    email: document.getElementById('customerEmail').value,
-                    phone: document.getElementById('customerPhone').value,
-                    address: document.getElementById('customerAddress').value,
-                    gstNumber: document.getElementById('customerGST').value,
-                    customerType: document.getElementById('customerType').value,
-                    creditLimit: parseFloat(document.getElementById('creditLimit').value) || 0,
-                    paymentTerms: document.getElementById('paymentTerms').value,
-                    notes: document.getElementById('customerNotes').value,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-
-                if (!customerData.name || !customerData.phone) {
-                    showError('Please fill all required fields');
-                    return;
-                }
-
-                await db.collection('users').doc(userId).collection('customers').add(customerData);
-                
-                closeModal('newCustomerModal');
-                await loadCustomers();
-                updateDashboardStats();
-                updateBadges();
-                populateCustomerSelect();
-                
-                showSuccess('Customer added successfully!');
-            } catch (error) {
-                console.error('Error saving customer:', error);
-                showError('Failed to save customer: ' + error.message);
-            }
-        }
-
-        // Process Sale - FIXED VERSION
+        // Process Sale - COMPLETELY FIXED VERSION
         async function processSale() {
             if (saleCart.length === 0) {
-                showError('Please add items to cart before completing sale');
+                showToast('Please add items to cart before completing sale', 'error');
                 return;
             }
 
             try {
+                showToast('Processing sale...', 'info');
+                
                 const userId = currentUser.uid;
-                const invoiceNumber = 'INV-' + Date.now().toString().slice(-10);
+                const invoiceNumber = 'INV-' + Date.now().toString().slice(-8);
                 const subtotal = saleCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
                 
                 // Calculate discount
@@ -4079,14 +3405,14 @@
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
-                // Start a batch write to ensure all operations succeed or fail together
+                // Start a batch write
                 const batch = db.batch();
                 
                 // Add sale to sales collection
                 const saleRef = db.collection('users').doc(userId).collection('sales').doc();
                 batch.set(saleRef, saleData);
                 
-                // Update inventory stock for each item in the cart
+                // Update inventory stock for each item
                 for (const item of saleCart) {
                     const inventoryRef = db.collection('users').doc(userId).collection('inventory').doc(item.id);
                     const inventoryItem = inventoryItems.find(i => i.id === item.id);
@@ -4094,7 +3420,7 @@
                     if (inventoryItem) {
                         const newStock = inventoryItem.currentStock - item.quantity;
                         if (newStock < 0) {
-                            showError(`Not enough stock for ${item.name}. Available: ${inventoryItem.currentStock}`);
+                            showToast(`Not enough stock for ${item.name}. Available: ${inventoryItem.currentStock}`, 'error');
                             return;
                         }
                         
@@ -4103,9 +3429,6 @@
                             lastSold: firebase.firestore.FieldValue.serverTimestamp(),
                             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
-                    } else {
-                        showError(`Item ${item.name} not found in inventory`);
-                        return;
                     }
                 }
                 
@@ -4119,23 +3442,37 @@
                 closeModal('newSaleModal');
                 saleCart = [];
                 
-                // Reload data to reflect changes
-                await Promise.all([loadInventory(), loadSales()]);
+                // Reload ALL data to reflect changes
+                await Promise.all([
+                    loadInventory(),
+                    loadSales(),
+                    loadCustomers()
+                ]);
+                
+                // Update all UI components
                 updateDashboardStats();
                 updateRecentSalesTable();
                 updateLowStockTable();
                 updateBadges();
+                populateCustomerSelect();
                 
-                showSuccess(`Sale completed successfully! Invoice #${invoiceNumber}`);
+                // If on sales page, reload the table
+                if (document.getElementById('salesContent').style.display !== 'none') {
+                    loadSalesTable();
+                }
+                
+                showToast(`Sale completed successfully! Invoice #${invoiceNumber}`, 'success');
                 
             } catch (error) {
                 console.error('Error processing sale:', error);
-                showError('Failed to process sale: ' + error.message);
+                showToast('Failed to process sale: ' + error.message, 'error');
             }
         }
 
         // Generate Invoice Preview
         function generateInvoicePreview(saleData) {
+            console.log('Generating invoice for sale:', saleData);
+            
             let itemsHtml = '';
             saleData.items.forEach((item, index) => {
                 itemsHtml += `
@@ -4145,7 +3482,7 @@
                         <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.sku || 'N/A'}</td>
                         <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
                         <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">₹${item.price.toFixed(2)}</td>
-                        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">₹${item.total.toFixed(2)}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">₹${(item.price * item.quantity).toFixed(2)}</td>
                     </tr>
                 `;
             });
@@ -4242,16 +3579,50 @@
             initializeApp();
         }
 
-        // Download Invoice as PDF
-        function downloadInvoicePDF() {
-            // In a real implementation, you would use jsPDF
-            showSuccess('PDF download would be implemented with jsPDF library');
+        // Download Invoice as PDF - WORKING VERSION
+        async function downloadInvoicePDF() {
+            try {
+                showToast('Generating PDF...', 'info');
+                
+                const invoiceElement = document.getElementById('invoiceContent');
+                
+                // Use html2canvas to capture the invoice
+                const canvas = await html2canvas(invoiceElement, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff'
+                });
+                
+                // Convert canvas to image
+                const imgData = canvas.toDataURL('image/png');
+                
+                // Create PDF
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                
+                // Calculate dimensions
+                const imgWidth = 190;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                
+                // Add image to PDF
+                pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
+                
+                // Save the PDF
+                pdf.save(`invoice_${new Date().getTime()}.pdf`);
+                
+                showToast('PDF downloaded successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                showToast('Failed to generate PDF', 'error');
+            }
         }
 
         // Export Sales Data
         function exportSalesData() {
             const csv = convertSalesToCSV();
-            downloadCSV(csv, 'sales_export.csv');
+            downloadCSV(csv, `sales_export_${new Date().getTime()}.csv`);
         }
 
         function convertSalesToCSV() {
@@ -4274,17 +3645,16 @@
         }
 
         function downloadCSV(csv, filename) {
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             
-            showSuccess('Sales data exported successfully');
+            showToast('CSV exported successfully!', 'success');
         }
 
         // Print Sales Report
@@ -4292,165 +3662,377 @@
             window.print();
         }
 
-        // Update Sales Chart
-        function updateSalesChart() {
-            const fromDate = document.getElementById('salesDateFrom').value;
-            const toDate = document.getElementById('salesDateTo').value;
+        // Modal Functions
+        function openModal(modalId) {
+            document.getElementById(modalId).style.display = 'flex';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function openNewItemModal() {
+            // Generate SKU
+            const sku = 'ITEM-' + Date.now().toString().slice(-8);
+            document.getElementById('itemSKU').value = sku;
             
-            if (fromDate && toDate) {
-                // Update chart with filtered data
-                const filteredSales = sales.filter(sale => 
-                    sale.date >= new Date(fromDate) && sale.date <= new Date(toDate)
-                );
+            // Reset form
+            document.getElementById('addItemForm').reset();
+            document.getElementById('initialStock').value = 10;
+            document.getElementById('minStock').value = 5;
+            document.getElementById('maxStock').value = 100;
+            document.getElementById('itemTaxRate').value = 18;
+            
+            openModal('newItemModal');
+        }
+
+        function openNewSaleModal() {
+            saleCart = [];
+            updateSaleCart();
+            loadSaleItems();
+            updateCartTotals();
+            openModal('newSaleModal');
+        }
+
+        function openNewCustomerModal() {
+            // Generate Customer ID
+            const customerId = 'CUST-' + Date.now().toString().slice(-8);
+            document.getElementById('customerId').value = customerId;
+            
+            // Reset form
+            document.getElementById('addCustomerForm').reset();
+            
+            openModal('newCustomerModal');
+        }
+
+        // Load Sale Items for Sale Modal
+        function loadSaleItems() {
+            const container = document.getElementById('saleItemsList');
+            const searchTerm = document.getElementById('searchSaleItems').value.toLowerCase();
+            const categoryFilter = document.getElementById('filterSaleCategory').value;
+            
+            let filteredItems = inventoryItems.filter(item => {
+                const matchesSearch = searchTerm === '' || 
+                    (item.name || '').toLowerCase().includes(searchTerm) ||
+                    (item.sku || '').toLowerCase().includes(searchTerm);
                 
-                // Update the chart data
-                // This is a simplified version - in reality you'd update the chart
-                showSuccess(`Chart updated for period ${fromDate} to ${toDate}`);
-            }
-        }
-
-        // Update Top Items Chart
-        function updateTopItemsChart() {
-            const period = document.getElementById('topItemsPeriod').value;
-            const data = getTopItemsData(period);
+                const matchesCategory = !categoryFilter || item.category === categoryFilter;
+                const inStock = item.currentStock > 0;
+                
+                return matchesSearch && matchesCategory && inStock;
+            });
             
-            if (charts.topItemsChart) {
-                charts.topItemsChart.data = data;
-                charts.topItemsChart.update();
+            if (filteredItems.length === 0) {
+                container.innerHTML = `
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                        <i class="fas fa-search" style="font-size: 48px; color: #ddd; margin-bottom: 15px;"></i>
+                        <p style="color: #666;">No items found</p>
+                    </div>
+                `;
+                return;
             }
+            
+            let html = '';
+            filteredItems.forEach(item => {
+                const stockStatus = getStockStatus(item.currentStock, item.minStock || 5);
+                
+                html += `
+                    <div style="background: white; border-radius: 12px; padding: 15px; border: 2px solid #eee; transition: all 0.3s; cursor: pointer;"
+                         onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-5px)';"
+                         onmouseout="this.style.borderColor='#eee'; this.style.transform='translateY(0)';">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                            <div>
+                                <h6 style="margin: 0 0 5px 0; font-weight: bold;">${item.name || 'Unnamed Item'}</h6>
+                                <p style="color: #666; font-size: 12px; margin: 0 0 5px 0;">${item.sku || 'No SKU'}</p>
+                                <span class="badge ${stockStatus.badgeClass}" style="font-size: 11px;">${stockStatus.text}</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: bold; color: var(--primary);">
+                                    ₹${(item.sellingPrice || 0).toFixed(2)}
+                                </div>
+                                <div style="font-size: 12px; color: #666;">
+                                    Stock: ${item.currentStock}
+                                </div>
+                            </div>
+                        </div>
+                        <button class="action-btn" onclick="addToCart('${item.id}')" style="width: 100%; padding: 8px; font-size: 14px;">
+                            <i class="fas fa-cart-plus"></i> Add to Cart
+                        </button>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
         }
 
-        // Update Performance Chart
-        function updatePerformanceChart() {
-            const year = document.getElementById('performanceYear').value;
-            // Update chart for selected year
-            showSuccess(`Performance chart updated for year ${year}`);
-        }
-
-        // Update Analytics Charts
-        function updateAnalyticsCharts() {
-            // Initialize analytics charts
-            // This would be similar to initializeCharts but for analytics
-        }
-
-        // Edit Item
-        function editItem(itemId) {
+        // Cart Functions
+        function addToCart(itemId) {
             const item = inventoryItems.find(i => i.id === itemId);
-            if (item) {
-                // Pre-fill the new item modal with existing data
-                document.getElementById('itemName').value = item.name;
-                document.getElementById('itemCategory').value = item.category;
-                document.getElementById('itemSKU').value = item.sku;
-                document.getElementById('itemBrand').value = item.brand;
-                document.getElementById('costPrice').value = item.costPrice;
-                document.getElementById('sellingPrice').value = item.sellingPrice;
-                document.getElementById('initialStock').value = item.currentStock;
-                document.getElementById('minStock').value = item.minStock;
-                document.getElementById('maxStock').value = item.maxStock;
-                document.getElementById('itemUnit').value = item.unit;
-                document.getElementById('itemDescription').value = item.description;
-                document.getElementById('itemSupplier').value = item.supplier;
-                document.getElementById('itemTaxRate').value = item.taxRate || 18;
-                document.getElementById('itemImage').value = item.image || '';
-                
-                openModal('newItemModal');
-                showSuccess('Edit the item details and click Save');
-            }
-        }
+            if (!item) return;
 
-        // Delete Item
-        async function deleteItem(itemId) {
-            if (confirm('Are you sure you want to delete this item? This action cannot be undone.')) {
-                try {
-                    const userId = currentUser.uid;
-                    await db.collection('users').doc(userId).collection('inventory').doc(itemId).delete();
-                    
-                    await loadInventory();
-                    updateDashboardStats();
-                    updateLowStockTable();
-                    updateBadges();
-                    
-                    showSuccess('Item deleted successfully!');
-                } catch (error) {
-                    console.error('Error deleting item:', error);
-                    showError('Failed to delete item');
+            const existingItem = saleCart.find(i => i.id === itemId);
+            
+            if (existingItem) {
+                if (existingItem.quantity < item.currentStock) {
+                    existingItem.quantity += 1;
+                } else {
+                    showToast(`Only ${item.currentStock} items available in stock`, 'error');
+                    return;
+                }
+            } else {
+                if (item.currentStock > 0) {
+                    saleCart.push({
+                        id: itemId,
+                        name: item.name || 'Unnamed Item',
+                        sku: item.sku,
+                        price: item.sellingPrice || 0,
+                        quantity: 1,
+                        maxQuantity: item.currentStock,
+                        unit: item.unit,
+                        taxRate: item.taxRate || 18
+                    });
+                } else {
+                    showToast('Item is out of stock', 'error');
+                    return;
                 }
             }
+            
+            updateSaleCart();
+            updateCartTotals();
         }
 
-        // Restock Item
-        function restockItem(itemId) {
-            const item = inventoryItems.find(i => i.id === itemId);
-            if (item) {
-                const newStock = prompt(`Enter new stock quantity for ${item.name}:`, item.currentStock);
-                if (newStock !== null) {
-                    const quantity = parseInt(newStock);
-                    if (!isNaN(quantity)) {
-                        updateItemStock(itemId, quantity);
-                    }
-                }
+        function updateSaleCart() {
+            const cartContainer = document.getElementById('saleCart');
+            
+            if (saleCart.length === 0) {
+                cartContainer.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #666;">
+                        <i class="fas fa-shopping-cart" style="font-size: 48px; margin-bottom: 15px; opacity: 0.3;"></i>
+                        <p>Cart is empty</p>
+                    </div>
+                `;
+                return;
             }
+            
+            let html = '';
+            saleCart.forEach((item, index) => {
+                const itemTotal = item.price * item.quantity;
+                html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${item.name}</div>
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">SKU: ${item.sku || 'N/A'}</div>
+                            <div style="font-size: 14px;">₹${item.price.toFixed(2)} × ${item.quantity} ${item.unit || 'pcs'}</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <div style="text-align: right;">
+                                <div style="font-weight: bold; color: var(--primary); font-size: 18px;">
+                                    ₹${itemTotal.toFixed(2)}
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="action-btn" style="padding: 5px 10px;" onclick="updateCartQuantity(${index}, -1)" ${item.quantity <= 1 ? 'disabled' : ''}>
+                                    <i class="fas fa-minus"></i>
+                                </button>
+                                <span style="font-weight: bold; min-width: 30px; text-align: center;">${item.quantity}</span>
+                                <button class="action-btn" style="padding: 5px 10px;" onclick="updateCartQuantity(${index}, 1)" ${item.quantity >= item.maxQuantity ? 'disabled' : ''}>
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                                <button class="action-btn danger" style="padding: 5px 10px;" onclick="removeFromCart(${index})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            cartContainer.innerHTML = html;
         }
 
-        async function updateItemStock(itemId, newStock) {
+        function updateCartQuantity(index, change) {
+            const item = saleCart[index];
+            const newQuantity = item.quantity + change;
+            
+            if (newQuantity < 1) {
+                removeFromCart(index);
+                return;
+            }
+            
+            if (newQuantity > item.maxQuantity) {
+                showToast(`Only ${item.maxQuantity} items available in stock`, 'error');
+                return;
+            }
+            
+            item.quantity = newQuantity;
+            updateSaleCart();
+            updateCartTotals();
+        }
+
+        function removeFromCart(index) {
+            saleCart.splice(index, 1);
+            updateSaleCart();
+            updateCartTotals();
+        }
+
+        function updateCartTotals() {
+            const subtotal = saleCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            
+            // Calculate discount
+            const discountInput = parseFloat(document.getElementById('cartDiscount').value) || 0;
+            const discountType = document.getElementById('discountType').value;
+            let discount = discountType === 'percent' ? subtotal * (discountInput / 100) : discountInput;
+            discount = Math.min(discount, subtotal);
+            
+            // Calculate GST
+            const gstRate = parseFloat(document.getElementById('gstRate').value) / 100;
+            const taxableAmount = subtotal - discount;
+            const gstAmount = taxableAmount * gstRate;
+            const total = taxableAmount + gstAmount;
+            
+            document.getElementById('cartSubtotal').textContent = `₹${subtotal.toFixed(2)}`;
+            document.getElementById('gstAmount').textContent = `₹${gstAmount.toFixed(2)}`;
+            document.getElementById('cartTotal').textContent = `₹${total.toFixed(2)}`;
+        }
+
+        // Save New Item
+        async function saveNewItem() {
             try {
                 const userId = currentUser.uid;
-                await db.collection('users').doc(userId).collection('inventory').doc(itemId).update({
-                    currentStock: newStock,
+                const itemData = {
+                    name: document.getElementById('itemName').value,
+                    category: document.getElementById('itemCategory').value,
+                    sku: document.getElementById('itemSKU').value || 'ITEM-' + Date.now().toString().slice(-8),
+                    brand: document.getElementById('itemBrand').value,
+                    costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
+                    sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
+                    currentStock: parseInt(document.getElementById('initialStock').value) || 0,
+                    minStock: parseInt(document.getElementById('minStock').value) || 5,
+                    maxStock: parseInt(document.getElementById('maxStock').value) || 100,
+                    unit: document.getElementById('itemUnit').value,
+                    description: document.getElementById('itemDescription').value,
+                    supplier: document.getElementById('itemSupplier').value,
+                    taxRate: parseFloat(document.getElementById('itemTaxRate').value) || 18,
+                    image: document.getElementById('itemImage').value,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                };
+
+                if (!itemData.name || !itemData.category || itemData.sellingPrice <= 0) {
+                    showToast('Please fill all required fields correctly', 'error');
+                    return;
+                }
+
+                await db.collection('users').doc(userId).collection('inventory').add(itemData);
                 
+                closeModal('newItemModal');
                 await loadInventory();
                 updateDashboardStats();
                 updateLowStockTable();
+                updateBadges();
                 
-                showSuccess('Stock updated successfully!');
+                showToast('Item added successfully!', 'success');
             } catch (error) {
-                console.error('Error updating stock:', error);
-                showError('Failed to update stock');
+                console.error('Error saving item:', error);
+                showToast('Failed to save item: ' + error.message, 'error');
             }
         }
 
-        // Edit Sale
-        function editSale(saleId) {
-            showSuccess('Edit sale functionality would be implemented');
-        }
+        // Save New Customer
+        async function saveNewCustomer() {
+            try {
+                const userId = currentUser.uid;
+                const customerData = {
+                    name: document.getElementById('customerName').value,
+                    customerId: document.getElementById('customerId').value || 'CUST-' + Date.now().toString().slice(-8),
+                    email: document.getElementById('customerEmail').value,
+                    phone: document.getElementById('customerPhone').value,
+                    address: document.getElementById('customerAddress').value,
+                    gstNumber: document.getElementById('customerGST').value,
+                    customerType: document.getElementById('customerType').value,
+                    creditLimit: parseFloat(document.getElementById('creditLimit').value) || 0,
+                    paymentTerms: document.getElementById('paymentTerms').value,
+                    notes: document.getElementById('customerNotes').value,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
 
-        // Edit Customer
-        function editCustomer(customerId) {
-            showSuccess('Edit customer functionality would be implemented');
+                if (!customerData.name || !customerData.phone) {
+                    showToast('Please fill all required fields', 'error');
+                    return;
+                }
+
+                await db.collection('users').doc(userId).collection('customers').add(customerData);
+                
+                closeModal('newCustomerModal');
+                await loadCustomers();
+                updateDashboardStats();
+                updateBadges();
+                populateCustomerSelect();
+                
+                showToast('Customer added successfully!', 'success');
+            } catch (error) {
+                console.error('Error saving customer:', error);
+                showToast('Failed to save customer: ' + error.message, 'error');
+            }
         }
 
         // Utility Functions
         function formatDate(date) {
             if (!date) return 'N/A';
-            return new Date(date).toLocaleDateString('en-IN', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric'
-            });
+            try {
+                return new Date(date).toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                });
+            } catch (e) {
+                return 'Invalid Date';
+            }
         }
 
         function formatTime(date) {
             if (!date) return 'N/A';
-            return new Date(date).toLocaleTimeString('en-IN', {
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+            try {
+                return new Date(date).toLocaleTimeString('en-IN', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (e) {
+                return 'Invalid Time';
+            }
         }
 
-        function getDateDaysAgo(days) {
-            const date = new Date();
-            date.setDate(date.getDate() - days);
-            return date.toISOString().split('T')[0];
-        }
-
-        function showError(message) {
-            alert('❌ ' + message);
-        }
-
-        function showSuccess(message) {
-            alert('✅ ' + message);
+        // Toast Notification System
+        function showToast(message, type = 'info') {
+            const toastContainer = document.getElementById('toastContainer');
+            const toastId = 'toast-' + Date.now();
+            
+            const icons = {
+                success: 'fas fa-check-circle',
+                error: 'fas fa-exclamation-circle',
+                info: 'fas fa-info-circle'
+            };
+            
+            const toast = document.createElement('div');
+            toast.id = toastId;
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="${icons[type] || icons.info}"></i>
+                <div class="toast-content">
+                    <div class="toast-message">${message}</div>
+                </div>
+                <button class="toast-close" onclick="document.getElementById('${toastId}').remove()">&times;</button>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                if (document.getElementById(toastId)) {
+                    document.getElementById(toastId).remove();
+                }
+            }, 5000);
         }
 
         // Logout
@@ -4458,61 +4040,42 @@
             auth.signOut().then(() => {
                 window.location.href = 'index.html';
             }).catch((error) => {
-                showError('Logout failed: ' + error.message);
+                showToast('Logout failed: ' + error.message, 'error');
             });
         }
 
-        // Event Listeners
+        // Initialize event listeners
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize search and filter event listeners
-            const searchInventory = document.getElementById('searchInventory');
-            const filterCategory = document.getElementById('filterCategory');
-            const filterStatus = document.getElementById('filterStatus');
+            // Search and filter listeners
+            document.getElementById('searchInventory')?.addEventListener('input', () => updateInventoryTable(1));
+            document.getElementById('filterCategory')?.addEventListener('change', () => updateInventoryTable(1));
+            document.getElementById('filterStatus')?.addEventListener('change', () => updateInventoryTable(1));
             
-            if (searchInventory) searchInventory.addEventListener('input', () => updateInventoryTable(1));
-            if (filterCategory) filterCategory.addEventListener('change', () => updateInventoryTable(1));
-            if (filterStatus) filterStatus.addEventListener('change', () => updateInventoryTable(1));
+            document.getElementById('searchSales')?.addEventListener('input', () => loadSalesTable(1));
+            document.getElementById('salesFilterDateFrom')?.addEventListener('change', () => loadSalesTable(1));
+            document.getElementById('salesFilterDateTo')?.addEventListener('change', () => loadSalesTable(1));
+            document.getElementById('salesFilterCustomer')?.addEventListener('change', () => loadSalesTable(1));
+            document.getElementById('salesFilterStatus')?.addEventListener('change', () => loadSalesTable(1));
             
-            const searchSales = document.getElementById('searchSales');
-            const salesFilterDateFrom = document.getElementById('salesFilterDateFrom');
-            const salesFilterDateTo = document.getElementById('salesFilterDateTo');
-            const salesFilterCustomer = document.getElementById('salesFilterCustomer');
-            const salesFilterStatus = document.getElementById('salesFilterStatus');
+            document.getElementById('searchCustomers')?.addEventListener('input', () => updateCustomersTable(1));
             
-            if (searchSales) searchSales.addEventListener('input', () => loadSalesTable(1));
-            if (salesFilterDateFrom) salesFilterDateFrom.addEventListener('change', () => loadSalesTable(1));
-            if (salesFilterDateTo) salesFilterDateTo.addEventListener('change', () => loadSalesTable(1));
-            if (salesFilterCustomer) salesFilterCustomer.addEventListener('change', () => loadSalesTable(1));
-            if (salesFilterStatus) salesFilterStatus.addEventListener('change', () => loadSalesTable(1));
+            document.getElementById('searchSaleItems')?.addEventListener('input', loadSaleItems);
+            document.getElementById('filterSaleCategory')?.addEventListener('change', loadSaleItems);
             
-            const searchCustomers = document.getElementById('searchCustomers');
-            if (searchCustomers) searchCustomers.addEventListener('input', () => updateCustomersTable(1));
+            document.getElementById('cartDiscount')?.addEventListener('input', updateCartTotals);
+            document.getElementById('discountType')?.addEventListener('change', updateCartTotals);
+            document.getElementById('gstRate')?.addEventListener('change', updateCartTotals);
             
-            const searchSaleItems = document.getElementById('searchSaleItems');
-            const filterSaleCategory = document.getElementById('filterSaleCategory');
-            
-            if (searchSaleItems) searchSaleItems.addEventListener('input', loadSaleItems);
-            if (filterSaleCategory) filterSaleCategory.addEventListener('change', loadSaleItems);
-            
-            const cartDiscount = document.getElementById('cartDiscount');
-            const discountType = document.getElementById('discountType');
-            const gstRate = document.getElementById('gstRate');
-            
-            if (cartDiscount) cartDiscount.addEventListener('input', updateCartTotals);
-            if (discountType) discountType.addEventListener('change', updateCartTotals);
-            if (gstRate) gstRate.addEventListener('change', updateCartTotals);
-            
-            const reportPeriod = document.getElementById('reportPeriod');
-            if (reportPeriod) reportPeriod.addEventListener('change', function() {
+            document.getElementById('reportPeriod')?.addEventListener('change', function() {
                 const customRange = document.getElementById('customDateRange');
                 if (customRange) {
                     customRange.style.display = this.value === 'custom' ? 'block' : 'none';
                 }
             });
+            
+            // Initialize the app
+            showDashboard();
         });
-
-        // Initialize the application
-        showDashboard();
     </script>
 </body>
 </html>
