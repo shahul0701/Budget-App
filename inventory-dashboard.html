@@ -993,6 +993,52 @@
             color: white;
             border-color: var(--primary);
         }
+        
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .toggle-slider {
+            background-color: var(--primary);
+        }
+        
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
     </style>
 </head>
 <body>
@@ -1072,7 +1118,7 @@
         <div class="top-bar">
             <div>
                 <h1 class="page-title" id="pageTitle">Dashboard</h1>
-                <p class="page-subtitle" id="pageSubtitle">Welcome to your inventory management system</p>
+                <p class="pageSubtitle" id="pageSubtitle">Welcome to your inventory management system</p>
             </div>
             
             <div class="top-actions">
@@ -2118,6 +2164,13 @@
                     inventoryItems.push({
                         id: doc.id,
                         ...data,
+                        currentStock: data.currentStock || 0,
+                        costPrice: data.costPrice || 0,
+                        sellingPrice: data.sellingPrice || 0,
+                        minStock: data.minStock || 5,
+                        maxStock: data.maxStock || 100,
+                        category: data.category || 'Other',
+                        sku: data.sku || 'SKU-' + doc.id.substring(0, 8),
                         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
                         updatedAt: data.updatedAt ? data.updatedAt.toDate() : new Date()
                     });
@@ -2144,6 +2197,9 @@
                     customers.push({
                         id: doc.id,
                         ...data,
+                        name: data.name || 'Unnamed Customer',
+                        phone: data.phone || '',
+                        email: data.email || '',
                         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
                         updatedAt: data.updatedAt ? data.updatedAt.toDate() : new Date()
                     });
@@ -2169,6 +2225,15 @@
                     sales.push({
                         id: doc.id,
                         ...data,
+                        invoiceNumber: data.invoiceNumber || 'INV-' + doc.id.substring(0, 8),
+                        customerName: data.customerName || 'Walk-in Customer',
+                        items: data.items || [],
+                        subtotal: data.subtotal || 0,
+                        discount: data.discount || 0,
+                        gstAmount: data.gstAmount || 0,
+                        total: data.total || 0,
+                        status: data.status || 'completed',
+                        paymentMethod: data.paymentMethod || 'cash',
                         date: data.date ? data.date.toDate() : new Date(),
                         createdAt: data.createdAt ? data.createdAt.toDate() : new Date()
                     });
@@ -2424,10 +2489,11 @@
             filteredSales.forEach(sale => {
                 if (sale.items) {
                     sale.items.forEach(item => {
-                        if (!itemSales[item.name]) {
-                            itemSales[item.name] = 0;
+                        const itemName = item.name || 'Unknown Item';
+                        if (!itemSales[itemName]) {
+                            itemSales[itemName] = 0;
                         }
-                        itemSales[item.name] += item.quantity || 0;
+                        itemSales[itemName] += item.quantity || 0;
                     });
                 }
             });
@@ -2457,10 +2523,11 @@
         function getCategoryData() {
             const categoryCount = {};
             inventoryItems.forEach(item => {
-                if (!categoryCount[item.category]) {
-                    categoryCount[item.category] = 0;
+                const category = item.category || 'Other';
+                if (!categoryCount[category]) {
+                    categoryCount[category] = 0;
                 }
-                categoryCount[item.category]++;
+                categoryCount[category]++;
             });
             
             return {
@@ -2599,7 +2666,9 @@
         function showDashboard() {
             setActivePage('Dashboard', 'Welcome to your inventory management system', 'dashboardContent');
             updateDashboardStats();
-            initializeCharts();
+            if (!charts.salesChart) {
+                initializeCharts();
+            }
         }
 
         function showInventory() {
@@ -2635,18 +2704,34 @@
             document.getElementById('pageTitle').textContent = title;
             document.getElementById('pageSubtitle').textContent = subtitle;
             
+            // Update active menu item
+            document.querySelectorAll('.menu-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
             // Hide all content sections
             document.querySelectorAll('[id$="Content"]').forEach(section => {
                 section.style.display = 'none';
             });
             
             // Show active content section
-            document.getElementById(contentId).style.display = 'block';
+            const activeSection = document.getElementById(contentId);
+            if (activeSection) {
+                activeSection.style.display = 'block';
+            }
             
-            // Update active menu item
-            document.querySelectorAll('.menu-item').forEach(item => {
-                item.classList.remove('active');
-            });
+            // Find and activate corresponding menu item
+            let menuItem = null;
+            if (contentId === 'dashboardContent') menuItem = document.querySelector('.menu-item:nth-child(1)');
+            else if (contentId === 'inventoryContent') menuItem = document.querySelector('.menu-item:nth-child(2)');
+            else if (contentId === 'salesContent') menuItem = document.querySelector('.menu-item:nth-child(3)');
+            else if (contentId === 'customersContent') menuItem = document.querySelector('.menu-item:nth-child(4)');
+            else if (contentId === 'reportsContent') menuItem = document.querySelector('.menu-item:nth-child(5)');
+            else if (contentId === 'analyticsContent') menuItem = document.querySelector('.menu-item:nth-child(6)');
+            
+            if (menuItem) {
+                menuItem.classList.add('active');
+            }
         }
 
         // Update Inventory Table
@@ -2660,8 +2745,8 @@
             let filteredItems = inventoryItems.filter(item => {
                 const matchesSearch = searchTerm === '' || 
                     item.name.toLowerCase().includes(searchTerm) ||
-                    item.sku?.toLowerCase().includes(searchTerm) ||
-                    item.brand?.toLowerCase().includes(searchTerm);
+                    (item.sku || '').toLowerCase().includes(searchTerm) ||
+                    (item.brand || '').toLowerCase().includes(searchTerm);
                 
                 const matchesCategory = !categoryFilter || item.category === categoryFilter;
                 
@@ -2706,7 +2791,7 @@
                     html += `
                         <tr>
                             <td>
-                                <strong>${item.name}</strong>
+                                <strong>${item.name || 'Unnamed Item'}</strong>
                                 ${item.brand ? `<br><small class="text-muted">${item.brand}</small>` : ''}
                             </td>
                             <td><code>${item.sku || 'N/A'}</code></td>
@@ -2828,7 +2913,7 @@
                     
                     html += `
                         <tr>
-                            <td><strong>${item.name}</strong></td>
+                            <td><strong>${item.name || 'Unnamed Item'}</strong></td>
                             <td><span class="${stockStatus.class}">${item.currentStock}</span></td>
                             <td>${item.minStock || 5}</td>
                             <td><span class="badge ${stockStatus.badgeClass}">${stockStatus.text}</span></td>
@@ -2959,8 +3044,8 @@
             let filteredCustomers = customers.filter(customer => {
                 return searchTerm === '' || 
                     customer.name.toLowerCase().includes(searchTerm) ||
-                    customer.email?.toLowerCase().includes(searchTerm) ||
-                    customer.phone?.includes(searchTerm);
+                    (customer.email || '').toLowerCase().includes(searchTerm) ||
+                    (customer.phone || '').includes(searchTerm);
             });
             
             // Pagination
@@ -3049,17 +3134,17 @@
             
             // Previous button
             if (currentPage > 1) {
-                html += `<div class="page-item" onclick="onPageChange(${currentPage - 1})">&laquo;</div>`;
+                html += `<div class="page-item" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${currentPage - 1})">&laquo;</div>`;
             }
             
             // Page numbers
             for (let i = startPage; i <= endPage; i++) {
-                html += `<div class="page-item ${i === currentPage ? 'active' : ''}" onclick="onPageChange(${i})">${i}</div>`;
+                html += `<div class="page-item ${i === currentPage ? 'active' : ''}" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${i})">${i}</div>`;
             }
             
             // Next button
             if (currentPage < totalPages) {
-                html += `<div class="page-item" onclick="onPageChange(${currentPage + 1})">&raquo;</div>`;
+                html += `<div class="page-item" onclick="(${onPageChange.toString().replace('onPageChange', '')})(${currentPage + 1})">&raquo;</div>`;
             }
             
             container.innerHTML = html;
@@ -3650,6 +3735,7 @@
             saleCart = [];
             updateSaleCart();
             loadSaleItems();
+            updateCartTotals();
             openModal('newSaleModal');
         }
 
@@ -3673,7 +3759,7 @@
             let filteredItems = inventoryItems.filter(item => {
                 const matchesSearch = searchTerm === '' || 
                     item.name.toLowerCase().includes(searchTerm) ||
-                    item.sku?.toLowerCase().includes(searchTerm);
+                    (item.sku || '').toLowerCase().includes(searchTerm);
                 
                 const matchesCategory = !categoryFilter || item.category === categoryFilter;
                 const inStock = item.currentStock > 0;
@@ -3701,7 +3787,7 @@
                          onmouseout="this.style.borderColor='#eee'; this.style.transform='translateY(0)';">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
                             <div>
-                                <h6 style="margin: 0 0 5px 0; font-weight: bold;">${item.name}</h6>
+                                <h6 style="margin: 0 0 5px 0; font-weight: bold;">${item.name || 'Unnamed Item'}</h6>
                                 <p style="color: #666; font-size: 12px; margin: 0 0 5px 0;">${item.sku || 'No SKU'}</p>
                                 <span class="badge ${stockStatus.badgeClass}" style="font-size: 11px;">${stockStatus.text}</span>
                             </div>
@@ -3742,7 +3828,7 @@
                 if (item.currentStock > 0) {
                     saleCart.push({
                         id: itemId,
-                        name: item.name,
+                        name: item.name || 'Unnamed Item',
                         sku: item.sku,
                         price: item.sellingPrice || 0,
                         quantity: 1,
@@ -3936,7 +4022,7 @@
             }
         }
 
-        // Process Sale
+        // Process Sale - FIXED VERSION
         async function processSale() {
             if (saleCart.length === 0) {
                 showError('Please add items to cart before completing sale');
@@ -3993,28 +4079,37 @@
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
-                // Update inventory stock and save sale
+                // Start a batch write to ensure all operations succeed or fail together
                 const batch = db.batch();
                 
                 // Add sale to sales collection
                 const saleRef = db.collection('users').doc(userId).collection('sales').doc();
                 batch.set(saleRef, saleData);
                 
-                // Update inventory stock
+                // Update inventory stock for each item in the cart
                 for (const item of saleCart) {
                     const inventoryRef = db.collection('users').doc(userId).collection('inventory').doc(item.id);
                     const inventoryItem = inventoryItems.find(i => i.id === item.id);
                     
                     if (inventoryItem) {
                         const newStock = inventoryItem.currentStock - item.quantity;
+                        if (newStock < 0) {
+                            showError(`Not enough stock for ${item.name}. Available: ${inventoryItem.currentStock}`);
+                            return;
+                        }
+                        
                         batch.update(inventoryRef, {
                             currentStock: newStock,
                             lastSold: firebase.firestore.FieldValue.serverTimestamp(),
                             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
+                    } else {
+                        showError(`Item ${item.name} not found in inventory`);
+                        return;
                     }
                 }
                 
+                // Commit the batch
                 await batch.commit();
                 
                 // Generate invoice
@@ -4024,7 +4119,7 @@
                 closeModal('newSaleModal');
                 saleCart = [];
                 
-                // Reload data
+                // Reload data to reflect changes
                 await Promise.all([loadInventory(), loadSales()]);
                 updateDashboardStats();
                 updateRecentSalesTable();
@@ -4032,6 +4127,7 @@
                 updateBadges();
                 
                 showSuccess(`Sale completed successfully! Invoice #${invoiceNumber}`);
+                
             } catch (error) {
                 console.error('Error processing sale:', error);
                 showError('Failed to process sale: ' + error.message);
@@ -4367,27 +4463,52 @@
         }
 
         // Event Listeners
-        document.getElementById('searchInventory').addEventListener('input', () => updateInventoryTable(1));
-        document.getElementById('filterCategory').addEventListener('change', () => updateInventoryTable(1));
-        document.getElementById('filterStatus').addEventListener('change', () => updateInventoryTable(1));
-        
-        document.getElementById('searchSales').addEventListener('input', () => loadSalesTable(1));
-        document.getElementById('salesFilterDateFrom').addEventListener('change', () => loadSalesTable(1));
-        document.getElementById('salesFilterDateTo').addEventListener('change', () => loadSalesTable(1));
-        document.getElementById('salesFilterCustomer').addEventListener('change', () => loadSalesTable(1));
-        document.getElementById('salesFilterStatus').addEventListener('change', () => loadSalesTable(1));
-        
-        document.getElementById('searchCustomers').addEventListener('input', () => updateCustomersTable(1));
-        
-        document.getElementById('searchSaleItems').addEventListener('input', loadSaleItems);
-        document.getElementById('filterSaleCategory').addEventListener('change', loadSaleItems);
-        document.getElementById('cartDiscount').addEventListener('input', updateCartTotals);
-        document.getElementById('discountType').addEventListener('change', updateCartTotals);
-        document.getElementById('gstRate').addEventListener('change', updateCartTotals);
-        
-        document.getElementById('reportPeriod').addEventListener('change', function() {
-            const customRange = document.getElementById('customDateRange');
-            customRange.style.display = this.value === 'custom' ? 'block' : 'none';
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize search and filter event listeners
+            const searchInventory = document.getElementById('searchInventory');
+            const filterCategory = document.getElementById('filterCategory');
+            const filterStatus = document.getElementById('filterStatus');
+            
+            if (searchInventory) searchInventory.addEventListener('input', () => updateInventoryTable(1));
+            if (filterCategory) filterCategory.addEventListener('change', () => updateInventoryTable(1));
+            if (filterStatus) filterStatus.addEventListener('change', () => updateInventoryTable(1));
+            
+            const searchSales = document.getElementById('searchSales');
+            const salesFilterDateFrom = document.getElementById('salesFilterDateFrom');
+            const salesFilterDateTo = document.getElementById('salesFilterDateTo');
+            const salesFilterCustomer = document.getElementById('salesFilterCustomer');
+            const salesFilterStatus = document.getElementById('salesFilterStatus');
+            
+            if (searchSales) searchSales.addEventListener('input', () => loadSalesTable(1));
+            if (salesFilterDateFrom) salesFilterDateFrom.addEventListener('change', () => loadSalesTable(1));
+            if (salesFilterDateTo) salesFilterDateTo.addEventListener('change', () => loadSalesTable(1));
+            if (salesFilterCustomer) salesFilterCustomer.addEventListener('change', () => loadSalesTable(1));
+            if (salesFilterStatus) salesFilterStatus.addEventListener('change', () => loadSalesTable(1));
+            
+            const searchCustomers = document.getElementById('searchCustomers');
+            if (searchCustomers) searchCustomers.addEventListener('input', () => updateCustomersTable(1));
+            
+            const searchSaleItems = document.getElementById('searchSaleItems');
+            const filterSaleCategory = document.getElementById('filterSaleCategory');
+            
+            if (searchSaleItems) searchSaleItems.addEventListener('input', loadSaleItems);
+            if (filterSaleCategory) filterSaleCategory.addEventListener('change', loadSaleItems);
+            
+            const cartDiscount = document.getElementById('cartDiscount');
+            const discountType = document.getElementById('discountType');
+            const gstRate = document.getElementById('gstRate');
+            
+            if (cartDiscount) cartDiscount.addEventListener('input', updateCartTotals);
+            if (discountType) discountType.addEventListener('change', updateCartTotals);
+            if (gstRate) gstRate.addEventListener('change', updateCartTotals);
+            
+            const reportPeriod = document.getElementById('reportPeriod');
+            if (reportPeriod) reportPeriod.addEventListener('change', function() {
+                const customRange = document.getElementById('customDateRange');
+                if (customRange) {
+                    customRange.style.display = this.value === 'custom' ? 'block' : 'none';
+                }
+            });
         });
 
         // Initialize the application
