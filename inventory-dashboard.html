@@ -848,6 +848,85 @@
             .charts-container {
                 grid-template-columns: 1fr;
             }
+            
+            /* Additional Mobile Responsiveness */
+            .main-content {
+                padding: 15px !important;
+            }
+            
+            .top-bar {
+                flex-direction: column;
+                gap: 15px;
+                padding: 20px !important;
+            }
+            
+            .top-actions {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            
+            .action-btn {
+                padding: 10px 15px !important;
+                font-size: 14px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr !important;
+                gap: 15px;
+            }
+            
+            .chart-card {
+                padding: 20px !important;
+            }
+            
+            .chart-container {
+                height: 250px !important;
+            }
+            
+            .table-actions {
+                flex-direction: column;
+                gap: 10px;
+                width: 100%;
+            }
+            
+            .search-box input {
+                width: 100% !important;
+            }
+            
+            select.form-control {
+                width: 100% !important;
+            }
+            
+            .tabs {
+                overflow-x: auto;
+                white-space: nowrap;
+                padding-bottom: 5px;
+            }
+            
+            .tab {
+                padding: 10px 15px;
+                font-size: 14px;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr !important;
+                gap: 15px;
+            }
+            
+            .modal-content {
+                width: 95% !important;
+                max-height: 80vh !important;
+            }
+            
+            .sale-cart-item {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .sale-cart-actions {
+                width: 100%;
+                justify-content: center;
+            }
         }
         
         /* Loading */
@@ -1142,6 +1221,25 @@
                 color: black !important;
             }
         }
+        
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 10000;
+            pointer-events: none;
+        }
+        
+        /* Item Grid */
+        .item-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 15px;
+        }
     </style>
 </head>
 <body>
@@ -1224,7 +1322,7 @@
         <div class="top-bar">
             <div>
                 <h1 class="page-title" id="pageTitle">Dashboard</h1>
-                <p class="page-subtitle" id="pageSubtitle">Welcome to your inventory management system</p>
+                <p class="pageSubtitle" id="pageSubtitle">Welcome to your inventory management system</p>
             </div>
             
             <div class="top-actions">
@@ -1666,7 +1764,7 @@
                     </div>
                 </div>
                 
-                <div class="tabs">
+                <div class="tabs" id="reportTabs">
                     <button class="tab active" onclick="showReportTab('salesReport')">Sales Report</button>
                     <button class="tab" onclick="showReportTab('inventoryReport')">Inventory Report</button>
                     <button class="tab" onclick="showReportTab('customerReport')">Customer Report</button>
@@ -4137,6 +4235,1331 @@
             }
         }
 
+        // ====================== COMPLETE FEATURE FUNCTIONS ======================
+
+        // Edit Item
+        async function editItem(itemId) {
+            try {
+                const item = inventoryItems.find(i => i.id === itemId);
+                if (!item) {
+                    showToast('Item not found', 'error');
+                    return;
+                }
+
+                // Populate form with item data
+                document.getElementById('itemName').value = item.name || '';
+                document.getElementById('itemCategory').value = item.category || '';
+                document.getElementById('itemSKU').value = item.sku || '';
+                document.getElementById('itemBrand').value = item.brand || '';
+                document.getElementById('costPrice').value = item.costPrice || 0;
+                document.getElementById('sellingPrice').value = item.sellingPrice || 0;
+                document.getElementById('initialStock').value = item.currentStock || 0;
+                document.getElementById('minStock').value = item.minStock || 5;
+                document.getElementById('maxStock').value = item.maxStock || 100;
+                document.getElementById('itemUnit').value = item.unit || 'Pieces';
+                document.getElementById('itemDescription').value = item.description || '';
+                document.getElementById('itemSupplier').value = item.supplier || '';
+                document.getElementById('itemTaxRate').value = item.taxRate || 18;
+                document.getElementById('itemImage').value = item.image || '';
+
+                // Update modal title and button
+                document.querySelector('#newItemModal .modal-title').textContent = 'Edit Inventory Item';
+                const saveButton = document.querySelector('#newItemModal .action-btn.success');
+                saveButton.innerHTML = '<i class="fas fa-save"></i> Update Item';
+                saveButton.onclick = async function() {
+                    await updateItem(itemId);
+                };
+
+                openModal('newItemModal');
+            } catch (error) {
+                console.error('Error editing item:', error);
+                showToast('Failed to edit item', 'error');
+            }
+        }
+
+        // Update Item
+        async function updateItem(itemId) {
+            try {
+                const userId = currentUser.uid;
+                const itemData = {
+                    name: document.getElementById('itemName').value,
+                    category: document.getElementById('itemCategory').value,
+                    sku: document.getElementById('itemSKU').value,
+                    brand: document.getElementById('itemBrand').value,
+                    costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
+                    sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
+                    currentStock: parseInt(document.getElementById('initialStock').value) || 0,
+                    minStock: parseInt(document.getElementById('minStock').value) || 5,
+                    maxStock: parseInt(document.getElementById('maxStock').value) || 100,
+                    unit: document.getElementById('itemUnit').value,
+                    description: document.getElementById('itemDescription').value,
+                    supplier: document.getElementById('itemSupplier').value,
+                    taxRate: parseFloat(document.getElementById('itemTaxRate').value) || 18,
+                    image: document.getElementById('itemImage').value,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+
+                if (!itemData.name || !itemData.category || itemData.sellingPrice <= 0) {
+                    showToast('Please fill all required fields correctly', 'error');
+                    return;
+                }
+
+                await db.collection('users').doc(userId).collection('inventory').doc(itemId).update(itemData);
+                
+                closeModal('newItemModal');
+                await loadInventory();
+                updateDashboardStats();
+                updateLowStockTable();
+                updateBadges();
+                
+                showToast('Item updated successfully!', 'success');
+            } catch (error) {
+                console.error('Error updating item:', error);
+                showToast('Failed to update item: ' + error.message, 'error');
+            }
+        }
+
+        // Delete Item with Confirmation
+        async function deleteItem(itemId) {
+            if (!confirm('Are you sure you want to delete this item? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const userId = currentUser.uid;
+                await db.collection('users').doc(userId).collection('inventory').doc(itemId).delete();
+                
+                await loadInventory();
+                updateDashboardStats();
+                updateInventoryTable();
+                updateLowStockTable();
+                updateBadges();
+                
+                showToast('Item deleted successfully!', 'success');
+            } catch (error) {
+                console.error('Error deleting item:', error);
+                showToast('Failed to delete item: ' + error.message, 'error');
+            }
+        }
+
+        // Restock Item
+        async function restockItem(itemId) {
+            const item = inventoryItems.find(i => i.id === itemId);
+            if (!item) return;
+
+            const restockAmount = prompt(`Enter restock amount for ${item.name} (Current: ${item.currentStock}, Min: ${item.minStock || 5}):`, 
+                                 Math.max(item.minStock || 5, 10));
+            
+            if (!restockAmount || isNaN(restockAmount) || restockAmount <= 0) {
+                return;
+            }
+
+            try {
+                const userId = currentUser.uid;
+                const newStock = item.currentStock + parseInt(restockAmount);
+                
+                await db.collection('users').doc(userId).collection('inventory').doc(itemId).update({
+                    currentStock: newStock,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                await loadInventory();
+                updateDashboardStats();
+                updateInventoryTable();
+                updateLowStockTable();
+                
+                showToast(`Restocked ${item.name} by ${restockAmount} units`, 'success');
+            } catch (error) {
+                console.error('Error restocking item:', error);
+                showToast('Failed to restock item: ' + error.message, 'error');
+            }
+        }
+
+        // Edit Sale
+        async function editSale(saleId) {
+            const sale = sales.find(s => s.id === saleId);
+            if (!sale) {
+                showToast('Sale not found', 'error');
+                return;
+            }
+
+            // For now, just show the invoice
+            viewInvoice(saleId);
+            
+            // TODO: Implement full sale editing functionality
+            showToast('Sale editing coming soon!', 'info');
+        }
+
+        // Edit Customer
+        async function editCustomer(customerId) {
+            try {
+                const customer = customers.find(c => c.id === customerId);
+                if (!customer) {
+                    showToast('Customer not found', 'error');
+                    return;
+                }
+
+                // Populate form with customer data
+                document.getElementById('customerName').value = customer.name || '';
+                document.getElementById('customerId').value = customer.customerId || '';
+                document.getElementById('customerEmail').value = customer.email || '';
+                document.getElementById('customerPhone').value = customer.phone || '';
+                document.getElementById('customerAddress').value = customer.address || '';
+                document.getElementById('customerGST').value = customer.gstNumber || '';
+                document.getElementById('customerType').value = customer.customerType || 'regular';
+                document.getElementById('creditLimit').value = customer.creditLimit || 0;
+                document.getElementById('paymentTerms').value = customer.paymentTerms || 'cod';
+                document.getElementById('customerNotes').value = customer.notes || '';
+
+                // Update modal title and button
+                document.querySelector('#newCustomerModal .modal-title').textContent = 'Edit Customer';
+                const saveButton = document.querySelector('#newCustomerModal .action-btn.success');
+                saveButton.innerHTML = '<i class="fas fa-save"></i> Update Customer';
+                saveButton.onclick = async function() {
+                    await updateCustomer(customerId);
+                };
+
+                openModal('newCustomerModal');
+            } catch (error) {
+                console.error('Error editing customer:', error);
+                showToast('Failed to edit customer', 'error');
+            }
+        }
+
+        // Update Customer
+        async function updateCustomer(customerId) {
+            try {
+                const userId = currentUser.uid;
+                const customerData = {
+                    name: document.getElementById('customerName').value,
+                    customerId: document.getElementById('customerId').value,
+                    email: document.getElementById('customerEmail').value,
+                    phone: document.getElementById('customerPhone').value,
+                    address: document.getElementById('customerAddress').value,
+                    gstNumber: document.getElementById('customerGST').value,
+                    customerType: document.getElementById('customerType').value,
+                    creditLimit: parseFloat(document.getElementById('creditLimit').value) || 0,
+                    paymentTerms: document.getElementById('paymentTerms').value,
+                    notes: document.getElementById('customerNotes').value,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+
+                if (!customerData.name || !customerData.phone) {
+                    showToast('Please fill all required fields', 'error');
+                    return;
+                }
+
+                await db.collection('users').doc(userId).collection('customers').doc(customerId).update(customerData);
+                
+                closeModal('newCustomerModal');
+                await loadCustomers();
+                updateDashboardStats();
+                updateCustomersTable();
+                populateCustomerSelect();
+                
+                showToast('Customer updated successfully!', 'success');
+            } catch (error) {
+                console.error('Error updating customer:', error);
+                showToast('Failed to update customer: ' + error.message, 'error');
+            }
+        }
+
+        // Update Sales Chart
+        function updateSalesChart() {
+            const dateFrom = document.getElementById('salesDateFrom').value;
+            const dateTo = document.getElementById('salesDateTo').value;
+            
+            if (!dateFrom || !dateTo) {
+                showToast('Please select date range', 'error');
+                return;
+            }
+            
+            if (charts.salesChart) {
+                charts.salesChart.destroy();
+            }
+            
+            const salesCtx = document.getElementById('salesChart').getContext('2d');
+            const salesData = getSalesChartDataWithRange(dateFrom, dateTo);
+            
+            charts.salesChart = new Chart(salesCtx, {
+                type: 'line',
+                data: salesData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₹' + value.toLocaleString('en-IN');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            showToast('Sales chart updated', 'success');
+        }
+
+        // Get Sales Chart Data with Date Range
+        function getSalesChartDataWithRange(dateFrom, dateTo) {
+            const startDate = new Date(dateFrom);
+            const endDate = new Date(dateTo);
+            const daysDiff = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+            
+            const labels = [];
+            const salesData = [];
+            
+            for (let i = 0; i <= daysDiff; i++) {
+                const date = new Date(startDate);
+                date.setDate(date.getDate() + i);
+                
+                labels.push(date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }));
+                
+                const dateStr = date.toDateString();
+                const daySales = sales.filter(sale => {
+                    if (!sale.date) return false;
+                    return sale.date.toDateString() === dateStr;
+                }).reduce((sum, sale) => sum + (sale.total || 0), 0);
+                
+                salesData.push(daySales);
+            }
+            
+            return {
+                labels: labels,
+                datasets: [{
+                    label: 'Sales (₹)',
+                    data: salesData,
+                    borderColor: '#4e54c8',
+                    backgroundColor: 'rgba(78, 84, 200, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.3,
+                    fill: true
+                }]
+            };
+        }
+
+        // Update Top Items Chart
+        function updateTopItemsChart() {
+            const period = document.getElementById('topItemsPeriod').value;
+            
+            if (charts.topItemsChart) {
+                charts.topItemsChart.destroy();
+            }
+            
+            const topItemsCtx = document.getElementById('topItemsChart').getContext('2d');
+            const topItemsData = getTopItemsData(period);
+            
+            charts.topItemsChart = new Chart(topItemsCtx, {
+                type: 'bar',
+                data: topItemsData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Quantity Sold'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Items'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            showToast('Top items chart updated', 'success');
+        }
+
+        // Update Performance Chart
+        function updatePerformanceChart() {
+            const year = parseInt(document.getElementById('performanceYear').value);
+            
+            if (charts.performanceChart) {
+                charts.performanceChart.destroy();
+            }
+            
+            const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+            const performanceData = getPerformanceDataForYear(year);
+            
+            charts.performanceChart = new Chart(performanceCtx, {
+                type: 'bar',
+                data: performanceData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₹' + value.toLocaleString('en-IN');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            showToast('Performance chart updated', 'success');
+        }
+
+        // Get Performance Data for Specific Year
+        function getPerformanceDataForYear(year) {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            
+            const monthlySales = Array(12).fill(0);
+            const monthlyProfit = Array(12).fill(0);
+            
+            sales.forEach(sale => {
+                if (!sale.date) return;
+                const month = sale.date.getMonth();
+                const saleYear = sale.date.getFullYear();
+                
+                if (saleYear === year) {
+                    monthlySales[month] += sale.total || 0;
+                    // Calculate profit (simplified: assume 30% margin)
+                    monthlyProfit[month] += (sale.total || 0) * 0.3;
+                }
+            });
+            
+            return {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Sales',
+                        data: monthlySales,
+                        backgroundColor: '#4e54c8',
+                        borderColor: '#4e54c8',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Profit',
+                        data: monthlyProfit,
+                        backgroundColor: '#00b09b',
+                        borderColor: '#00b09b',
+                        borderWidth: 1
+                    }
+                ]
+            };
+        }
+
+        // Report Tab Navigation
+        function showReportTab(tabName) {
+            currentReportType = tabName;
+            
+            // Update active tab
+            document.querySelectorAll('#reportTabs .tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Generate report preview
+            generateReportPreview(tabName);
+        }
+
+        // Generate Report Preview
+        function generateReportPreview(reportType) {
+            const previewContainer = document.getElementById('reportPreview');
+            
+            switch(reportType) {
+                case 'salesReport':
+                    previewContainer.innerHTML = generateSalesReportPreview();
+                    break;
+                case 'inventoryReport':
+                    previewContainer.innerHTML = generateInventoryReportPreview();
+                    break;
+                case 'customerReport':
+                    previewContainer.innerHTML = generateCustomerReportPreview();
+                    break;
+                case 'profitReport':
+                    previewContainer.innerHTML = generateProfitReportPreview();
+                    break;
+                default:
+                    previewContainer.innerHTML = generateSalesReportPreview();
+            }
+        }
+
+        // Generate Sales Report Preview
+        function generateSalesReportPreview() {
+            const period = document.getElementById('reportPeriod').value;
+            let filteredSales = filterSalesByPeriod(period);
+            
+            const totalSales = filteredSales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+            const avgSale = filteredSales.length > 0 ? totalSales / filteredSales.length : 0;
+            const totalItems = filteredSales.reduce((sum, sale) => sum + (sale.items?.length || 0), 0);
+            
+            return `
+                <div style="padding: 20px;">
+                    <h4 style="color: var(--primary); margin-bottom: 20px;">Sales Report - ${getPeriodLabel(period)}</h4>
+                    
+                    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 30px;">
+                        <div class="stat-card">
+                            <div class="stat-value">${filteredSales.length}</div>
+                            <div class="stat-label">Total Transactions</div>
+                        </div>
+                        <div class="stat-card success">
+                            <div class="stat-value">₹${totalSales.toLocaleString('en-IN')}</div>
+                            <div class="stat-label">Total Revenue</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">₹${avgSale.toFixed(2)}</div>
+                            <div class="stat-label">Average Sale</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-value">${totalItems}</div>
+                            <div class="stat-label">Items Sold</div>
+                        </div>
+                    </div>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Date</th>
+                                <th>Customer</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                                <th>Payment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filteredSales.slice(0, 10).map(sale => `
+                                <tr>
+                                    <td>${sale.invoiceNumber || 'N/A'}</td>
+                                    <td>${formatDate(sale.date)}</td>
+                                    <td>${sale.customerName || 'Walk-in'}</td>
+                                    <td>${sale.items?.length || 0}</td>
+                                    <td>₹${sale.total?.toFixed(2) || '0.00'}</td>
+                                    <td>${sale.paymentMethod || 'Cash'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    
+                    ${filteredSales.length > 10 ? `<p style="text-align: center; margin-top: 15px; color: #666;">... and ${filteredSales.length - 10} more transactions</p>` : ''}
+                </div>
+            `;
+        }
+
+        // Generate Inventory Report Preview
+        function generateInventoryReportPreview() {
+            const lowStockCount = inventoryItems.filter(item => 
+                item.currentStock > 0 && item.currentStock <= (item.minStock || 5)
+            ).length;
+            
+            const outOfStockCount = inventoryItems.filter(item => item.currentStock <= 0).length;
+            const totalValue = inventoryItems.reduce((sum, item) => 
+                sum + (item.currentStock * (item.costPrice || 0)), 0);
+            
+            return `
+                <div style="padding: 20px;">
+                    <h4 style="color: var(--primary); margin-bottom: 20px;">Inventory Report</h4>
+                    
+                    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 30px;">
+                        <div class="stat-card">
+                            <div class="stat-value">${inventoryItems.length}</div>
+                            <div class="stat-label">Total Items</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">${lowStockCount}</div>
+                            <div class="stat-label">Low Stock</div>
+                        </div>
+                        <div class="stat-card danger">
+                            <div class="stat-value">${outOfStockCount}</div>
+                            <div class="stat-label">Out of Stock</div>
+                        </div>
+                        <div class="stat-card success">
+                            <div class="stat-value">₹${totalValue.toLocaleString('en-IN')}</div>
+                            <div class="stat-label">Total Value</div>
+                        </div>
+                    </div>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Item Name</th>
+                                <th>Category</th>
+                                <th>Stock</th>
+                                <th>Cost</th>
+                                <th>Price</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${inventoryItems.slice(0, 10).map(item => {
+                                const status = getStockStatus(item.currentStock, item.minStock || 5);
+                                return `
+                                    <tr>
+                                        <td>${item.name || 'Unnamed'}</td>
+                                        <td>${item.category || 'N/A'}</td>
+                                        <td>${item.currentStock} ${item.unit || 'pcs'}</td>
+                                        <td>₹${item.costPrice?.toFixed(2) || '0.00'}</td>
+                                        <td>₹${item.sellingPrice?.toFixed(2) || '0.00'}</td>
+                                        <td><span class="badge ${status.badgeClass}">${status.text}</span></td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Generate Customer Report Preview
+        function generateCustomerReportPreview() {
+            const topCustomers = customers.map(customer => {
+                const customerSales = sales.filter(s => s.customerId === customer.id);
+                const totalSpent = customerSales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+                const orderCount = customerSales.length;
+                
+                return {
+                    ...customer,
+                    totalSpent,
+                    orderCount,
+                    avgOrder: orderCount > 0 ? totalSpent / orderCount : 0
+                };
+            }).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 10);
+            
+            return `
+                <div style="padding: 20px;">
+                    <h4 style="color: var(--primary); margin-bottom: 20px;">Customer Report - Top ${topCustomers.length} Customers</h4>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Orders</th>
+                                <th>Total Spent</th>
+                                <th>Avg. Order</th>
+                                <th>Last Order</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${topCustomers.map(customer => {
+                                const customerSales = sales.filter(s => s.customerId === customer.id);
+                                const lastOrder = customerSales.length > 0 ? 
+                                    formatDate(customerSales[0].date) : 'Never';
+                                
+                                return `
+                                    <tr>
+                                        <td>
+                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                <div class="customer-avatar" style="width: 35px; height: 35px; font-size: 14px;">
+                                                    ${customer.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <strong>${customer.name}</strong><br>
+                                                    <small>${customer.customerType || 'Regular'}</small>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>${customer.orderCount}</td>
+                                        <td><strong>₹${customer.totalSpent.toFixed(2)}</strong></td>
+                                        <td>₹${customer.avgOrder.toFixed(2)}</td>
+                                        <td>${lastOrder}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Generate Profit Report Preview
+        function generateProfitReportPreview() {
+            const period = document.getElementById('reportPeriod').value;
+            let filteredSales = filterSalesByPeriod(period);
+            
+            const totalRevenue = filteredSales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+            const totalCost = filteredSales.reduce((sum, sale) => {
+                // Estimate cost as 70% of revenue (30% profit margin)
+                return sum + (sale.total || 0) * 0.7;
+            }, 0);
+            const totalProfit = totalRevenue - totalCost;
+            const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+            
+            return `
+                <div style="padding: 20px;">
+                    <h4 style="color: var(--primary); margin-bottom: 20px;">Profit & Loss Report - ${getPeriodLabel(period)}</h4>
+                    
+                    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 30px;">
+                        <div class="stat-card success">
+                            <div class="stat-value">₹${totalRevenue.toLocaleString('en-IN')}</div>
+                            <div class="stat-label">Total Revenue</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">₹${totalCost.toLocaleString('en-IN')}</div>
+                            <div class="stat-label">Total Cost</div>
+                        </div>
+                        <div class="stat-card danger">
+                            <div class="stat-value">₹${totalProfit.toLocaleString('en-IN')}</div>
+                            <div class="stat-label">Total Profit</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-value">${profitMargin.toFixed(1)}%</div>
+                            <div class="stat-label">Profit Margin</div>
+                        </div>
+                    </div>
+                    
+                    <div style="background: #f8f9fa; border-radius: 15px; padding: 20px; margin-top: 20px;">
+                        <h5 style="margin-bottom: 15px;">Profit Breakdown</h5>
+                        <div style="display: flex; align-items: center; gap: 20px;">
+                            <div style="flex: 1;">
+                                <div style="height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden;">
+                                    <div style="height: 100%; width: ${(totalRevenue > 0 ? totalCost / totalRevenue * 100 : 0)}%; background: #f46b45;"></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                                    <span>Cost: ₹${totalCost.toFixed(2)}</span>
+                                    <span>${totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%</span>
+                                </div>
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden;">
+                                    <div style="height: 100%; width: ${profitMargin}%; background: #00b09b;"></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                                    <span>Profit: ₹${totalProfit.toFixed(2)}</span>
+                                    <span>${profitMargin.toFixed(1)}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Filter Sales by Period
+        function filterSalesByPeriod(period) {
+            const now = new Date();
+            let startDate = new Date();
+            
+            switch(period) {
+                case 'today':
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date.toDateString() === now.toDateString();
+                    });
+                case 'yesterday':
+                    startDate.setDate(now.getDate() - 1);
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date.toDateString() === startDate.toDateString();
+                    });
+                case 'this_week':
+                    startDate.setDate(now.getDate() - now.getDay());
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate;
+                    });
+                case 'last_week':
+                    startDate.setDate(now.getDate() - now.getDay() - 7);
+                    const endDate = new Date(startDate);
+                    endDate.setDate(startDate.getDate() + 6);
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate && sale.date <= endDate;
+                    });
+                case 'this_month':
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate;
+                    });
+                case 'last_month':
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    const endMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate && sale.date <= endMonth;
+                    });
+                case 'this_year':
+                    startDate = new Date(now.getFullYear(), 0, 1);
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate;
+                    });
+                case 'custom':
+                    const customFrom = document.getElementById('reportDateFrom').value;
+                    const customTo = document.getElementById('reportDateTo').value;
+                    if (!customFrom || !customTo) return sales;
+                    
+                    const customStart = new Date(customFrom);
+                    const customEnd = new Date(customTo);
+                    customEnd.setHours(23, 59, 59, 999);
+                    
+                    return sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= customStart && sale.date <= customEnd;
+                    });
+                default:
+                    return sales;
+            }
+        }
+
+        // Get Period Label
+        function getPeriodLabel(period) {
+            const labels = {
+                'today': 'Today',
+                'yesterday': 'Yesterday',
+                'this_week': 'This Week',
+                'last_week': 'Last Week',
+                'this_month': 'This Month',
+                'last_month': 'Last Month',
+                'this_year': 'This Year',
+                'custom': 'Custom Range'
+            };
+            return labels[period] || period;
+        }
+
+        // Generate Report
+        function generateReport() {
+            generateReportPreview(currentReportType);
+            showToast(`${getPeriodLabel(document.getElementById('reportPeriod').value)} report generated`, 'success');
+        }
+
+        // Download Current Report
+        function downloadCurrentReport() {
+            const format = document.getElementById('reportFormat').value;
+            const period = document.getElementById('reportPeriod').value;
+            
+            switch(format) {
+                case 'pdf':
+                    downloadReportAsPDF();
+                    break;
+                case 'excel':
+                    downloadReportAsExcel();
+                    break;
+                case 'csv':
+                    downloadReportAsCSV();
+                    break;
+                case 'html':
+                    downloadReportAsHTML();
+                    break;
+                default:
+                    showToast('Please select a valid format', 'error');
+            }
+        }
+
+        // Download Report as PDF
+        async function downloadReportAsPDF() {
+            try {
+                const preview = document.getElementById('reportPreview');
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                
+                // Create a temporary element for PDF generation
+                const tempElement = document.createElement('div');
+                tempElement.style.padding = '20px';
+                tempElement.innerHTML = preview.innerHTML;
+                document.body.appendChild(tempElement);
+                
+                // Use html2canvas
+                const canvas = await html2canvas(tempElement, {
+                    scale: 2,
+                    useCORS: true,
+                    backgroundColor: '#ffffff'
+                });
+                
+                const imgData = canvas.toDataURL('image/png');
+                pdf.addImage(imgData, 'PNG', 10, 10, 190, 0);
+                pdf.save(`report_${currentReportType}_${new Date().getTime()}.pdf`);
+                
+                document.body.removeChild(tempElement);
+                showToast('PDF report downloaded!', 'success');
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                showToast('Failed to generate PDF report', 'error');
+            }
+        }
+
+        // Download Report as Excel
+        function downloadReportAsExcel() {
+            let csvContent = '';
+            
+            switch(currentReportType) {
+                case 'salesReport':
+                    csvContent = generateSalesCSV();
+                    break;
+                case 'inventoryReport':
+                    csvContent = generateInventoryCSV();
+                    break;
+                case 'customerReport':
+                    csvContent = generateCustomerCSV();
+                    break;
+                case 'profitReport':
+                    csvContent = generateProfitCSV();
+                    break;
+            }
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${currentReportType}_${new Date().getTime()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showToast('CSV report downloaded!', 'success');
+        }
+
+        // Generate Sales CSV
+        function generateSalesCSV() {
+            const period = document.getElementById('reportPeriod').value;
+            const filteredSales = filterSalesByPeriod(period);
+            
+            let csv = 'Invoice No,Date,Customer,Items,Subtotal,Discount,GST,Total,Payment Method,Status\n';
+            
+            filteredSales.forEach(sale => {
+                csv += `"${sale.invoiceNumber || ''}",`;
+                csv += `"${formatDate(sale.date)}",`;
+                csv += `"${sale.customerName || ''}",`;
+                csv += `"${sale.items?.length || 0}",`;
+                csv += `"${sale.subtotal || 0}",`;
+                csv += `"${sale.discount || 0}",`;
+                csv += `"${sale.gstAmount || 0}",`;
+                csv += `"${sale.total || 0}",`;
+                csv += `"${sale.paymentMethod || ''}",`;
+                csv += `"${sale.status || ''}"\n`;
+            });
+            
+            return csv;
+        }
+
+        // Generate Inventory CSV
+        function generateInventoryCSV() {
+            let csv = 'Item Name,SKU,Category,Brand,Stock,Min Stock,Cost Price,Selling Price,Stock Value,Status\n';
+            
+            inventoryItems.forEach(item => {
+                const status = getStockStatus(item.currentStock, item.minStock || 5);
+                const stockValue = item.currentStock * (item.costPrice || 0);
+                
+                csv += `"${item.name || ''}",`;
+                csv += `"${item.sku || ''}",`;
+                csv += `"${item.category || ''}",`;
+                csv += `"${item.brand || ''}",`;
+                csv += `"${item.currentStock || 0}",`;
+                csv += `"${item.minStock || 5}",`;
+                csv += `"${item.costPrice || 0}",`;
+                csv += `"${item.sellingPrice || 0}",`;
+                csv += `"${stockValue || 0}",`;
+                csv += `"${status.text}"\n`;
+            });
+            
+            return csv;
+        }
+
+        // Generate Customer CSV
+        function generateCustomerCSV() {
+            let csv = 'Customer Name,Email,Phone,Address,Customer Type,Total Orders,Total Spent,Avg. Order,Last Order\n';
+            
+            customers.forEach(customer => {
+                const customerSales = sales.filter(s => s.customerId === customer.id);
+                const totalOrders = customerSales.length;
+                const totalSpent = customerSales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+                const avgOrder = totalOrders > 0 ? totalSpent / totalOrders : 0;
+                const lastOrder = customerSales.length > 0 ? formatDate(customerSales[0].date) : 'Never';
+                
+                csv += `"${customer.name || ''}",`;
+                csv += `"${customer.email || ''}",`;
+                csv += `"${customer.phone || ''}",`;
+                csv += `"${customer.address || ''}",`;
+                csv += `"${customer.customerType || ''}",`;
+                csv += `"${totalOrders}",`;
+                csv += `"${totalSpent}",`;
+                csv += `"${avgOrder.toFixed(2)}",`;
+                csv += `"${lastOrder}"\n`;
+            });
+            
+            return csv;
+        }
+
+        // Generate Profit CSV
+        function generateProfitCSV() {
+            const period = document.getElementById('reportPeriod').value;
+            const filteredSales = filterSalesByPeriod(period);
+            
+            let csv = 'Invoice No,Date,Revenue,Cost,Profit,Profit Margin\n';
+            
+            filteredSales.forEach(sale => {
+                const revenue = sale.total || 0;
+                const cost = revenue * 0.7; // Assuming 30% profit margin
+                const profit = revenue - cost;
+                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                
+                csv += `"${sale.invoiceNumber || ''}",`;
+                csv += `"${formatDate(sale.date)}",`;
+                csv += `"${revenue.toFixed(2)}",`;
+                csv += `"${cost.toFixed(2)}",`;
+                csv += `"${profit.toFixed(2)}",`;
+                csv += `"${margin.toFixed(2)}"\n`;
+            });
+            
+            return csv;
+        }
+
+        // Download Report as HTML
+        function downloadReportAsHTML() {
+            const preview = document.getElementById('reportPreview');
+            const htmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>${currentReportType} Report</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                        th { background-color: #f2f2f2; }
+                        .stats { display: flex; justify-content: space-between; margin: 20px 0; }
+                        .stat-card { border: 1px solid #ddd; padding: 15px; flex: 1; margin: 0 10px; text-align: center; }
+                        .header { text-align: center; margin-bottom: 30px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>${currentReportType.replace('Report', '').toUpperCase()} REPORT</h1>
+                        <p>Generated on: ${new Date().toLocaleString()}</p>
+                        <p>Period: ${getPeriodLabel(document.getElementById('reportPeriod').value)}</p>
+                    </div>
+                    ${preview.innerHTML}
+                </body>
+                </html>
+            `;
+            
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${currentReportType}_${new Date().getTime()}.html`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showToast('HTML report downloaded!', 'success');
+        }
+
+        // Print Current Report
+        function printCurrentReport() {
+            const printContent = document.getElementById('reportPreview').innerHTML;
+            const originalContent = document.body.innerHTML;
+            
+            document.body.innerHTML = `
+                <div style="padding: 20px; font-family: Arial, sans-serif;">
+                    <h1 style="text-align: center; color: #4e54c8;">${currentReportType.replace('Report', '').toUpperCase()} REPORT</h1>
+                    <p style="text-align: center;">Generated on: ${new Date().toLocaleString()}</p>
+                    <p style="text-align: center;">Period: ${getPeriodLabel(document.getElementById('reportPeriod').value)}</p>
+                    <hr>
+                    ${printContent}
+                </div>
+            `;
+            window.print();
+            document.body.innerHTML = originalContent;
+            
+            // Reinitialize the app
+            initializeApp();
+        }
+
+        // Update Analytics Charts
+        function updateAnalyticsCharts() {
+            // Destroy existing charts
+            ['analyticsChart', 'customerSegmentationChart', 'advancedAnalyticsChart'].forEach(chartId => {
+                if (charts[chartId]) {
+                    charts[chartId].destroy();
+                }
+            });
+            
+            // Analytics Chart
+            const analyticsCtx = document.getElementById('analyticsChart').getContext('2d');
+            charts.analyticsChart = new Chart(analyticsCtx, {
+                type: 'line',
+                data: getAnalyticsData(),
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₹' + value.toLocaleString('en-IN');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Customer Segmentation Chart
+            const segmentationCtx = document.getElementById('customerSegmentationChart').getContext('2d');
+            charts.customerSegmentationChart = new Chart(segmentationCtx, {
+                type: 'doughnut',
+                data: getCustomerSegmentationData(),
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+            
+            // Advanced Analytics Chart
+            const advancedCtx = document.getElementById('advancedAnalyticsChart').getContext('2d');
+            charts.advancedAnalyticsChart = new Chart(advancedCtx, {
+                type: 'bar',
+                data: getAdvancedAnalyticsData(),
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+            
+            showToast('Analytics charts updated', 'success');
+        }
+
+        // Get Analytics Data
+        function getAnalyticsData() {
+            const period = document.getElementById('analyticsPeriod').value;
+            let labels = [];
+            let salesData = [];
+            let profitData = [];
+            
+            if (period === 'daily') {
+                // Last 30 days
+                for (let i = 29; i >= 0; i--) {
+                    const date = new Date();
+                    date.setDate(date.getDate() - i);
+                    labels.push(date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }));
+                    
+                    const dateStr = date.toDateString();
+                    const daySales = sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date.toDateString() === dateStr;
+                    }).reduce((sum, sale) => sum + (sale.total || 0), 0);
+                    
+                    salesData.push(daySales);
+                    profitData.push(daySales * 0.3); // 30% profit margin
+                }
+            } else if (period === 'weekly') {
+                // Last 12 weeks
+                for (let i = 11; i >= 0; i--) {
+                    const startDate = new Date();
+                    startDate.setDate(startDate.getDate() - (i * 7));
+                    const endDate = new Date(startDate);
+                    endDate.setDate(endDate.getDate() + 6);
+                    
+                    labels.push(`Week ${i + 1}`);
+                    
+                    const weekSales = sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date >= startDate && sale.date <= endDate;
+                    }).reduce((sum, sale) => sum + (sale.total || 0), 0);
+                    
+                    salesData.push(weekSales);
+                    profitData.push(weekSales * 0.3);
+                }
+            } else { // monthly
+                // Last 12 months
+                for (let i = 11; i >= 0; i--) {
+                    const date = new Date();
+                    date.setMonth(date.getMonth() - i);
+                    labels.push(date.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }));
+                    
+                    const month = date.getMonth();
+                    const year = date.getFullYear();
+                    
+                    const monthSales = sales.filter(sale => {
+                        if (!sale.date) return false;
+                        return sale.date.getMonth() === month && sale.date.getFullYear() === year;
+                    }).reduce((sum, sale) => sum + (sale.total || 0), 0);
+                    
+                    salesData.push(monthSales);
+                    profitData.push(monthSales * 0.3);
+                }
+            }
+            
+            return {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Sales',
+                        data: salesData,
+                        borderColor: '#4e54c8',
+                        backgroundColor: 'rgba(78, 84, 200, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    },
+                    {
+                        label: 'Profit',
+                        data: profitData,
+                        borderColor: '#00b09b',
+                        backgroundColor: 'rgba(0, 176, 155, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    }
+                ]
+            };
+        }
+
+        // Get Customer Segmentation Data
+        function getCustomerSegmentationData() {
+            const segments = {
+                'Regular': 0,
+                'Wholesale': 0,
+                'Retail': 0,
+                'Corporate': 0,
+                'VIP': 0
+            };
+            
+            customers.forEach(customer => {
+                const type = customer.customerType || 'Regular';
+                segments[type] = (segments[type] || 0) + 1;
+            });
+            
+            // Filter out segments with 0 customers
+            const filteredSegments = Object.entries(segments).filter(([_, count]) => count > 0);
+            
+            return {
+                labels: filteredSegments.map(([type, _]) => type),
+                datasets: [{
+                    data: filteredSegments.map(([_, count]) => count),
+                    backgroundColor: [
+                        '#4e54c8',
+                        '#8f94fb',
+                        '#00b09b',
+                        '#f46b45',
+                        '#ff416c'
+                    ]
+                }]
+            };
+        }
+
+        // Get Advanced Analytics Data
+        function getAdvancedAnalyticsData() {
+            // Top 5 categories by sales
+            const categorySales = {};
+            
+            sales.forEach(sale => {
+                if (sale.items) {
+                    sale.items.forEach(item => {
+                        const inventoryItem = inventoryItems.find(i => i.id === item.itemId);
+                        const category = inventoryItem?.category || 'Other';
+                        if (!categorySales[category]) {
+                            categorySales[category] = 0;
+                        }
+                        categorySales[category] += (item.price || 0) * (item.quantity || 0);
+                    });
+                }
+            });
+            
+            const sortedCategories = Object.entries(categorySales)
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 5);
+            
+            return {
+                labels: sortedCategories.map(([category, _]) => category),
+                datasets: [{
+                    label: 'Sales by Category',
+                    data: sortedCategories.map(([_, sales]) => sales),
+                    backgroundColor: [
+                        '#4e54c8',
+                        '#8f94fb',
+                        '#00b09b',
+                        '#f46b45',
+                        '#ff416c'
+                    ]
+                }]
+            };
+        }
+
+        // Update Analytics
+        function updateAnalytics() {
+            updateAnalyticsCharts();
+        }
+
+        // Report Card Click Handlers
+        function generateSalesReport() {
+            showReports();
+            setTimeout(() => {
+                showReportTab('salesReport');
+                generateReport();
+            }, 100);
+        }
+
+        function generateInventoryReport() {
+            showReports();
+            setTimeout(() => {
+                showReportTab('inventoryReport');
+                generateReport();
+            }, 100);
+        }
+
+        function generateCustomerReport() {
+            showReports();
+            setTimeout(() => {
+                showReportTab('customerReport');
+                generateReport();
+            }, 100);
+        }
+
+        function generateProfitReport() {
+            showReports();
+            setTimeout(() => {
+                showReportTab('profitReport');
+                generateReport();
+            }, 100);
+        }
+
+        function generateTaxReport() {
+            showToast('Tax report feature coming soon!', 'info');
+        }
+
+        function generateCustomReport() {
+            showToast('Custom report feature coming soon!', 'info');
+        }
+
         // Utility Functions
         function formatDate(date) {
             if (!date) return 'N/A';
@@ -4265,8 +5688,64 @@
                 }
             });
             
+            // Add keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                // Ctrl + I for new item
+                if (e.ctrlKey && e.key === 'i') {
+                    e.preventDefault();
+                    openNewItemModal();
+                }
+                // Ctrl + S for new sale
+                if (e.ctrlKey && e.key === 's') {
+                    e.preventDefault();
+                    openNewSaleModal();
+                }
+                // Ctrl + C for new customer
+                if (e.ctrlKey && e.key === 'c') {
+                    e.preventDefault();
+                    openNewCustomerModal();
+                }
+                // Escape to close modals
+                if (e.key === 'Escape') {
+                    const modals = document.querySelectorAll('.modal-overlay[style*="display: flex"]');
+                    modals.forEach(modal => closeModal(modal.id));
+                }
+            });
+            
+            // Enter key for search
+            document.getElementById('searchSaleItems')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    loadSaleItems();
+                }
+            });
+            
+            document.getElementById('searchInventory')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    updateInventoryTable(1);
+                }
+            });
+            
+            document.getElementById('searchSales')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    loadSalesTable(1);
+                }
+            });
+            
+            document.getElementById('searchCustomers')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    updateCustomersTable(1);
+                }
+            });
+            
             // Initialize the app
             showDashboard();
+            
+            // Show welcome message
+            setTimeout(() => {
+                if (inventoryItems.length === 0 && sales.length === 0) {
+                    showToast('Welcome to Inventory Pro! Click "Test Data" to get started.', 'info');
+                }
+            }, 2000);
         });
     </script>
 </body>
