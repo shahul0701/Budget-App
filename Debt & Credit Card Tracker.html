@@ -2383,8 +2383,8 @@
                 } else if (filter === 'overdue') {
                     const today = new Date();
                     filteredDebts = dataState.debts.filter(debt => {
-                        const dueDate = new Date(today.getFullYear(), today.getMonth(), debt.paymentDueDay);
-                        return debt.status === 'active' && today > dueDate;
+                        const dueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+                        return debt.status === 'active' && dueDate < today;
                     });
                 } else if (filter === 'paid') {
                     filteredDebts = dataState.debts.filter(d => d.status === 'paid_off');
@@ -2410,6 +2410,11 @@
                     const statusText = debt.status.charAt(0).toUpperCase() + debt.status.slice(1).replace('_', ' ');
                     const typeText = debt.type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
                     const progress = debt.principalAmount > 0 ? ((debt.principalAmount - debt.currentBalance) / debt.principalAmount * 100) : 0;
+                    
+                    // Get next due date
+                    const today = new Date();
+                    const nextDueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+                    const daysUntilDue = nextDueDate ? Math.ceil((nextDueDate - today) / (1000 * 60 * 60 * 24)) : 0;
                     
                     html += `
                         <div class="card-item" onclick="viewDebtDetails('${debt.id}')">
@@ -2457,6 +2462,17 @@
                                 </div>
                             </div>
                             
+                            <div class="card-details">
+                                <div class="detail-item">
+                                    <small>Frequency</small>
+                                    <div>${debt.paymentFrequency.charAt(0).toUpperCase() + debt.paymentFrequency.slice(1)}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <small>Next Due</small>
+                                    <div>${nextDueDate ? nextDueDate.toLocaleDateString() : 'N/A'}</div>
+                                </div>
+                            </div>
+                            
                             <div class="card-actions">
                                 <div class="action-icon" onclick="event.stopPropagation(); recordPaymentFor('debt', '${debt.id}')" title="Record Payment">
                                     <i class="bi bi-cash"></i>
@@ -2499,10 +2515,14 @@
                     );
                 } else if (filter === 'due') {
                     const today = new Date();
-                    const currentDay = today.getDate();
-                    filteredCards = dataState.creditCards.filter(card => 
-                        card.status === 'active' && card.paymentDueDay >= currentDay && card.paymentDueDay <= currentDay + 7
-                    );
+                    filteredCards = dataState.creditCards.filter(card => {
+                        const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
+                        if (dueDate < today) {
+                            dueDate.setMonth(dueDate.getMonth() + 1);
+                        }
+                        const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+                        return card.status === 'active' && daysUntilDue <= 7;
+                    });
                 } else if (filter === 'inactive') {
                     filteredCards = dataState.creditCards.filter(card => card.status !== 'active');
                 }
@@ -2528,6 +2548,14 @@
                     const statusClass = card.status === 'active' ? 'status-active' : 'status-inactive';
                     const statusText = card.status.charAt(0).toUpperCase() + card.status.slice(1);
                     const typeText = card.cardType.charAt(0).toUpperCase() + card.cardType.slice(1);
+                    
+                    // Calculate next due date
+                    const today = new Date();
+                    const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
+                    if (dueDate < today) {
+                        dueDate.setMonth(dueDate.getMonth() + 1);
+                    }
+                    const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
                     
                     html += `
                         <div class="card-item" onclick="viewCreditCardDetails('${card.id}')">
@@ -2570,6 +2598,17 @@
                                 <div class="detail-item">
                                     <small>Card Type</small>
                                     <div>${typeText} •••• ${card.lastFourDigits}</div>
+                                </div>
+                            </div>
+                            
+                            <div class="card-details">
+                                <div class="detail-item">
+                                    <small>Next Due</small>
+                                    <div>${dueDate.toLocaleDateString()}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <small>Days Until Due</small>
+                                    <div>${daysUntilDue}</div>
                                 </div>
                             </div>
                             
@@ -2750,7 +2789,7 @@
                 
                 // Check for events on this day
                 const hasDebtEvents = dataState.debts.some(debt => 
-                    debt.status === 'active' && debt.paymentDueDay === day
+                    debt.status === 'active' && isDueDate(debt.paymentFrequency, debt.paymentDueDay, date)
                 );
                 const hasCardEvents = dataState.creditCards.some(card => 
                     card.status === 'active' && card.paymentDueDay === day
@@ -2779,6 +2818,89 @@
             updateCalendarEvents();
         }
 
+        // Helper function to check if a date is a due date for a frequency
+        function isDueDate(frequency, dueDay, date) {
+            const day = date.getDate();
+            const month = date.getMonth();
+            const year = date.getFullYear();
+            
+            switch(frequency) {
+                case 'monthly':
+                    return day === dueDay;
+                case 'weekly':
+                    // Weekly: check if it's the same day of week (0-6)
+                    return day % 7 === dueDay % 7;
+                case 'bi_weekly':
+                    // Bi-weekly: check every 14 days
+                    return day % 14 === dueDay % 14;
+                case 'quarterly':
+                    // Quarterly: check every 3 months
+                    return day === dueDay && [0, 3, 6, 9].includes(month % 3);
+                case 'yearly':
+                    // Yearly: check same month and day
+                    return day === dueDay && month === 0; // January
+                default:
+                    return false;
+            }
+        }
+
+        // Calculate next due date based on frequency
+        function calculateNextDueDate(frequency, dueDay, fromDate = new Date()) {
+            const today = new Date(fromDate);
+            const day = today.getDate();
+            const month = today.getMonth();
+            const year = today.getFullYear();
+            
+            let nextDueDate = new Date(today);
+            
+            switch(frequency) {
+                case 'monthly':
+                    // Monthly payments
+                    nextDueDate.setDate(dueDay);
+                    if (nextDueDate < today) {
+                        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+                    }
+                    break;
+                    
+                case 'weekly':
+                    // Weekly payments
+                    const daysUntilNextWeek = (7 - (today.getDay() - (dueDay % 7))) % 7;
+                    nextDueDate.setDate(today.getDate() + (daysUntilNextWeek === 0 ? 7 : daysUntilNextWeek));
+                    break;
+                    
+                case 'bi_weekly':
+                    // Bi-weekly payments
+                    const daysUntilBiWeekly = (14 - (today.getDate() % 14 - dueDay % 14)) % 14;
+                    nextDueDate.setDate(today.getDate() + (daysUntilBiWeekly === 0 ? 14 : daysUntilBiWeekly));
+                    break;
+                    
+                case 'quarterly':
+                    // Quarterly payments
+                    const currentQuarter = Math.floor(month / 3);
+                    const nextQuarterMonth = (currentQuarter * 3 + 3) % 12;
+                    nextDueDate.setMonth(nextQuarterMonth);
+                    nextDueDate.setDate(dueDay);
+                    if (nextDueDate < today) {
+                        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+                    }
+                    break;
+                    
+                case 'yearly':
+                    // Yearly payments
+                    nextDueDate.setMonth(0); // January
+                    nextDueDate.setDate(dueDay);
+                    if (nextDueDate < today) {
+                        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+                    }
+                    break;
+                    
+                default:
+                    return null;
+            }
+            
+            return nextDueDate;
+        }
+
         // Show day events
         function showDayEvents(day) {
             const date = new Date(currentYear, currentMonth, day);
@@ -2793,7 +2915,7 @@
             
             // Debt due dates
             const debtEvents = dataState.debts.filter(debt => 
-                debt.status === 'active' && debt.paymentDueDay === day
+                debt.status === 'active' && isDueDate(debt.paymentFrequency, debt.paymentDueDay, date)
             );
             
             if (debtEvents.length > 0) {
@@ -2875,6 +2997,105 @@
             }
         }
 
+        // Update Upcoming Payments with proper frequency handling
+        function updateUpcomingPayments() {
+            const upcomingDiv = document.getElementById('upcomingPayments');
+            if (!upcomingDiv) return;
+            
+            const today = new Date();
+            let upcoming = [];
+            
+            // Check debt due dates for next 30 days
+            dataState.debts.forEach(debt => {
+                if (debt.status === 'active' && debt.paymentFrequency && debt.paymentDueDay) {
+                    let nextDueDate = calculateNextDueDate(
+                        debt.paymentFrequency,
+                        debt.paymentDueDay,
+                        today
+                    );
+                    
+                    if (nextDueDate) {
+                        const daysUntilDue = Math.ceil((nextDueDate - today) / (1000 * 60 * 60 * 24));
+                        
+                        if (daysUntilDue >= 0 && daysUntilDue <= 30) {
+                            upcoming.push({
+                                type: 'debt',
+                                id: debt.id,
+                                name: debt.name,
+                                amount: debt.minimumPayment || 0,
+                                dueDate: nextDueDate,
+                                daysUntilDue: daysUntilDue,
+                                isOverdue: daysUntilDue < 0,
+                                frequency: debt.paymentFrequency
+                            });
+                        }
+                    }
+                }
+            });
+            
+            // Check credit card due dates for next 30 days
+            dataState.creditCards.forEach(card => {
+                if (card.status === 'active' && card.paymentDueDay) {
+                    const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
+                    
+                    // If due date has passed this month, move to next month
+                    if (dueDate < today) {
+                        dueDate.setMonth(dueDate.getMonth() + 1);
+                    }
+                    
+                    const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysUntilDue >= 0 && daysUntilDue <= 30) {
+                        const minPayment = Math.max(card.currentBalance * 0.02, 25);
+                        upcoming.push({
+                            type: 'card',
+                            id: card.id,
+                            name: card.cardName,
+                            amount: minPayment,
+                            dueDate: dueDate,
+                            daysUntilDue: daysUntilDue,
+                            isOverdue: daysUntilDue < 0
+                        });
+                    }
+                }
+            });
+            
+            if (upcoming.length === 0) {
+                upcomingDiv.innerHTML = `
+                    <div style="text-align: center; padding: 20px; background: var(--gray); border-radius: 10px;">
+                        <i class="bi bi-check-circle" style="font-size: 24px; color: var(--success); margin-bottom: 10px;"></i>
+                        <p style="color: #6b7280;">No upcoming payments in the next 30 days</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort by days until due
+            upcoming.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+            
+            let html = '';
+            upcoming.forEach(item => {
+                const frequencyText = item.frequency ? ` (${item.frequency.charAt(0).toUpperCase() + item.frequency.slice(1)})` : '';
+                html += `
+                    <div style="background: ${item.isOverdue ? '#fff5f5' : '#f8f9fa'}; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid ${item.isOverdue ? 'var(--danger)' : 'var(--primary)'};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <strong style="font-size: 14px;">${item.name}${frequencyText}</strong>
+                            <span style="font-weight: bold; color: var(--primary);">$${formatCurrency(item.amount)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: ${item.isOverdue ? 'var(--danger)' : '#6b7280'};">
+                            <span>Due: ${item.dueDate.toLocaleDateString()}</span>
+                            <span>${item.type === 'debt' ? 'Debt' : 'Card'}</span>
+                        </div>
+                        <div style="font-size: 11px; color: ${item.isOverdue ? 'var(--danger)' : 'var(--primary)'}; margin-top: 5px;">
+                            ${item.isOverdue ? '⚠️ Overdue' : `Due in ${item.daysUntilDue} day${item.daysUntilDue !== 1 ? 's' : ''}`}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            upcomingDiv.innerHTML = html;
+        }
+
         // Calendar navigation
         function prevMonth() {
             if (currentMonth === 0) {
@@ -2944,92 +3165,6 @@
             }
         }
 
-        // Update Upcoming Payments
-        function updateUpcomingPayments() {
-            const upcomingDiv = document.getElementById('upcomingPayments');
-            if (!upcomingDiv) return;
-            
-            const today = new Date();
-            const currentDay = today.getDate();
-            const currentMonth = today.getMonth();
-            const currentYear = today.getFullYear();
-            
-            let upcoming = [];
-            
-            // Check debt due dates for next 30 days
-            dataState.debts.forEach(debt => {
-                if (debt.status === 'active' && debt.paymentDueDay) {
-                    const dueDay = parseInt(debt.paymentDueDay);
-                    const dueDate = new Date(currentYear, currentMonth, dueDay);
-                    const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-                    
-                    if (daysUntilDue >= 0 && daysUntilDue <= 30) {
-                        upcoming.push({
-                            type: 'debt',
-                            name: debt.name,
-                            amount: debt.minimumPayment || 0,
-                            dueDay: dueDay,
-                            daysUntilDue: daysUntilDue,
-                            isOverdue: daysUntilDue < 0
-                        });
-                    }
-                }
-            });
-            
-            // Check credit card due dates for next 30 days
-            dataState.creditCards.forEach(card => {
-                if (card.status === 'active' && card.paymentDueDay) {
-                    const dueDay = parseInt(card.paymentDueDay);
-                    const dueDate = new Date(currentYear, currentMonth, dueDay);
-                    const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-                    
-                    if (daysUntilDue >= 0 && daysUntilDue <= 30) {
-                        const minPayment = Math.max(card.currentBalance * 0.02, 25);
-                        upcoming.push({
-                            type: 'card',
-                            name: card.cardName,
-                            amount: minPayment,
-                            dueDay: dueDay,
-                            daysUntilDue: daysUntilDue,
-                            isOverdue: daysUntilDue < 0
-                        });
-                    }
-                }
-            });
-            
-            if (upcoming.length === 0) {
-                upcomingDiv.innerHTML = `
-                    <div style="text-align: center; padding: 20px; background: var(--gray); border-radius: 10px;">
-                        <i class="bi bi-check-circle" style="font-size: 24px; color: var(--success); margin-bottom: 10px;"></i>
-                        <p style="color: #6b7280;">No upcoming payments in the next 30 days</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Sort by days until due
-            upcoming.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
-            
-            let html = '';
-            upcoming.forEach(item => {
-                html += `
-                    <div style="background: ${item.isOverdue ? '#fff5f5' : '#f8f9fa'}; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid ${item.isOverdue ? 'var(--danger)' : 'var(--primary)'};">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                            <strong style="font-size: 14px;">${item.name}</strong>
-                            <span style="font-weight: bold; color: var(--primary);">$${formatCurrency(item.amount)}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: ${item.isOverdue ? 'var(--danger)' : '#6b7280'};">
-                            <span>Due in ${item.daysUntilDue} days</span>
-                            <span>${item.type === 'debt' ? 'Debt' : 'Card'}</span>
-                        </div>
-                        ${item.isOverdue ? '<div style="font-size: 11px; color: var(--danger); margin-top: 5px;">⚠️ Overdue</div>' : ''}
-                    </div>
-                `;
-            });
-            
-            upcomingDiv.innerHTML = html;
-        }
-
         // Load Quick Insights
         function loadQuickInsights() {
             const insightsDiv = document.getElementById('quickInsights');
@@ -3043,12 +3178,12 @@
             
             const overdueItems = dataState.debts.filter(debt => {
                 const today = new Date();
-                const dueDate = new Date(today.getFullYear(), today.getMonth(), debt.paymentDueDay);
-                return debt.status === 'active' && today > dueDate;
+                const nextDueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+                return debt.status === 'active' && nextDueDate < today;
             }).length + dataState.creditCards.filter(card => {
                 const today = new Date();
                 const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
-                return card.status === 'active' && today > dueDate;
+                return card.status === 'active' && dueDate < today;
             }).length;
             
             const highInterestDebts = dataState.debts.filter(debt => debt.interestRate > 15).length;
@@ -3120,11 +3255,11 @@
         function updateNotifications() {
             const today = new Date();
             const overdueCount = dataState.debts.filter(debt => {
-                const dueDate = new Date(today.getFullYear(), today.getMonth(), debt.paymentDueDay);
-                return debt.status === 'active' && today > dueDate;
+                const nextDueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+                return debt.status === 'active' && nextDueDate < today;
             }).length + dataState.creditCards.filter(card => {
                 const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
-                return card.status === 'active' && today > dueDate;
+                return card.status === 'active' && dueDate < today;
             }).length;
             
             const notificationCount = document.getElementById('notificationCount');
@@ -3143,13 +3278,14 @@
             
             // Check overdue debts
             dataState.debts.forEach(debt => {
-                const dueDate = new Date(today.getFullYear(), today.getMonth(), debt.paymentDueDay);
-                if (debt.status === 'active' && today > dueDate) {
+                const nextDueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+                if (debt.status === 'active' && nextDueDate < today) {
+                    const daysOverdue = Math.ceil((today - nextDueDate) / (1000 * 60 * 60 * 24));
                     overdueItems.push({
                         type: 'debt',
                         id: debt.id,
                         name: debt.name,
-                        daysOverdue: Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24))
+                        daysOverdue: daysOverdue
                     });
                 }
             });
@@ -3157,12 +3293,13 @@
             // Check overdue credit cards
             dataState.creditCards.forEach(card => {
                 const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
-                if (card.status === 'active' && today > dueDate) {
+                if (card.status === 'active' && dueDate < today) {
+                    const daysOverdue = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
                     overdueItems.push({
                         type: 'card',
                         id: card.id,
                         name: card.cardName,
-                        daysOverdue: Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24))
+                        daysOverdue: daysOverdue
                     });
                 }
             });
@@ -3960,6 +4097,9 @@
             const typeText = debt.type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
             const statusText = debt.status.charAt(0).toUpperCase() + debt.status.slice(1).replace('_', ' ');
             const progress = debt.principalAmount > 0 ? ((debt.principalAmount - debt.currentBalance) / debt.principalAmount * 100) : 0;
+            const today = new Date();
+            const nextDueDate = calculateNextDueDate(debt.paymentFrequency, debt.paymentDueDay, today);
+            const daysUntilDue = nextDueDate ? Math.ceil((nextDueDate - today) / (1000 * 60 * 60 * 24)) : 0;
             
             let html = `
                 <div style="margin-bottom: 25px;">
@@ -4024,6 +4164,17 @@
                 
                 <div class="form-row">
                     <div class="form-group">
+                        <label>Next Due Date</label>
+                        <div style="font-weight: bold; color: ${daysUntilDue <= 7 ? 'var(--danger)' : daysUntilDue <= 14 ? 'var(--warning)' : 'var(--success)'};">${nextDueDate ? nextDueDate.toLocaleDateString() : 'N/A'}</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Days Until Due</label>
+                        <div>${daysUntilDue}</div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
                         <label>Debt Type</label>
                         <div>${typeText}</div>
                     </div>
@@ -4059,6 +4210,12 @@
             const availableCredit = card.creditLimit - card.currentBalance;
             const utilization = card.creditLimit > 0 ? (card.currentBalance / card.creditLimit * 100).toFixed(1) : 0;
             const typeText = card.cardType.charAt(0).toUpperCase() + card.cardType.slice(1);
+            const today = new Date();
+            const dueDate = new Date(today.getFullYear(), today.getMonth(), card.paymentDueDay);
+            if (dueDate < today) {
+                dueDate.setMonth(dueDate.getMonth() + 1);
+            }
+            const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
             
             let html = `
                 <div style="margin-bottom: 25px;">
@@ -4105,6 +4262,17 @@
                     <div class="form-group">
                         <label>Statement Due Day</label>
                         <div>${card.statementDueDay}</div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Next Due Date</label>
+                        <div style="font-weight: bold; color: ${daysUntilDue <= 7 ? 'var(--danger)' : daysUntilDue <= 14 ? 'var(--warning)' : 'var(--success)'};">${dueDate.toLocaleDateString()}</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Days Until Due</label>
+                        <div>${daysUntilDue}</div>
                     </div>
                 </div>
                 
