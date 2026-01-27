@@ -525,9 +525,7 @@
       where,
       orderBy,
       limit,
-      deleteDoc,
-      serverTimestamp,
-      Timestamp
+      serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // Your Firebase configuration
@@ -567,15 +565,11 @@
     const lastLogin = document.getElementById('lastLogin');
     const currentIP = document.getElementById('currentIP');
 
-    // Current session ID
-    let currentSessionId = null;
-
     // Show alert message
     function showAlert(message, type) {
       alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
       alertBox.style.display = 'block';
       
-      // Hide alert after 5 seconds
       setTimeout(() => {
         alertBox.style.display = 'none';
       }, 5000);
@@ -587,50 +581,29 @@
       let device = 'Unknown Device';
       let deviceType = 'desktop';
       let browser = 'Unknown Browser';
+      let os = 'Unknown OS';
       
       // Detect browser
-      if (/firefox/i.test(userAgent)) {
-        browser = 'Firefox';
-      } else if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) {
-        browser = 'Chrome';
-      } else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) {
-        browser = 'Safari';
-      } else if (/edg/i.test(userAgent)) {
-        browser = 'Edge';
-      } else if (/opera/i.test(userAgent)) {
-        browser = 'Opera';
-      }
-      
-      // Detect device type
-      if (/mobile/i.test(userAgent)) {
-        deviceType = 'mobile';
-        device = `${browser} on Mobile`;
-      } else if (/tablet/i.test(userAgent)) {
-        deviceType = 'tablet';
-        device = `${browser} on Tablet`;
-      } else {
-        device = `${browser} on Desktop`;
-      }
+      if (/firefox/i.test(userAgent)) browser = 'Firefox';
+      else if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) browser = 'Chrome';
+      else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) browser = 'Safari';
+      else if (/edg/i.test(userAgent)) browser = 'Edge';
+      else if (/opera/i.test(userAgent)) browser = 'Opera';
       
       // Detect OS
-      if (/windows/i.test(userAgent)) {
-        device += ' (Windows)';
-      } else if (/macintosh/i.test(userAgent) || /mac os/i.test(userAgent)) {
-        device += ' (macOS)';
-      } else if (/linux/i.test(userAgent)) {
-        device += ' (Linux)';
-      } else if (/android/i.test(userAgent)) {
-        device += ' (Android)';
-      } else if (/iphone|ipad|ipod/i.test(userAgent)) {
-        device += ' (iOS)';
-      }
+      if (/windows/i.test(userAgent)) os = 'Windows';
+      else if (/macintosh/i.test(userAgent) || /mac os/i.test(userAgent)) os = 'macOS';
+      else if (/linux/i.test(userAgent)) os = 'Linux';
+      else if (/android/i.test(userAgent)) os = 'Android';
+      else if (/iphone|ipad|ipod/i.test(userAgent)) os = 'iOS';
       
-      return {
-        device,
-        deviceType,
-        browser,
-        userAgent: userAgent.substring(0, 100)
-      };
+      // Detect device type
+      if (/mobile/i.test(userAgent)) deviceType = 'mobile';
+      else if (/tablet/i.test(userAgent)) deviceType = 'tablet';
+      
+      device = `${browser} on ${deviceType} (${os})`;
+      
+      return { device, deviceType, browser, os, userAgent };
     }
 
     // Get IP address
@@ -640,19 +613,11 @@
         const data = await response.json();
         return data.ip || 'Unknown';
       } catch (error) {
-        console.error('Error getting IP:', error);
-        // Try fallback method
-        try {
-          const response = await fetch('https://api64.ipify.org?format=json');
-          const data = await response.json();
-          return data.ip || 'Unknown';
-        } catch (e) {
-          return 'Unknown';
-        }
+        return 'Unknown';
       }
     }
 
-    // Initialize user document if it doesn't exist
+    // Initialize user document
     async function initializeUserDocument(user) {
       try {
         const userRef = doc(db, 'users', user.uid);
@@ -664,9 +629,6 @@
             email: user.email,
             displayName: user.displayName || 'User',
             totalLogins: 0,
-            activeSessions: 0,
-            lastLogin: null,
-            lastIP: null,
             createdAt: serverTimestamp(),
             loginNotifications: true
           });
@@ -674,7 +636,7 @@
         
         return userDoc;
       } catch (error) {
-        console.error('Error initializing user document:', error);
+        console.error('Error initializing user:', error);
       }
     }
 
@@ -684,15 +646,12 @@
         const user = auth.currentUser;
         if (!user) return;
         
-        // Initialize user document first
         await initializeUserDocument(user);
-        
         const deviceInfo = getDeviceInfo();
         const ipAddress = await getIPAddress();
         const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        currentSessionId = sessionId;
         
-        // Save current IP in footer
+        // Update IP in footer
         currentIP.textContent = `IP: ${ipAddress}`;
         
         const sessionData = {
@@ -702,19 +661,19 @@
           displayName: user.displayName || 'User',
           device: deviceInfo.device,
           deviceType: deviceInfo.deviceType,
+          os: deviceInfo.os,
           browser: deviceInfo.browser,
-          userAgent: deviceInfo.userAgent,
           ipAddress: ipAddress,
           loginTime: serverTimestamp(),
           lastActive: serverTimestamp(),
           isActive: true
         };
         
-        // Save session to Firestore
-        const sessionRef = doc(db, 'loginSessions', sessionId);
-        await setDoc(sessionRef, sessionData);
+        // Save session
+        await setDoc(doc(db, 'sessions', sessionId), sessionData);
+        localStorage.setItem('currentSessionId', sessionId);
         
-        // Update user's last login and increment total logins
+        // Update user stats
         const userRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userRef);
         const currentLogins = userDoc.exists() ? (userDoc.data().totalLogins || 0) : 0;
@@ -725,17 +684,13 @@
           totalLogins: currentLogins + 1
         });
         
-        // Record in login history
+        // Record history
         await recordLoginHistory(user, deviceInfo, ipAddress, true);
-        
-        // Save session ID to localStorage
-        localStorage.setItem('currentSessionId', sessionId);
         
         return sessionId;
         
       } catch (error) {
-        console.error('Error recording login session:', error);
-        showAlert(`Session error: ${error.message}`, 'error');
+        console.error('Error recording session:', error);
         return null;
       }
     }
@@ -750,43 +705,18 @@
           device: deviceInfo.device,
           ipAddress: ipAddress,
           timestamp: serverTimestamp(),
-          success: success
+          success: success,
+          type: 'login'
         };
         
-        await setDoc(doc(db, 'loginHistory', historyId), historyData);
+        await setDoc(doc(db, 'history', historyId), historyData);
       } catch (error) {
-        console.error('Error recording login history:', error);
+        console.error('Error recording history:', error);
       }
     }
 
-    // Get user stats
-    async function getUserStats() {
-      try {
-        const user = auth.currentUser;
-        if (!user) return { totalLogins: 0, activeSessions: 0 };
-        
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          return {
-            totalLogins: data.totalLogins || 0,
-            activeSessions: data.activeSessions || 0,
-            lastLogin: data.lastLogin,
-            lastIP: data.lastIP
-          };
-        } else {
-          // Create user stats document
-          await initializeUserDocument(user);
-          return { totalLogins: 0, activeSessions: 0 };
-        }
-      } catch (error) {
-        console.error('Error getting user stats:', error);
-        return { totalLogins: 0, activeSessions: 0 };
-      }
-    }
-
-    // Update active sessions
-    async function updateActiveSessions() {
+    // Load all sessions and filter client-side (NO INDEX NEEDED)
+    async function loadAllSessions() {
       try {
         const user = auth.currentUser;
         if (!user) return;
@@ -798,37 +728,39 @@
           </div>
         `;
         
+        // Simple query - no composite index needed
         const sessionsQuery = query(
-          collection(db, 'loginSessions'),
-          where('uid', '==', user.uid),
-          where('isActive', '==', true),
-          orderBy('lastActive', 'desc')
+          collection(db, 'sessions')
         );
         
         const querySnapshot = await getDocs(sessionsQuery);
-        const sessions = [];
+        const allSessions = [];
         
         querySnapshot.forEach((doc) => {
-          sessions.push({ id: doc.id, ...doc.data() });
+          allSessions.push({ id: doc.id, ...doc.data() });
         });
         
-        // Update active devices count
-        activeDevices.textContent = sessions.length;
+        // Filter client-side
+        const userSessions = allSessions.filter(session => 
+          session.uid === user.uid && session.isActive === true
+        );
         
-        // Update user's active sessions count
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, {
-          activeSessions: sessions.length
+        // Sort by lastActive (client-side)
+        userSessions.sort((a, b) => {
+          const timeA = a.lastActive?.seconds || 0;
+          const timeB = b.lastActive?.seconds || 0;
+          return timeB - timeA;
         });
         
-        // Display sessions
-        displaySessions(sessions);
+        activeDevices.textContent = userSessions.length;
+        displaySessions(userSessions);
         
       } catch (error) {
-        console.error('Error updating sessions:', error);
+        console.error('Error loading sessions:', error);
         sessionsList.innerHTML = `
           <div class="empty-state">
-            Error loading sessions: ${error.message}
+            Error: ${error.message}<br>
+            <small>Creating sessions collection...</small>
           </div>
         `;
       }
@@ -837,7 +769,7 @@
     // Display sessions
     function displaySessions(sessions) {
       if (sessions.length === 0) {
-        sessionsList.innerHTML = '<div class="empty-state">No active sessions</div>';
+        sessionsList.innerHTML = '<div class="empty-state">No active sessions found</div>';
         return;
       }
       
@@ -848,12 +780,8 @@
         const isCurrent = session.sessionId === currentSessionId;
         let loginTime = 'Unknown time';
         
-        if (session.loginTime) {
-          if (session.loginTime.toDate) {
-            loginTime = session.loginTime.toDate().toLocaleString();
-          } else if (session.loginTime.seconds) {
-            loginTime = new Date(session.loginTime.seconds * 1000).toLocaleString();
-          }
+        if (session.loginTime?.seconds) {
+          loginTime = new Date(session.loginTime.seconds * 1000).toLocaleString();
         }
         
         const sessionElement = document.createElement('div');
@@ -872,6 +800,7 @@
             </div>
             <div class="session-details">
               IP: ${session.ipAddress || 'Unknown'} • 
+              Browser: ${session.browser || 'Unknown'} • 
               Last active: ${loginTime}
             </div>
           </div>
@@ -883,7 +812,7 @@
         sessionsList.appendChild(sessionElement);
       });
       
-      // Add event listeners to logout buttons
+      // Add event listeners
       document.querySelectorAll('.logout-session-btn').forEach(button => {
         button.addEventListener('click', async (e) => {
           const sessionId = e.target.dataset.sessionId;
@@ -892,7 +821,7 @@
       });
     }
 
-    // Load login history
+    // Load login history - simple query
     async function loadLoginHistory() {
       try {
         const user = auth.currentUser;
@@ -905,13 +834,8 @@
           </div>
         `;
         
-        const historyQuery = query(
-          collection(db, 'loginHistory'),
-          where('uid', '==', user.uid),
-          orderBy('timestamp', 'desc'),
-          limit(10)
-        );
-        
+        // Simple query - no composite index needed
+        const historyQuery = query(collection(db, 'history'));
         const querySnapshot = await getDocs(historyQuery);
         
         if (querySnapshot.empty) {
@@ -919,86 +843,96 @@
           return;
         }
         
-        let historyHTML = '';
+        const allHistory = [];
         querySnapshot.forEach((doc) => {
-          const history = doc.data();
-          let time = 'Unknown time';
-          
-          if (history.timestamp) {
-            if (history.timestamp.toDate) {
-              time = history.timestamp.toDate().toLocaleString();
-            } else if (history.timestamp.seconds) {
-              time = new Date(history.timestamp.seconds * 1000).toLocaleString();
-            }
-          }
-          
-          historyHTML += `
-            <div class="session-item">
-              <div class="session-info">
-                <div class="session-device">${history.device || 'Unknown Device'}</div>
-                <div class="session-details">
-                  ${time} • IP: ${history.ipAddress || 'Unknown'}
-                  ${history.success ? '<span class="badge badge-success">Success</span>' : '<span class="badge badge-warning">Failed</span>'}
-                </div>
-              </div>
-            </div>
-          `;
+          allHistory.push({ id: doc.id, ...doc.data() });
         });
         
-        loginHistory.innerHTML = historyHTML;
+        // Filter and sort client-side
+        const userHistory = allHistory
+          .filter(history => history.uid === user.uid && history.type === 'login')
+          .sort((a, b) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeB - timeA;
+          })
+          .slice(0, 10); // Limit to 10 most recent
+        
+        displayLoginHistory(userHistory);
         
       } catch (error) {
-        console.error('Error loading login history:', error);
+        console.error('Error loading history:', error);
         loginHistory.innerHTML = `
           <div class="empty-state">
-            Error loading history: ${error.message}<br>
-            <small>Please check Firestore rules and collections</small>
+            Error: ${error.message}<br>
+            <small>Creating history collection...</small>
           </div>
         `;
       }
     }
 
-    // Logout a specific session
-    async function logoutSession(sessionId) {
-      try {
-        if (!confirm('Are you sure you want to logout this device?')) {
-          return;
+    // Display login history
+    function displayLoginHistory(history) {
+      if (history.length === 0) {
+        loginHistory.innerHTML = '<div class="empty-state">No login history found</div>';
+        return;
+      }
+      
+      let historyHTML = '';
+      history.forEach(item => {
+        let time = 'Unknown time';
+        if (item.timestamp?.seconds) {
+          time = new Date(item.timestamp.seconds * 1000).toLocaleString();
         }
         
-        await updateDoc(doc(db, 'loginSessions', sessionId), {
+        historyHTML += `
+          <div class="session-item">
+            <div class="session-info">
+              <div class="session-device">${item.device || 'Unknown Device'}</div>
+              <div class="session-details">
+                ${time} • IP: ${item.ipAddress || 'Unknown'}
+                ${item.success ? '<span class="badge badge-success">Success</span>' : '<span class="badge badge-warning">Failed</span>'}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      loginHistory.innerHTML = historyHTML;
+    }
+
+    // Logout a session
+    async function logoutSession(sessionId) {
+      try {
+        if (!confirm('Logout this device?')) return;
+        
+        await updateDoc(doc(db, 'sessions', sessionId), {
           isActive: false,
           logoutTime: serverTimestamp()
         });
         
-        showAlert('Session logged out successfully', 'success');
-        await updateActiveSessions();
+        showAlert('Device logged out', 'success');
+        await loadAllSessions();
       } catch (error) {
-        showAlert(`Error logging out session: ${error.message}`, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Logout all sessions except current
+    // Logout all sessions
     async function logoutAllSessions() {
-      if (!confirm('Are you sure you want to logout from all other devices?')) {
-        return;
-      }
+      if (!confirm('Logout all other devices?')) return;
       
       try {
         const user = auth.currentUser;
         const currentSessionId = localStorage.getItem('currentSessionId');
         
-        const sessionsQuery = query(
-          collection(db, 'loginSessions'),
-          where('uid', '==', user.uid),
-          where('isActive', '==', true)
-        );
-        
+        const sessionsQuery = query(collection(db, 'sessions'));
         const querySnapshot = await getDocs(sessionsQuery);
         const updates = [];
         
         querySnapshot.forEach((doc) => {
           const session = doc.data();
-          if (session.sessionId !== currentSessionId) {
+          if (session.uid === user.uid && session.sessionId !== currentSessionId && session.isActive === true) {
             updates.push(
               updateDoc(doc.ref, {
                 isActive: false,
@@ -1009,77 +943,69 @@
         });
         
         await Promise.all(updates);
-        showAlert('Logged out from all other devices', 'success');
-        await updateActiveSessions();
+        showAlert('All other devices logged out', 'success');
+        await loadAllSessions();
         
       } catch (error) {
-        showAlert(`Error logging out sessions: ${error.message}`, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Update user's last activity
+    // Update last activity
     async function updateLastActivity() {
       try {
         const sessionId = localStorage.getItem('currentSessionId');
         if (sessionId) {
-          await updateDoc(doc(db, 'loginSessions', sessionId), {
+          await updateDoc(doc(db, 'sessions', sessionId), {
             lastActive: serverTimestamp()
           });
         }
       } catch (error) {
-        console.error('Error updating last activity:', error);
+        console.error('Error updating activity:', error);
       }
     }
 
-    // Main initialization
+    // Main auth state change handler
     auth.onAuthStateChanged(async (user) => {
       if (user) {
-        // User is signed in
+        // Update user info
         displayNameElement.textContent = user.displayName || 'User';
         userEmailElement.textContent = user.email;
         displayNameInput.value = user.displayName || '';
         
         // Update profile picture
         const userName = user.displayName || 'User';
-        const profilePicture = document.getElementById('profilePicture');
-        profilePicture.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6200ee&color=fff`;
+        document.getElementById('profilePicture').src = 
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6200ee&color=fff`;
         
-        // Check if this is a new session
-        const savedSessionId = localStorage.getItem('currentSessionId');
-        if (!savedSessionId) {
+        // Check/create session
+        if (!localStorage.getItem('currentSessionId')) {
           await recordLoginSession();
         } else {
-          // Update current session activity
           await updateLastActivity();
         }
         
-        // Get current IP
+        // Get IP
         const ip = await getIPAddress();
         currentIP.textContent = `IP: ${ip}`;
         
-        // Load user data
-        const stats = await getUserStats();
-        totalLogins.textContent = stats.totalLogins || 0;
-        
-        // Format last login time
-        if (stats.lastLogin) {
-          let lastLoginTime;
-          if (stats.lastLogin.toDate) {
-            lastLoginTime = stats.lastLogin.toDate();
-          } else if (stats.lastLogin.seconds) {
-            lastLoginTime = new Date(stats.lastLogin.seconds * 1000);
-          } else {
-            lastLoginTime = new Date(stats.lastLogin);
+        // Load user stats
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          totalLogins.textContent = data.totalLogins || 0;
+          
+          if (data.lastLogin?.seconds) {
+            const lastLoginTime = new Date(data.lastLogin.seconds * 1000);
+            lastLogin.textContent = `Last login: ${lastLoginTime.toLocaleString()} from ${data.lastIP || 'Unknown IP'}`;
           }
-          lastLogin.textContent = `Last login: ${lastLoginTime.toLocaleString()} from ${stats.lastIP || 'Unknown IP'}`;
         }
         
         // Load sessions and history
-        await updateActiveSessions();
+        await loadAllSessions();
         await loadLoginHistory();
         
       } else {
-        // No user is signed in, redirect to login
         window.location.href = 'index.html';
       }
     });
@@ -1087,33 +1013,23 @@
     // Update display name
     updateNameBtn.addEventListener('click', async () => {
       const newName = displayNameInput.value.trim();
-      
       if (!newName) {
-        showAlert('Please enter a display name', 'error');
+        showAlert('Please enter a name', 'error');
         return;
       }
       
       try {
         const user = auth.currentUser;
-        await updateProfile(user, {
-          displayName: newName
-        });
+        await updateProfile(user, { displayName: newName });
         
-        // Update UI
         displayNameElement.textContent = newName;
+        document.getElementById('profilePicture').src = 
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=6200ee&color=fff`;
         
-        // Update profile picture
-        const profilePicture = document.getElementById('profilePicture');
-        profilePicture.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=6200ee&color=fff`;
-        
-        // Update in database
-        await updateDoc(doc(db, 'users', user.uid), {
-          displayName: newName
-        });
-        
-        showAlert('Name updated successfully!', 'success');
+        await updateDoc(doc(db, 'users', user.uid), { displayName: newName });
+        showAlert('Name updated', 'success');
       } catch (error) {
-        showAlert(`Error updating name: ${error.message}`, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     });
 
@@ -1124,47 +1040,42 @@
       const confirmPwd = confirmPassword.value;
       
       if (!currentPwd || !newPwd || !confirmPwd) {
-        showAlert('Please fill in all password fields', 'error');
+        showAlert('Fill all fields', 'error');
         return;
       }
       
       if (newPwd !== confirmPwd) {
-        showAlert('New passwords do not match', 'error');
+        showAlert('Passwords dont match', 'error');
         return;
       }
       
       if (newPwd.length < 6) {
-        showAlert('New password must be at least 6 characters', 'error');
+        showAlert('Password must be 6+ characters', 'error');
         return;
       }
       
       try {
         const user = auth.currentUser;
-        
-        // Reauthenticate user
         const credential = EmailAuthProvider.credential(user.email, currentPwd);
         await reauthenticateWithCredential(user, credential);
-        
-        // Update password
         await updatePassword(user, newPwd);
         
-        // Clear password fields
         currentPassword.value = '';
         newPassword.value = '';
         confirmPassword.value = '';
         
-        showAlert('Password updated successfully!', 'success');
+        showAlert('Password updated', 'success');
       } catch (error) {
-        showAlert(`Error updating password: ${error.message}`, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     });
 
-    // Logout current session
+    // Logout
     logoutBtn.addEventListener('click', async () => {
       try {
         const sessionId = localStorage.getItem('currentSessionId');
         if (sessionId) {
-          await updateDoc(doc(db, 'loginSessions', sessionId), {
+          await updateDoc(doc(db, 'sessions', sessionId), {
             isActive: false,
             logoutTime: serverTimestamp()
           });
@@ -1174,36 +1085,24 @@
         localStorage.removeItem('currentSessionId');
         window.location.href = 'index.html';
       } catch (error) {
-        showAlert(`Error signing out: ${error.message}`, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     });
 
-    // Logout all sessions
+    // Logout all
     logoutAllBtn.addEventListener('click', logoutAllSessions);
 
     // Refresh sessions
     refreshSessionsBtn.addEventListener('click', async () => {
-      await updateActiveSessions();
+      await loadAllSessions();
       await loadLoginHistory();
-      showAlert('Sessions refreshed', 'info');
+      showAlert('Refreshed', 'info');
     });
 
-    // Update activity every 30 seconds
+    // Update activity periodically
     setInterval(updateLastActivity, 30000);
-
-    // Update activity on user interaction
     document.addEventListener('click', updateLastActivity);
     document.addEventListener('keypress', updateLastActivity);
-
-    // Initialize
-    document.addEventListener('DOMContentLoaded', () => {
-      // Get IP on page load
-      getIPAddress().then(ip => {
-        if (currentIP.textContent === 'IP: Loading...') {
-          currentIP.textContent = `IP: ${ip}`;
-        }
-      });
-    });
 
   </script>
 </body>
