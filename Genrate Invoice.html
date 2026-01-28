@@ -814,7 +814,7 @@
                                     </select>
                                 </td>
                                 <td class="item-total">0.00</td>
-                                <td><button class="btn btn-danger remove-item" style="padding: 5px 10px;">
+                                <td><button class="btn btn-danger remove-item" style="padding: 5px 10px;" onclick="removeItemRow(this)">
                                     <i class="fas fa-trash"></i>
                                 </button></td>
                             </tr>
@@ -1027,8 +1027,14 @@
             expiryDate.setDate(expiryDate.getDate() + 30);
             document.getElementById('expiryDate').value = expiryDate.toISOString().split('T')[0];
             
+            // Set default document number
+            document.getElementById('documentNumber').value = 'INV-001';
+            
             // Add event listeners
             setupEventListeners();
+            
+            // Initialize item row
+            initItemRow(itemsTable.querySelector('tr'));
             
             // Check auth state
             auth.onAuthStateChanged((user) => {
@@ -1075,13 +1081,6 @@
             
             // Items Management
             addItemBtn.addEventListener('click', addItemRow);
-            
-            // Calculations
-            document.addEventListener('input', (e) => {
-                if (e.target.classList.contains('item-input')) {
-                    updateItemCalculations();
-                }
-            });
             
             // Preview
             previewBtn.addEventListener('click', updatePreview);
@@ -1138,8 +1137,8 @@
 
         function updateUserInfo() {
             if (currentUser) {
-                const name = currentUser.displayName || currentUser.email.split('@')[0];
-                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase();
+                const name = currentUser.displayName || currentUser.email || 'User';
+                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 userAvatar.textContent = initials;
                 userName.textContent = name;
             }
@@ -1189,26 +1188,33 @@
                 expiryDateField.style.display = 'none';
                 voucherFields.style.display = 'none';
                 receiptFields.style.display = 'none';
+                document.getElementById('documentNumber').value = 'INV-001';
             } else if (type === 'receipt') {
                 dueDateField.style.display = 'none';
                 expiryDateField.style.display = 'none';
                 voucherFields.style.display = 'none';
                 receiptFields.style.display = 'block';
+                document.getElementById('documentNumber').value = 'REC-001';
             } else if (type === 'voucher') {
                 dueDateField.style.display = 'none';
                 expiryDateField.style.display = 'block';
                 voucherFields.style.display = 'block';
                 receiptFields.style.display = 'none';
-            }
-            
-            // Update document number prefix
-            const docNumber = document.getElementById('documentNumber');
-            const prefix = type === 'invoice' ? 'INV-' : type === 'receipt' ? 'REC-' : 'VOU-';
-            if (!docNumber.value.startsWith(prefix)) {
-                docNumber.value = prefix + '001';
+                document.getElementById('documentNumber').value = 'VOU-001';
             }
             
             updatePreview();
+        }
+
+        // Initialize item row
+        function initItemRow(row) {
+            const inputs = row.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                input.addEventListener('input', () => {
+                    updateItemTotal(row);
+                    updateCalculations();
+                });
+            });
         }
 
         // Items Management
@@ -1233,64 +1239,74 @@
                 </button></td>
             `;
             itemsTable.appendChild(row);
-            updateItemCalculations();
+            initItemRow(row);
+            updateCalculations();
         }
 
         function removeItemRow(button) {
             button.closest('tr').remove();
-            updateItemCalculations();
+            updateCalculations();
         }
 
-        function updateItemCalculations() {
-            let total = 0;
-            const rows = itemsTable.querySelectorAll('tr');
+        function updateItemTotal(row) {
+            const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+            const price = parseFloat(row.querySelector('.item-price').value) || 0;
+            const tax = parseFloat(row.querySelector('.item-tax').value) || 0;
             
-            rows.forEach(row => {
+            const subtotal = qty * price;
+            const taxAmount = subtotal * (tax / 100);
+            const total = subtotal + taxAmount;
+            
+            row.querySelector('.item-total').textContent = total.toFixed(2);
+        }
+
+        function updateCalculations() {
+            let subtotalValue = 0;
+            const taxAmounts = { 5: 0, 10: 0, 18: 0, 28: 0 };
+            
+            itemsTable.querySelectorAll('tr').forEach(row => {
                 const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
                 const price = parseFloat(row.querySelector('.item-price').value) || 0;
                 const tax = parseFloat(row.querySelector('.item-tax').value) || 0;
                 
-                const itemTotal = qty * price * (1 + tax / 100);
-                row.querySelector('.item-total').textContent = itemTotal.toFixed(2);
-                total += qty * price;
-            });
-            
-            updateTaxSummary(total);
-        }
-
-        function updateTaxSummary(subtotalValue) {
-            const taxRates = [5, 10, 18, 28];
-            let taxTotal = 0;
-            let taxRowsHTML = '';
-            
-            taxRates.forEach(rate => {
-                let taxAmount = 0;
+                const itemSubtotal = qty * price;
+                subtotalValue += itemSubtotal;
                 
-                // Calculate tax for each rate
-                itemsTable.querySelectorAll('tr').forEach(row => {
-                    const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-                    const price = parseFloat(row.querySelector('.item-price').value) || 0;
-                    const tax = parseFloat(row.querySelector('.item-tax').value) || 0;
-                    
-                    if (tax === rate) {
-                        taxAmount += qty * price * (tax / 100);
-                    }
-                });
-                
-                if (taxAmount > 0) {
-                    taxRowsHTML += `
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>Tax (${rate}%):</span>
-                            <span>${taxAmount.toFixed(2)}</span>
-                        </div>
-                    `;
-                    taxTotal += taxAmount;
+                if (tax > 0) {
+                    taxAmounts[tax] += itemSubtotal * (tax / 100);
                 }
             });
             
+            // Update subtotal display
             subtotal.textContent = subtotalValue.toFixed(2);
+            
+            // Update tax rows
+            let taxRowsHTML = '';
+            let totalTax = 0;
+            
+            const taxRates = [5, 10, 18, 28];
+            taxRates.forEach(rate => {
+                if (taxAmounts[rate] > 0) {
+                    taxRowsHTML += `
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>Tax (${rate}%):</span>
+                            <span>${taxAmounts[rate].toFixed(2)}</span>
+                        </div>
+                    `;
+                    totalTax += taxAmounts[rate];
+                }
+            });
+            
             taxRows.innerHTML = taxRowsHTML;
-            grandTotal.textContent = (subtotalValue + taxTotal).toFixed(2);
+            
+            // Update grand total
+            const grandTotalValue = subtotalValue + totalTax;
+            grandTotal.textContent = grandTotalValue.toFixed(2);
+            
+            // Update preview if it exists
+            if (document.getElementById('documentPreview').innerHTML !== '') {
+                updatePreview();
+            }
         }
 
         // Load User Details
@@ -1403,91 +1419,174 @@
         }
 
         function collectFormData() {
-            return {
+            // Collect all form data
+            const formData = {
+                // My Details
                 myName: document.getElementById('myName').value,
                 myCompany: document.getElementById('myCompany').value,
                 myEmail: document.getElementById('myEmail').value,
                 myPhone: document.getElementById('myPhone').value,
+                
+                // Client Details
                 clientName: document.getElementById('clientName').value,
                 clientEmail: document.getElementById('clientEmail').value,
                 clientPhone: document.getElementById('clientPhone').value,
                 clientAddress: document.getElementById('clientAddress').value,
+                
+                // Document Details
                 documentNumber: document.getElementById('documentNumber').value,
                 issueDate: document.getElementById('issueDate').value,
                 dueDate: document.getElementById('dueDate').value,
                 expiryDate: document.getElementById('expiryDate').value,
+                
+                // Voucher Specific
                 voucherCode: document.getElementById('voucherCode').value,
                 voucherAmount: document.getElementById('voucherAmount').value,
                 voucherTerms: document.getElementById('voucherTerms').value,
+                
+                // Receipt Specific
                 paymentMethod: document.getElementById('paymentMethod').value,
                 transactionId: document.getElementById('transactionId').value,
+                
+                // Bank Details
                 bankName: document.getElementById('bankName').value,
                 accountNumber: document.getElementById('accountNumber').value,
                 ifscCode: document.getElementById('ifscCode').value,
                 accountHolder: document.getElementById('accountHolder').value,
                 upiId: document.getElementById('upiId').value,
+                
+                // Calculated Values
                 subtotal: subtotal.textContent,
-                grandTotal: grandTotal.textContent
+                grandTotal: grandTotal.textContent,
+                
+                // Items
+                items: []
             };
+            
+            // Collect items data
+            itemsTable.querySelectorAll('tr').forEach(row => {
+                const item = {
+                    description: row.querySelector('.item-desc').value,
+                    quantity: row.querySelector('.item-qty').value,
+                    price: row.querySelector('.item-price').value,
+                    tax: row.querySelector('.item-tax').value,
+                    total: row.querySelector('.item-total').textContent
+                };
+                formData.items.push(item);
+            });
+            
+            return formData;
         }
 
         function generateInvoicePreview(data) {
+            // Generate items HTML
+            let itemsHTML = '';
+            let totalAmount = 0;
+            
+            if (data.items && data.items.length > 0) {
+                data.items.forEach((item, index) => {
+                    if (item.description || item.quantity || item.price) {
+                        const itemTotal = parseFloat(item.total) || 0;
+                        totalAmount += itemTotal;
+                        
+                        itemsHTML += `
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.description || 'Item ' + (index + 1)}</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity || '1'}</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">₹${parseFloat(item.price || 0).toFixed(2)}</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.tax || '0'}%</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">₹${itemTotal.toFixed(2)}</td>
+                            </tr>
+                        `;
+                    }
+                });
+            }
+            
+            // If no items added, show placeholder
+            if (itemsHTML === '') {
+                itemsHTML = `
+                    <tr>
+                        <td colspan="5" style="padding: 20px; text-align: center; color: #999;">
+                            No items added yet
+                        </td>
+                    </tr>
+                `;
+            }
+            
             return `
                 <div style="max-width: 800px; margin: 0 auto; padding: 40px; background: white; font-family: Arial, sans-serif;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                    <!-- Header -->
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 40px; border-bottom: 2px solid #4361ee; padding-bottom: 20px;">
                         <div>
-                            <h1 style="color: #4361ee; margin-bottom: 10px;">${data.myCompany || 'Your Company'}</h1>
+                            <h1 style="color: #4361ee; margin-bottom: 10px; font-size: 28px;">${data.myCompany || 'Your Company'}</h1>
                             <p>${data.myName || ''}</p>
                             <p>${data.myPhone || ''}</p>
                             <p>${data.myEmail || ''}</p>
                         </div>
                         <div style="text-align: right;">
-                            <h1 style="color: #4361ee; font-size: 36px;">INVOICE</h1>
-                            <p><strong>Invoice #:</strong> ${data.documentNumber}</p>
-                            <p><strong>Date:</strong> ${new Date(data.issueDate).toLocaleDateString()}</p>
-                            <p><strong>Due Date:</strong> ${new Date(data.dueDate).toLocaleDateString()}</p>
+                            <h1 style="color: #4361ee; font-size: 36px; margin-bottom: 10px;">INVOICE</h1>
+                            <p><strong>Invoice #:</strong> ${data.documentNumber || 'INV-001'}</p>
+                            <p><strong>Date:</strong> ${new Date(data.issueDate).toLocaleDateString() || new Date().toLocaleDateString()}</p>
+                            <p><strong>Due Date:</strong> ${data.dueDate ? new Date(data.dueDate).toLocaleDateString() : 'N/A'}</p>
                         </div>
                     </div>
                     
-                    <div style="margin-bottom: 40px;">
-                        <h3 style="color: #4361ee; margin-bottom: 10px;">Bill To:</h3>
-                        <p><strong>${data.clientName || 'Client Name'}</strong></p>
-                        <p>${data.clientAddress || ''}</p>
-                        <p>${data.clientPhone || ''}</p>
-                        <p>${data.clientEmail || ''}</p>
+                    <!-- Bill To Section -->
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                        <div>
+                            <h3 style="color: #4361ee; margin-bottom: 10px;">Bill To:</h3>
+                            <p><strong>${data.clientName || 'Client Name'}</strong></p>
+                            <p>${data.clientAddress || ''}</p>
+                            <p>${data.clientPhone || ''}</p>
+                            <p>${data.clientEmail || ''}</p>
+                        </div>
                     </div>
                     
+                    <!-- Items Table -->
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                         <thead>
                             <tr style="background: #f8f9fa;">
                                 <th style="padding: 12px; text-align: left; border-bottom: 2px solid #4361ee;">Description</th>
-                                <th style="padding: 12px; text-align: right; border-bottom: 2px solid #4361ee;">Quantity</th>
+                                <th style="padding: 12px; text-align: center; border-bottom: 2px solid #4361ee;">Quantity</th>
                                 <th style="padding: 12px; text-align: right; border-bottom: 2px solid #4361ee;">Price</th>
+                                <th style="padding: 12px; text-align: right; border-bottom: 2px solid #4361ee;">Tax</th>
                                 <th style="padding: 12px; text-align: right; border-bottom: 2px solid #4361ee;">Amount</th>
                             </tr>
                         </thead>
-                        <tbody id="previewItems">
-                            <!-- Items will be added here -->
+                        <tbody>
+                            ${itemsHTML}
                         </tbody>
                     </table>
                     
-                    <div style="text-align: right;">
-                        <p>Subtotal: ₹${data.subtotal}</p>
-                        <p>Total: <strong style="font-size: 20px;">₹${data.grandTotal}</strong></p>
+                    <!-- Totals -->
+                    <div style="text-align: right; margin-top: 30px;">
+                        <div style="display: inline-block; text-align: left; min-width: 300px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                                <span>Subtotal:</span>
+                                <span>₹${data.subtotal || '0.00'}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 10px; padding-top: 10px; border-top: 1px solid #eee;">
+                                <span><strong>Total:</strong></span>
+                                <span><strong>₹${data.grandTotal || '0.00'}</strong></span>
+                            </div>
+                        </div>
                     </div>
                     
-                    ${data.bankName ? `
+                    <!-- Bank Details -->
+                    ${data.bankName || data.accountNumber ? `
                     <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
                         <h4 style="color: #4361ee; margin-bottom: 10px;">Bank Details</h4>
-                        <p>Bank: ${data.bankName}</p>
-                        <p>Account: ${data.accountNumber}</p>
-                        <p>IFSC: ${data.ifscCode}</p>
-                        <p>Holder: ${data.accountHolder}</p>
+                        ${data.bankName ? `<p><strong>Bank:</strong> ${data.bankName}</p>` : ''}
+                        ${data.accountNumber ? `<p><strong>Account No:</strong> ${data.accountNumber}</p>` : ''}
+                        ${data.ifscCode ? `<p><strong>IFSC:</strong> ${data.ifscCode}</p>` : ''}
+                        ${data.accountHolder ? `<p><strong>Account Holder:</strong> ${data.accountHolder}</p>` : ''}
                     </div>
                     ` : ''}
                     
-                    <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #f0f0f0;">
+                    <!-- Footer -->
+                    <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #f0f0f0; text-align: center;">
                         <p>Thank you for your business!</p>
+                        <p style="color: #666; font-size: 12px; margin-top: 10px;">This is a computer-generated invoice</p>
                     </div>
                 </div>
             `;
@@ -1495,14 +1594,18 @@
 
         function generateReceiptPreview(data) {
             return `
-                <div style="max-width: 800px; margin: 0 auto; padding: 40px; background: white; font-family: Arial, sans-serif;">
-                    <div style="text-align: center; margin-bottom: 40px;">
-                        <h1 style="color: #2a9d8f; font-size: 36px;">RECEIPT</h1>
-                        <div style="position: absolute; right: 100px; top: 100px; transform: rotate(15deg); padding: 10px 20px; border: 3px solid #2a9d8f; color: #2a9d8f; font-weight: bold; font-size: 24px;">
-                            PAID
-                        </div>
+                <div style="max-width: 800px; margin: 0 auto; padding: 40px; background: white; font-family: Arial, sans-serif; position: relative;">
+                    <!-- Paid Stamp -->
+                    <div style="position: absolute; right: 100px; top: 100px; transform: rotate(15deg); padding: 10px 20px; border: 3px solid #2a9d8f; color: #2a9d8f; font-weight: bold; font-size: 24px; background: white; z-index: 1;">
+                        PAID
                     </div>
                     
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 40px;">
+                        <h1 style="color: #2a9d8f; font-size: 36px; margin-bottom: 20px;">RECEIPT</h1>
+                    </div>
+                    
+                    <!-- Company Info -->
                     <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
                         <div>
                             <h3 style="color: #2a9d8f;">${data.myCompany || 'Your Company'}</h3>
@@ -1511,23 +1614,28 @@
                             <p>${data.myEmail || ''}</p>
                         </div>
                         <div style="text-align: right;">
-                            <p><strong>Receipt #:</strong> ${data.documentNumber}</p>
-                            <p><strong>Date:</strong> ${new Date(data.issueDate).toLocaleDateString()}</p>
-                            <p><strong>Payment Method:</strong> ${data.paymentMethod}</p>
+                            <p><strong>Receipt #:</strong> ${data.documentNumber || 'REC-001'}</p>
+                            <p><strong>Date:</strong> ${new Date(data.issueDate).toLocaleDateString() || new Date().toLocaleDateString()}</p>
+                            <p><strong>Payment Method:</strong> ${data.paymentMethod || 'Cash'}</p>
                             ${data.transactionId ? `<p><strong>Transaction ID:</strong> ${data.transactionId}</p>` : ''}
                         </div>
                     </div>
                     
+                    <!-- Received From -->
                     <div style="margin-bottom: 40px;">
                         <h3 style="color: #2a9d8f; margin-bottom: 10px;">Received From:</h3>
                         <p><strong>${data.clientName || 'Client Name'}</strong></p>
                         <p>${data.clientAddress || ''}</p>
+                        <p>${data.clientPhone || ''}</p>
+                        <p>${data.clientEmail || ''}</p>
                     </div>
                     
-                    <div style="text-align: center; margin: 40px 0; font-size: 24px; color: #2a9d8f;">
-                        <p>Amount Received: <strong>₹${data.grandTotal}</strong></p>
+                    <!-- Amount -->
+                    <div style="text-align: center; margin: 40px 0; font-size: 24px; color: #2a9d8f; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <p>Amount Received: <strong style="font-size: 32px;">₹${data.grandTotal || '0.00'}</strong></p>
                     </div>
                     
+                    <!-- Footer -->
                     <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #f0f0f0; text-align: center;">
                         <p>This receipt acknowledges payment received in full.</p>
                     </div>
@@ -1538,14 +1646,16 @@
         function generateVoucherPreview(data) {
             return `
                 <div style="max-width: 800px; margin: 0 auto; padding: 40px; background: white; font-family: Arial, sans-serif; text-align: center;">
+                    <!-- Voucher Header -->
                     <div style="background: linear-gradient(135deg, #f72585, #7209b7); color: white; padding: 40px; border-radius: 10px; margin-bottom: 40px;">
                         <h1 style="font-size: 36px; margin-bottom: 10px;">GIFT VOUCHER</h1>
-                        <div style="font-size: 48px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+                        <div style="font-size: 48px; font-weight: bold; letter-spacing: 5px; margin: 20px 0; background: white; color: #f72585; padding: 10px; border-radius: 5px;">
                             ${data.voucherCode || 'VOUCHER-CODE'}
                         </div>
-                        <p style="font-size: 24px;">Value: ₹${data.voucherAmount || data.grandTotal}</p>
+                        <p style="font-size: 24px;">Value: ₹${data.voucherAmount || data.grandTotal || '0.00'}</p>
                     </div>
                     
+                    <!-- Company Info -->
                     <div style="margin-bottom: 40px;">
                         <h2 style="color: #f72585;">${data.myCompany || 'Your Company'}</h2>
                         <p>${data.myName || ''}</p>
@@ -1553,18 +1663,22 @@
                         <p>${data.myEmail || ''}</p>
                     </div>
                     
+                    <!-- Issued To -->
                     <div style="margin-bottom: 40px;">
                         <h3 style="color: #f72585;">Issued To:</h3>
                         <p><strong>${data.clientName || 'Recipient Name'}</strong></p>
                         <p>${data.clientEmail || ''}</p>
+                        <p>${data.clientPhone || ''}</p>
                     </div>
                     
+                    <!-- Terms -->
                     <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 40px; text-align: left;">
                         <h4 style="color: #f72585;">Terms & Conditions:</h4>
                         <p>${data.voucherTerms || 'This voucher is non-transferable and cannot be exchanged for cash. Valid for one-time use only.'}</p>
-                        <p><strong>Valid Until:</strong> ${new Date(data.expiryDate).toLocaleDateString()}</p>
+                        <p><strong>Valid Until:</strong> ${data.expiryDate ? new Date(data.expiryDate).toLocaleDateString() : 'N/A'}</p>
                     </div>
                     
+                    <!-- Footer -->
                     <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #f0f0f0;">
                         <p>Thank you for choosing us!</p>
                     </div>
@@ -1579,39 +1693,87 @@
                 return;
             }
             
+            // Basic validation
+            if (!document.getElementById('clientName').value) {
+                showNotification('Please enter client name', 'error');
+                return;
+            }
+            
+            if (!document.getElementById('documentNumber').value) {
+                showNotification('Please enter document number', 'error');
+                return;
+            }
+            
             showLoading();
             
             const data = collectFormData();
-            const items = [];
             
-            itemsTable.querySelectorAll('tr').forEach(row => {
-                items.push({
-                    description: row.querySelector('.item-desc').value,
-                    quantity: parseFloat(row.querySelector('.item-qty').value) || 0,
-                    price: parseFloat(row.querySelector('.item-price').value) || 0,
-                    tax: parseFloat(row.querySelector('.item-tax').value) || 0,
-                    total: row.querySelector('.item-total').textContent
-                });
-            });
-            
+            // Prepare document data for Firebase
             const documentData = {
-                ...data,
-                items: items,
+                // User information
+                userId: currentUser.uid,
+                userName: currentUser.displayName || currentUser.email,
+                
+                // Document type
                 docType: currentDocType,
+                
+                // My details
+                myName: data.myName,
+                myCompany: data.myCompany,
+                myEmail: data.myEmail,
+                myPhone: data.myPhone,
+                
+                // Client details
+                clientName: data.clientName,
+                clientEmail: data.clientEmail,
+                clientPhone: data.clientPhone,
+                clientAddress: data.clientAddress,
+                
+                // Document details
+                documentNumber: data.documentNumber,
+                issueDate: data.issueDate,
+                dueDate: data.dueDate,
+                expiryDate: data.expiryDate,
+                
+                // Specific fields
+                voucherCode: data.voucherCode,
+                voucherAmount: data.voucherAmount,
+                voucherTerms: data.voucherTerms,
+                paymentMethod: data.paymentMethod,
+                transactionId: data.transactionId,
+                
+                // Bank details
+                bankName: data.bankName,
+                accountNumber: data.accountNumber,
+                ifscCode: data.ifscCode,
+                accountHolder: data.accountHolder,
+                upiId: data.upiId,
+                
+                // Items
+                items: data.items,
+                
+                // Calculated values
                 subtotal: parseFloat(data.subtotal) || 0,
                 grandTotal: parseFloat(data.grandTotal) || 0,
+                
+                // Timestamps
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                userId: currentUser.uid
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
+            console.log('Saving document:', documentData);
+            
+            // Save to Firestore
             db.collection('documents').add(documentData)
-                .then(() => {
+                .then((docRef) => {
+                    console.log('Document saved with ID:', docRef.id);
                     showNotification('Document saved successfully!');
                     loadDashboardData();
                     switchPage('dashboard');
                     hideLoading();
                 })
                 .catch((error) => {
+                    console.error('Error saving document:', error);
                     showNotification('Error saving document: ' + error.message, 'error');
                     hideLoading();
                 });
@@ -1624,27 +1786,37 @@
             
             const preview = document.getElementById('documentPreview');
             
-            html2canvas(preview, { scale: 2 }).then(canvas => {
+            html2canvas(preview, { 
+                scale: 2,
+                useCORS: true,
+                logging: false
+            }).then(canvas => {
                 const imgData = canvas.toDataURL('image/png');
                 const imgWidth = 210; // A4 width in mm
-                const pageHeight = 297; // A4 height in mm
                 const imgHeight = (canvas.height * imgWidth) / canvas.width;
                 
+                // Add image to PDF
                 doc.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-                doc.save(`${currentDocType}-${document.getElementById('documentNumber').value || 'document'}.pdf`);
+                
+                // Save the PDF
+                const docNumber = document.getElementById('documentNumber').value || 'document';
+                doc.save(`${currentDocType}-${docNumber}.pdf`);
+            }).catch(error => {
+                console.error('PDF generation error:', error);
+                showNotification('Error generating PDF', 'error');
             });
         }
 
         // Reset Form
         function resetForm() {
             if (confirm('Are you sure you want to reset the form? All unsaved data will be lost.')) {
+                // Clear form fields
                 document.getElementById('clientName').value = '';
                 document.getElementById('clientEmail').value = '';
                 document.getElementById('clientPhone').value = '';
                 document.getElementById('clientAddress').value = '';
-                document.getElementById('documentNumber').value = currentDocType === 'invoice' ? 'INV-001' : 
-                                                                 currentDocType === 'receipt' ? 'REC-001' : 'VOU-001';
                 
+                // Reset items
                 itemsTable.innerHTML = `
                     <tr>
                         <td><input type="text" class="item-input item-desc" placeholder="Item description"></td>
@@ -1666,7 +1838,13 @@
                     </tr>
                 `;
                 
-                updateItemCalculations();
+                // Reinitialize the first row
+                initItemRow(itemsTable.querySelector('tr'));
+                
+                // Update calculations
+                updateCalculations();
+                
+                // Update preview
                 updatePreview();
                 
                 showNotification('Form reset successfully');
@@ -1679,7 +1857,7 @@
             
             showLoading();
             
-            // Load statistics
+            // Load statistics from Firestore
             db.collection('documents')
                 .where('userId', '==', currentUser.uid)
                 .get()
@@ -1700,7 +1878,7 @@
                         recentDocs.push({ id: doc.id, ...data });
                     });
                     
-                    // Update statistics
+                    // Update statistics display
                     invoiceCount.textContent = invoices;
                     receiptCount.textContent = receipts;
                     voucherCount.textContent = vouchers;
@@ -1723,10 +1901,12 @@
         function updateChart(invoices, receipts, vouchers) {
             const ctx = document.getElementById('documentsChart').getContext('2d');
             
+            // Destroy existing chart if it exists
             if (chart) {
                 chart.destroy();
             }
             
+            // Create new chart
             chart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -1752,6 +1932,13 @@
                     plugins: {
                         legend: {
                             display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y;
+                                }
+                            }
                         }
                     },
                     scales: {
@@ -1793,7 +1980,7 @@
                     <div class="doc-badge ${badgeClass}">${doc.docType.toUpperCase()}</div>
                     <h3>${doc.documentNumber || 'Untitled'}</h3>
                     <p><i class="fas fa-user"></i> ${doc.clientName || 'No client'}</p>
-                    <p><i class="fas fa-calendar"></i> ${new Date(doc.issueDate).toLocaleDateString()}</p>
+                    <p><i class="fas fa-calendar"></i> ${doc.issueDate ? new Date(doc.issueDate).toLocaleDateString() : 'No date'}</p>
                     <p><i class="fas fa-money-bill-wave"></i> ₹${doc.grandTotal ? doc.grandTotal.toFixed(2) : '0.00'}</p>
                     <div style="display: flex; gap: 10px; margin-top: 15px;">
                         <button class="btn btn-primary" onclick="loadDocument('${doc.id}')" style="padding: 5px 15px; font-size: 12px;">
@@ -1843,7 +2030,7 @@
                             <div class="doc-badge ${badgeClass}">${data.docType.toUpperCase()}</div>
                             <h3>${data.documentNumber || 'Untitled'}</h3>
                             <p><i class="fas fa-user"></i> ${data.clientName || 'No client'}</p>
-                            <p><i class="fas fa-calendar"></i> ${new Date(data.issueDate).toLocaleDateString()}</p>
+                            <p><i class="fas fa-calendar"></i> ${data.issueDate ? new Date(data.issueDate).toLocaleDateString() : 'No date'}</p>
                             <p><i class="fas fa-money-bill-wave"></i> ₹${data.grandTotal ? data.grandTotal.toFixed(2) : '0.00'}</p>
                             <div style="display: flex; gap: 10px; margin-top: 15px;">
                                 <button class="btn btn-primary" onclick="loadDocument('${doc.id}')" style="padding: 5px 15px; font-size: 12px;">
@@ -1873,45 +2060,72 @@
                 .then((doc) => {
                     if (doc.exists) {
                         const data = doc.data();
+                        
+                        // Select document type
                         selectDocumentType(data.docType);
                         
-                        // Populate form fields
-                        Object.keys(data).forEach(key => {
-                            const element = document.getElementById(key);
-                            if (element) {
-                                element.value = data[key];
-                            }
-                        });
+                        // Populate my details
+                        document.getElementById('myName').value = data.myName || '';
+                        document.getElementById('myCompany').value = data.myCompany || '';
+                        document.getElementById('myEmail').value = data.myEmail || '';
+                        document.getElementById('myPhone').value = data.myPhone || '';
+                        
+                        // Populate client details
+                        document.getElementById('clientName').value = data.clientName || '';
+                        document.getElementById('clientEmail').value = data.clientEmail || '';
+                        document.getElementById('clientPhone').value = data.clientPhone || '';
+                        document.getElementById('clientAddress').value = data.clientAddress || '';
+                        
+                        // Populate document details
+                        document.getElementById('documentNumber').value = data.documentNumber || '';
+                        document.getElementById('issueDate').value = data.issueDate || '';
+                        document.getElementById('dueDate').value = data.dueDate || '';
+                        document.getElementById('expiryDate').value = data.expiryDate || '';
+                        
+                        // Populate specific fields
+                        document.getElementById('voucherCode').value = data.voucherCode || '';
+                        document.getElementById('voucherAmount').value = data.voucherAmount || '';
+                        document.getElementById('voucherTerms').value = data.voucherTerms || '';
+                        document.getElementById('paymentMethod').value = data.paymentMethod || 'cash';
+                        document.getElementById('transactionId').value = data.transactionId || '';
+                        
+                        // Populate bank details
+                        document.getElementById('bankName').value = data.bankName || '';
+                        document.getElementById('accountNumber').value = data.accountNumber || '';
+                        document.getElementById('ifscCode').value = data.ifscCode || '';
+                        document.getElementById('accountHolder').value = data.accountHolder || '';
+                        document.getElementById('upiId').value = data.upiId || '';
+                        
+                        // Clear existing items
+                        itemsTable.innerHTML = '';
                         
                         // Populate items
                         if (data.items && data.items.length > 0) {
-                            itemsTable.innerHTML = '';
                             data.items.forEach(item => {
-                                const row = document.createElement('tr');
-                                row.innerHTML = `
-                                    <td><input type="text" class="item-input item-desc" value="${item.description}"></td>
-                                    <td><input type="number" class="item-input item-qty" value="${item.quantity}"></td>
-                                    <td><input type="number" class="item-input item-price" value="${item.price}"></td>
-                                    <td>
-                                        <select class="item-input item-tax">
-                                            <option value="0" ${item.tax == 0 ? 'selected' : ''}>0%</option>
-                                            <option value="5" ${item.tax == 5 ? 'selected' : ''}>5%</option>
-                                            <option value="10" ${item.tax == 10 ? 'selected' : ''}>10%</option>
-                                            <option value="18" ${item.tax == 18 ? 'selected' : ''}>18%</option>
-                                            <option value="28" ${item.tax == 28 ? 'selected' : ''}>28%</option>
-                                        </select>
-                                    </td>
-                                    <td class="item-total">${item.total}</td>
-                                    <td><button class="btn btn-danger remove-item" style="padding: 5px 10px;" onclick="removeItemRow(this)">
-                                        <i class="fas fa-trash"></i>
-                                    </button></td>
-                                `;
-                                itemsTable.appendChild(row);
+                                addItemRow();
+                                const rows = itemsTable.querySelectorAll('tr');
+                                const lastRow = rows[rows.length - 1];
+                                
+                                lastRow.querySelector('.item-desc').value = item.description || '';
+                                lastRow.querySelector('.item-qty').value = item.quantity || 1;
+                                lastRow.querySelector('.item-price').value = item.price || 0;
+                                lastRow.querySelector('.item-tax').value = item.tax || 0;
+                                
+                                // Update the item total
+                                updateItemTotal(lastRow);
                             });
+                        } else {
+                            // Add one empty row if no items
+                            addItemRow();
                         }
                         
-                        updateItemCalculations();
+                        // Update calculations
+                        updateCalculations();
+                        
+                        // Update preview
                         updatePreview();
+                        
+                        // Switch to create page
                         switchPage('create');
                     }
                     hideLoading();
@@ -1955,7 +2169,7 @@
                 receipt: {
                     documentNumber: 'REC-TEMP',
                     paymentMethod: 'card',
-                    transactionId: 'TXN-' + Date.now()
+                    transactionId: 'TXN-' + Date.now().toString().slice(-6)
                 },
                 voucher: {
                     documentNumber: 'VOU-TEMP',
@@ -1970,7 +2184,10 @@
             // Populate template data
             Object.keys(template).forEach(key => {
                 if (key === 'items') {
+                    // Clear existing items
                     itemsTable.innerHTML = '';
+                    
+                    // Add template items
                     template.items.forEach(item => {
                         addItemRow();
                         const rows = itemsTable.querySelectorAll('tr');
@@ -1979,6 +2196,9 @@
                         lastRow.querySelector('.item-qty').value = item.quantity;
                         lastRow.querySelector('.item-price').value = item.price;
                         lastRow.querySelector('.item-tax').value = item.tax;
+                        
+                        // Update the item total
+                        updateItemTotal(lastRow);
                     });
                 } else {
                     const element = document.getElementById(key);
@@ -1988,9 +2208,15 @@
                 }
             });
             
-            updateItemCalculations();
+            // Update calculations
+            updateCalculations();
+            
+            // Update preview
             updatePreview();
+            
+            // Switch to create page
             switchPage('create');
+            
             showNotification('Template loaded successfully');
         }
 
