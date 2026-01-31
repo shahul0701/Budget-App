@@ -20,1065 +20,6 @@
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-    // Firebase configuration
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-      authDomain: "budget-app-1365f.firebaseapp.com",
-      projectId: "budget-app-1365f",
-      storageBucket: "budget-app-1365f.appspot.com",
-      messagingSenderId: "1036194450411",
-      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-      measurementId: "G-YFFJL2H54X"
-    };
-
-    // Initialize Firebase
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    // Global variables
-    let allTransactions = [];
-    let allBudgets = [];
-    let allAccounts = [];
-    let forecasts = {};
-    let userUID = null;
-    
-    // Chart instances
-    let budgetVsActualChart = null;
-    let spendingByCategoryChart = null;
-    let forecastChart = null;
-
-    // DOM elements
-    const logoutBtn = document.getElementById("logoutBtn");
-    const userDisplay = document.getElementById("userDisplay");
-    const loadingStatus = document.getElementById("loadingStatus");
-
-    // Initialize on page load
-    document.addEventListener('DOMContentLoaded', () => {
-      // Initialize date range picker
-      $('#dateRange').daterangepicker({
-        opens: 'left',
-        startDate: moment().startOf('month'),
-        endDate: moment().endOf('month'),
-        ranges: {
-          'Today': [moment(), moment()],
-          'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-          'Last 7 Days': [moment().subtract(6, 'days'), moment()],
-          'Last 30 Days': [moment().subtract(29, 'days'), moment()],
-          'This Month': [moment().startOf('month'), moment().endOf('month')],
-          'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
-          'This Quarter': [moment().startOf('quarter'), moment().endOf('quarter')],
-          'This Year': [moment().startOf('year'), moment().endOf('year')]
-        }
-      });
-
-      // Set default budget period to current month
-      const currentMonth = moment().format('YYYY-MM');
-      document.getElementById('budgetPeriod').value = currentMonth;
-      
-      // Generate forecast for next 12 months by default
-      generateForecast();
-    });
-
-    // Authentication
-    logoutBtn.addEventListener("click", async () => {
-      await signOut(auth);
-      window.location.href = "login.html";
-    });
-
-    // Main initialization
-    onAuthStateChanged(auth, async user => {
-      if (!user) {
-        window.location.href = "login.html";
-        return;
-      }
-      
-      userUID = user.uid;
-      userDisplay.textContent = user.displayName || user.email || "User";
-      loadingStatus.textContent = "Loading Budget Data...";
-
-      try {
-        // Load all transactions
-        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-        allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Load budgets
-        await loadBudgets(user.uid);
-        
-        // Extract unique accounts
-        allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
-        
-        // Initialize dashboard
-        initializeDashboard();
-        
-        loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
-      } catch (error) {
-        loadingStatus.textContent = `Error loading data: ${error.message}`;
-        console.error("Error:", error);
-      }
-    });
-
-    // Load budgets from Firestore
-    async function loadBudgets(uid) {
-      try {
-        const budgetsSnap = await getDocs(collection(db, "users", uid, "budgets"));
-        allBudgets = budgetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`Loaded ${allBudgets.length} budgets`);
-      } catch (error) {
-        console.error("Error loading budgets:", error);
-        allBudgets = [];
-      }
-    }
-
-    // Save budget to Firestore
-    async function saveBudget(budgetData) {
-      try {
-        const budgetId = budgetData.id || `budget_${Date.now()}`;
-        const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
-        await setDoc(budgetRef, { 
-          ...budgetData, 
-          id: budgetId, 
-          userId: userUID,
-          lastUpdated: new Date().toISOString() 
-        });
-        
-        // Reload budgets
-        await loadBudgets(userUID);
-        return true;
-      } catch (error) {
-        console.error("Error saving budget:", error);
-        return false;
-      }
-    }
-
-    // Delete budget
-    async function deleteBudget(budgetId) {
-      try {
-        const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
-        await deleteDoc(budgetRef);
-        await loadBudgets(userUID);
-        return true;
-      } catch (error) {
-        console.error("Error deleting budget:", error);
-        return false;
-      }
-    }
-
-    // Initialize dashboard
-    function initializeDashboard() {
-      updateDashboard();
-      populateAccountDropdowns();
-      renderBudgetTable();
-      updateForecastChart();
-      updateVarianceAnalysis();
-      updateInvestmentSummary();
-    }
-
-    // Update dashboard with current data
-    function updateDashboard() {
-      // Get current date range
-      const dateRange = document.getElementById('dateRange').value;
-      const [startDate, endDate] = dateRange.split(' - ').map(d => moment(d, 'MM/DD/YYYY'));
-      
-      // Filter transactions
-      const filteredTx = allTransactions.filter(tx => {
-        if (!tx.DATE) return false;
-        const txDate = moment(tx.DATE);
-        return txDate.isBetween(startDate, endDate, null, '[]');
-      });
-      
-      // Calculate summary
-      const summary = calculateFinancialSummary(filteredTx);
-      
-      // Update stats
-      updateDashboardStats(summary);
-      
-      // Update charts
-      updateBudgetVsActualChart(summary);
-      updateSpendingByCategoryChart(filteredTx);
-      
-      // Update budget progress
-      updateBudgetProgress();
-    }
-
-    // Calculate financial summary
-    function calculateFinancialSummary(transactions) {
-      const summary = {
-        income: 0,
-        expense: 0,
-        net: 0,
-        byAccount: {},
-        byCategory: {}
-      };
-      
-      transactions.forEach(tx => {
-        const account = tx.ACCOUNT_HEADER || "Uncategorized";
-        const amount = Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0);
-        
-        // Update account summary
-        if (!summary.byAccount[account]) {
-          summary.byAccount[account] = { income: 0, expense: 0, net: 0 };
-        }
-        
-        summary.byAccount[account].income += Number(tx.INCOME || 0);
-        summary.byAccount[account].expense += Number(tx.EXPENSE || 0);
-        summary.byAccount[account].net += amount;
-        
-        // Update totals
-        summary.income += Number(tx.INCOME || 0);
-        summary.expense += Number(tx.EXPENSE || 0);
-        summary.net += amount;
-      });
-      
-      return summary;
-    }
-
-    // Update dashboard statistics
-    function updateDashboardStats(summary) {
-      document.getElementById('totalIncome').textContent = formatCurrency(summary.income);
-      document.getElementById('totalExpense').textContent = formatCurrency(summary.expense);
-      document.getElementById('netBalance').textContent = formatCurrency(summary.net);
-      
-      const savingsRate = summary.income > 0 ? ((summary.net / summary.income) * 100).toFixed(1) : 0;
-      document.getElementById('savingsRate').textContent = savingsRate + '%';
-      
-      // Update color for net balance
-      const netElem = document.getElementById('netBalance');
-      netElem.className = summary.net >= 0 ? 'stat-value income' : 'stat-value expense';
-    }
-
-    // Update Budget vs Actual chart - FIXED DESTROY METHOD
-    function updateBudgetVsActualChart(summary) {
-      const ctx = document.getElementById('budgetVsActualChart').getContext('2d');
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      
-      // Get budgets for current period
-      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
-      const totalBudgetedIncome = periodBudgets
-        .filter(b => b.type === 'Income')
-        .reduce((sum, b) => sum + Number(b.amount || 0), 0);
-      
-      const totalBudgetedExpense = periodBudgets
-        .filter(b => b.type === 'Expense')
-        .reduce((sum, b) => sum + Number(b.amount || 0), 0);
-      
-      // Destroy existing chart if it exists
-      if (budgetVsActualChart) {
-        try {
-          budgetVsActualChart.destroy();
-        } catch (e) {
-          console.log("Error destroying chart:", e);
-        }
-      }
-      
-      budgetVsActualChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Income', 'Expenses'],
-          datasets: [
-            {
-              label: 'Budgeted',
-              data: [totalBudgetedIncome, totalBudgetedExpense],
-              backgroundColor: 'rgba(99, 102, 241, 0.7)',
-              borderColor: 'rgba(99, 102, 241, 1)',
-              borderWidth: 1,
-              borderRadius: 6
-            },
-            {
-              label: 'Actual',
-              data: [summary.income, summary.expense],
-              backgroundColor: 'rgba(16, 185, 129, 0.7)',
-              borderColor: 'rgba(16, 185, 129, 1)',
-              borderWidth: 1,
-              borderRadius: 6
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true,
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)'
-              },
-              title: {
-                display: true,
-                text: 'Amount ($)'
-              }
-            },
-            x: {
-              grid: {
-                display: false
-              }
-            }
-          },
-          plugins: {
-            legend: {
-              position: 'top',
-              labels: {
-                padding: 15,
-                usePointStyle: true,
-                pointStyle: 'circle'
-              }
-            },
-            title: {
-              display: false
-            }
-          }
-        }
-      });
-    }
-
-    // Update spending by category chart - FIXED DESTROY METHOD
-    function updateSpendingByCategoryChart(transactions) {
-      const ctx = document.getElementById('spendingByCategoryChart').getContext('2d');
-      
-      // Group by category/account
-      const categoryData = {};
-      transactions.forEach(tx => {
-        if (tx.EXPENSE > 0) {
-          const category = tx.ACCOUNT_HEADER || 'Uncategorized';
-          categoryData[category] = (categoryData[category] || 0) + Number(tx.EXPENSE);
-        }
-      });
-      
-      // Sort by amount and take top 8
-      const sortedCategories = Object.entries(categoryData)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8);
-      
-      const labels = sortedCategories.map(([category]) => category);
-      const data = sortedCategories.map(([_, amount]) => amount);
-      
-      // Generate colors
-      const colors = [
-        'rgba(239, 68, 68, 0.8)',    // Red
-        'rgba(245, 158, 11, 0.8)',   // Amber
-        'rgba(16, 185, 129, 0.8)',   // Emerald
-        'rgba(59, 130, 246, 0.8)',   // Blue
-        'rgba(139, 92, 246, 0.8)',   // Violet
-        'rgba(236, 72, 153, 0.8)',   // Pink
-        'rgba(249, 115, 22, 0.8)',   // Orange
-        'rgba(6, 182, 212, 0.8)'     // Cyan
-      ];
-      
-      // Destroy existing chart if it exists
-      if (spendingByCategoryChart) {
-        try {
-          spendingByCategoryChart.destroy();
-        } catch (e) {
-          console.log("Error destroying chart:", e);
-        }
-      }
-      
-      spendingByCategoryChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: labels,
-          datasets: [{
-            data: data,
-            backgroundColor: colors,
-            borderWidth: 1,
-            borderColor: 'rgba(255, 255, 255, 0.2)'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'right',
-              labels: {
-                padding: 15,
-                usePointStyle: true,
-                pointStyle: 'circle',
-                font: {
-                  size: 11
-                }
-              }
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  let label = context.label || '';
-                  if (label) {
-                    label += ': ';
-                  }
-                  label += formatCurrency(context.parsed);
-                  return label;
-                }
-              }
-            }
-          },
-          cutout: '70%'
-        }
-      });
-    }
-
-    // Populate account dropdowns
-    function populateAccountDropdowns() {
-      const accountSelects = document.querySelectorAll('.account-select');
-      accountSelects.forEach(select => {
-        // Clear existing options except the first
-        while (select.options.length > 1) {
-          select.remove(1);
-        }
-        
-        // Add account options
-        allAccounts.forEach(account => {
-          const option = document.createElement('option');
-          option.value = account;
-          option.textContent = account;
-          select.appendChild(option);
-        });
-      });
-    }
-
-    // Render budget table
-    function renderBudgetTable() {
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
-      const tbody = document.getElementById('budgetTableBody');
-      
-      if (periodBudgets.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center no-data">No budgets set for ${budgetPeriod}</td></tr>`;
-        return;
-      }
-      
-      let html = '';
-      periodBudgets.forEach((budget, index) => {
-        // Calculate actual spending for this budget
-        const actual = calculateActualForBudget(budget);
-        const variance = budget.amount - actual;
-        const variancePercent = budget.amount > 0 ? (variance / budget.amount * 100).toFixed(1) : 0;
-        
-        // Determine variance class
-        let varianceClass = '';
-        let varianceIcon = '';
-        if (variance > 0) {
-          varianceClass = 'variance-positive';
-          varianceIcon = '<i class="fas fa-arrow-down text-success"></i>';
-        } else if (variance < 0) {
-          varianceClass = 'variance-negative';
-          varianceIcon = '<i class="fas fa-arrow-up text-danger"></i>';
-        } else {
-          varianceClass = 'variance-neutral';
-          varianceIcon = '<i class="fas fa-equals text-muted"></i>';
-        }
-        
-        // Determine budget type color
-        const typeClass = budget.type === 'Income' ? 'type-income' : 
-                         budget.type === 'Expense' ? 'type-expense' :
-                         budget.type === 'Investment' ? 'type-investment' : 'type-savings';
-        
-        html += `
-          <tr>
-            <td class="text-center">${index + 1}</td>
-            <td>
-              <div class="account-name">
-                <span class="account-icon ${typeClass}">
-                  <i class="fas ${getBudgetTypeIcon(budget.type)}"></i>
-                </span>
-                ${budget.account}
-              </div>
-            </td>
-            <td><span class="budget-type ${typeClass}">${budget.type}</span></td>
-            <td><span class="frequency-badge">${budget.frequency}</span></td>
-            <td class="text-right amount">${formatCurrency(budget.amount)}</td>
-            <td class="text-right amount">${formatCurrency(actual)}</td>
-            <td class="text-right ${varianceClass}">
-              ${varianceIcon} ${formatCurrency(Math.abs(variance))} (${Math.abs(variancePercent)}%)
-            </td>
-            <td class="actions">
-              <button class="btn-icon edit-budget" data-id="${budget.id}" title="Edit Budget">
-                <i class="fas fa-edit"></i>
-              </button>
-              <button class="btn-icon delete-budget" data-id="${budget.id}" title="Delete Budget">
-                <i class="fas fa-trash"></i>
-              </button>
-            </td>
-          </tr>
-        `;
-      });
-      
-      tbody.innerHTML = html;
-      
-      // Add event listeners for edit/delete buttons
-      document.querySelectorAll('.edit-budget').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const budgetId = e.currentTarget.getAttribute('data-id');
-          editBudget(budgetId);
-        });
-      });
-      
-      document.querySelectorAll('.delete-budget').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          const budgetId = e.currentTarget.getAttribute('data-id');
-          if (confirm('Are you sure you want to delete this budget?')) {
-            await deleteBudget(budgetId);
-            renderBudgetTable();
-            updateDashboard();
-          }
-        });
-      });
-    }
-
-    // Get icon for budget type
-    function getBudgetTypeIcon(type) {
-      switch(type) {
-        case 'Income': return 'fa-money-bill-wave';
-        case 'Expense': return 'fa-shopping-cart';
-        case 'Investment': return 'fa-chart-line';
-        case 'Savings': return 'fa-piggy-bank';
-        default: return 'fa-dollar-sign';
-      }
-    }
-
-    // Calculate actual spending for a budget
-    function calculateActualForBudget(budget) {
-      const budgetPeriod = budget.period;
-      const [year, month] = budgetPeriod.split('-').map(Number);
-      
-      // Filter transactions for this budget period and account
-      const filteredTx = allTransactions.filter(tx => {
-        if (!tx.DATE) return false;
-        const txDate = new Date(tx.DATE);
-        return txDate.getFullYear() === year && 
-               txDate.getMonth() + 1 === month &&
-               tx.ACCOUNT_HEADER === budget.account;
-      });
-      
-      // Calculate total based on budget type
-      if (budget.type === 'Income') {
-        return filteredTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
-      } else {
-        return filteredTx.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
-      }
-    }
-
-    // Update budget progress
-    function updateBudgetProgress() {
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
-      
-      let totalBudgeted = 0;
-      let totalActual = 0;
-      
-      periodBudgets.forEach(budget => {
-        totalBudgeted += Number(budget.amount || 0);
-        totalActual += calculateActualForBudget(budget);
-      });
-      
-      const progressPercent = totalBudgeted > 0 ? Math.min(100, (totalActual / totalBudgeted) * 100) : 0;
-      const progressBar = document.getElementById('budgetProgressBar');
-      progressBar.style.width = `${progressPercent}%`;
-      progressBar.textContent = `${progressPercent.toFixed(1)}%`;
-      
-      // Update progress bar color based on percentage
-      if (progressPercent > 90) {
-        progressBar.className = 'progress-bar danger';
-      } else if (progressPercent > 75) {
-        progressBar.className = 'progress-bar warning';
-      } else {
-        progressBar.className = 'progress-bar success';
-      }
-      
-      document.getElementById('budgetProgressText').textContent = 
-        `${formatCurrency(totalActual)} of ${formatCurrency(totalBudgeted)}`;
-    }
-
-    // Generate forecast
-    function generateForecast() {
-      const forecastType = document.getElementById('forecastType').value;
-      const forecastPeriods = parseInt(document.getElementById('forecastPeriods').value);
-      const forecastMethod = document.getElementById('forecastMethod').value;
-      
-      // Calculate forecast based on historical data
-      forecasts = calculateForecast(forecastType, forecastPeriods, forecastMethod);
-      
-      // Update forecast chart
-      updateForecastChart();
-    }
-
-    // Calculate forecast
-    function calculateForecast(type, periods, method) {
-      const forecastData = {
-        labels: [],
-        data: []
-      };
-      
-      // Get historical data based on type
-      const historicalData = getHistoricalData(type);
-      
-      // Generate forecast labels
-      const startDate = moment();
-      for (let i = 0; i < periods; i++) {
-        let label;
-        if (type === 'monthly') {
-          label = startDate.clone().add(i, 'months').format('MMM YYYY');
-        } else if (type === 'weekly') {
-          label = `W${i + 1}`;
-        } else if (type === 'quarterly') {
-          label = `Q${Math.floor(i / 3) + 1} ${startDate.clone().add(i * 3, 'months').format('YY')}`;
-        } else {
-          label = `${startDate.clone().add(i, 'years').format('YYYY')}`;
-        }
-        forecastData.labels.push(label);
-      }
-      
-      // Simple forecasting methods
-      if (method === 'average') {
-        const avg = historicalData.length > 0 ? 
-          historicalData.reduce((a, b) => a + b, 0) / historicalData.length : 0;
-        forecastData.data = Array(periods).fill(avg);
-      } else if (method === 'trend') {
-        // Simple linear trend
-        if (historicalData.length > 1) {
-          const lastValue = historicalData[historicalData.length - 1];
-          const growthRate = 0.03; // 3% growth assumption
-          forecastData.data = Array(periods).fill(0).map((_, i) => 
-            lastValue * Math.pow(1 + growthRate, i + 1)
-          );
-        } else {
-          forecastData.data = Array(periods).fill(0);
-        }
-      } else if (method === 'last') {
-        const lastValue = historicalData.length > 0 ? historicalData[historicalData.length - 1] : 0;
-        forecastData.data = Array(periods).fill(lastValue);
-      }
-      
-      return forecastData;
-    }
-
-    // Get historical data for forecasting
-    function getHistoricalData(type) {
-      const data = [];
-      const now = moment();
-      
-      // Get last 12 periods of data
-      for (let i = 11; i >= 0; i--) {
-        let periodStart, periodEnd;
-        
-        if (type === 'monthly') {
-          periodStart = now.clone().subtract(i, 'months').startOf('month');
-          periodEnd = now.clone().subtract(i, 'months').endOf('month');
-        } else if (type === 'weekly') {
-          periodStart = now.clone().subtract(i, 'weeks').startOf('week');
-          periodEnd = now.clone().subtract(i, 'weeks').endOf('week');
-        } else if (type === 'quarterly') {
-          periodStart = now.clone().subtract(i * 3, 'months').startOf('quarter');
-          periodEnd = now.clone().subtract(i * 3, 'months').endOf('quarter');
-        } else {
-          periodStart = now.clone().subtract(i, 'years').startOf('year');
-          periodEnd = now.clone().subtract(i, 'years').endOf('year');
-        }
-        
-        // Calculate total for period
-        const periodTotal = allTransactions
-          .filter(tx => {
-            if (!tx.DATE) return false;
-            const txDate = moment(tx.DATE);
-            return txDate.isBetween(periodStart, periodEnd, null, '[]');
-          })
-          .reduce((sum, tx) => sum + Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0), 0);
-        
-        data.push(periodTotal);
-      }
-      
-      return data;
-    }
-
-    // Update forecast chart - FIXED DESTROY METHOD
-    function updateForecastChart() {
-      const ctx = document.getElementById('forecastChart').getContext('2d');
-      
-      // Destroy existing chart if it exists
-      if (forecastChart) {
-        try {
-          forecastChart.destroy();
-        } catch (e) {
-          console.log("Error destroying chart:", e);
-        }
-      }
-      
-      forecastChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: forecasts.labels || [],
-          datasets: [{
-            label: 'Forecasted Net Balance',
-            data: forecasts.data || [],
-            borderColor: 'rgba(139, 92, 246, 1)',
-            backgroundColor: 'rgba(139, 92, 246, 0.1)',
-            tension: 0.3,
-            fill: true,
-            pointBackgroundColor: 'rgba(139, 92, 246, 1)',
-            pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            pointRadius: 4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'top',
-              labels: {
-                padding: 15,
-                usePointStyle: true,
-                pointStyle: 'circle'
-              }
-            },
-            title: {
-              display: false
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: false,
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)'
-              },
-              title: {
-                display: true,
-                text: 'Amount ($)'
-              }
-            },
-            x: {
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)'
-              }
-            }
-          }
-        }
-      });
-    }
-
-    // Update variance analysis
-    function updateVarianceAnalysis() {
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
-      
-      let totalVariance = 0;
-      let overBudgetCount = 0;
-      let underBudgetCount = 0;
-      
-      periodBudgets.forEach(budget => {
-        const actual = calculateActualForBudget(budget);
-        const variance = budget.amount - actual;
-        
-        if (variance < 0) {
-          overBudgetCount++;
-        } else if (variance > 0) {
-          underBudgetCount++;
-        }
-        
-        totalVariance += variance;
-      });
-      
-      document.getElementById('varianceTotal').textContent = formatCurrency(totalVariance);
-      document.getElementById('overBudgetCount').textContent = overBudgetCount;
-      document.getElementById('underBudgetCount').textContent = underBudgetCount;
-      document.getElementById('onBudgetCount').textContent = periodBudgets.length - overBudgetCount - underBudgetCount;
-      
-      // Update color for total variance
-      const varianceElem = document.getElementById('varianceTotal');
-      if (totalVariance >= 0) {
-        varianceElem.className = 'variance-value positive';
-      } else {
-        varianceElem.className = 'variance-value negative';
-      }
-    }
-
-    // Update investment summary
-    function updateInvestmentSummary() {
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      
-      // Calculate investment budgets
-      const investmentBudgets = allBudgets.filter(b => 
-        b.type === 'Investment' && b.period === budgetPeriod
-      );
-      
-      const totalInvestmentBudget = investmentBudgets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
-      
-      // Calculate actual investments
-      const [year, month] = budgetPeriod.split('-').map(Number);
-      const investmentTransactions = allTransactions.filter(tx => {
-        if (!tx.DATE) return false;
-        const txDate = new Date(tx.DATE);
-        return txDate.getFullYear() === year && 
-               txDate.getMonth() + 1 === month &&
-               (tx.ACCOUNT_HEADER || '').toLowerCase().includes('investment');
-      });
-      
-      const actualInvestment = investmentTransactions.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
-      
-      // Calculate growth (simplified)
-      const growthRate = 0.07; // 7% annual return
-      const futureValue = actualInvestment * Math.pow(1 + growthRate/12, 60); // 5 years
-      
-      document.getElementById('totalInvestments').textContent = formatCurrency(actualInvestment * 12); // Annualized
-      document.getElementById('monthlyInvestment').textContent = formatCurrency(totalInvestmentBudget);
-      document.getElementById('investmentGrowth').textContent = (growthRate * 100).toFixed(1) + '%';
-      document.getElementById('futureValue').textContent = formatCurrency(futureValue);
-    }
-
-    // Add new budget
-    async function addNewBudget() {
-      const account = document.getElementById('newBudgetAccount').value;
-      const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
-      const frequency = document.getElementById('newBudgetFrequency').value;
-      const period = document.getElementById('budgetPeriod').value;
-      
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      const budgetData = {
-        account,
-        type,
-        amount,
-        frequency,
-        period,
-        created: new Date().toISOString()
-      };
-      
-      const success = await saveBudget(budgetData);
-      if (success) {
-        // Clear form
-        document.getElementById('newBudgetAmount').value = '';
-        
-        // Update UI
-        renderBudgetTable();
-        updateDashboard();
-        updateVarianceAnalysis();
-        updateInvestmentSummary();
-        
-        showNotification('Budget added successfully!', 'success');
-      } else {
-        showNotification('Error saving budget. Please try again.', 'error');
-      }
-    }
-
-    // Edit budget
-    function editBudget(budgetId) {
-      const budget = allBudgets.find(b => b.id === budgetId);
-      if (!budget) return;
-      
-      // Populate edit form
-      document.getElementById('newBudgetAccount').value = budget.account;
-      document.getElementById('newBudgetType').value = budget.type;
-      document.getElementById('newBudgetAmount').value = budget.amount;
-      document.getElementById('newBudgetFrequency').value = budget.frequency;
-      
-      // Scroll to form
-      document.getElementById('budgetForm').scrollIntoView({ behavior: 'smooth' });
-      
-      // Change button text
-      const addBtn = document.getElementById('addBudgetBtn');
-      addBtn.innerHTML = '<i class="fas fa-save"></i> Update Budget';
-      addBtn.onclick = async () => {
-        await updateExistingBudget(budgetId);
-      };
-      
-      showNotification('Editing budget for ' + budget.account, 'info');
-    }
-
-    // Update existing budget
-    async function updateExistingBudget(budgetId) {
-      const account = document.getElementById('newBudgetAccount').value;
-      const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
-      const frequency = document.getElementById('newBudgetFrequency').value;
-      const period = document.getElementById('budgetPeriod').value;
-      
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      const budgetData = {
-        id: budgetId,
-        account,
-        type,
-        amount,
-        frequency,
-        period,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      const success = await saveBudget(budgetData);
-      if (success) {
-        // Reset form
-        document.getElementById('newBudgetAmount').value = '';
-        document.getElementById('addBudgetBtn').innerHTML = '<i class="fas fa-plus"></i> Add Budget';
-        document.getElementById('addBudgetBtn').onclick = addNewBudget;
-        
-        // Update UI
-        renderBudgetTable();
-        updateDashboard();
-        updateVarianceAnalysis();
-        updateInvestmentSummary();
-        
-        showNotification('Budget updated successfully!', 'success');
-      } else {
-        showNotification('Error updating budget. Please try again.', 'error');
-      }
-    }
-
-    // Export budgets to CSV
-    function exportBudgets() {
-      const budgetPeriod = document.getElementById('budgetPeriod').value;
-      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
-      
-      if (periodBudgets.length === 0) {
-        showNotification('No budgets to export for this period', 'warning');
-        return;
-      }
-      
-      // Create CSV content
-      let csv = 'Account,Type,Frequency,Amount,Period\n';
-      periodBudgets.forEach(budget => {
-        csv += `"${budget.account}",${budget.type},${budget.frequency},${budget.amount},${budget.period}\n`;
-      });
-      
-      // Create download link
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `budgets_${budgetPeriod}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      
-      showNotification('Budgets exported successfully!', 'success');
-    }
-
-    // Import budgets from CSV (simplified)
-    function importBudgets() {
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = '.csv';
-      
-      fileInput.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const csv = event.target.result;
-          const lines = csv.split('\n');
-          const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-          
-          let importedCount = 0;
-          for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-            
-            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-            if (values.length < headers.length) continue;
-            
-            const budgetData = {};
-            headers.forEach((header, index) => {
-              budgetData[header.toLowerCase()] = values[index];
-            });
-            
-            // Convert amount to number
-            budgetData.amount = parseFloat(budgetData.amount) || 0;
-            
-            // Add current period if not specified
-            if (!budgetData.period) {
-              budgetData.period = document.getElementById('budgetPeriod').value;
-            }
-            
-            await saveBudget(budgetData);
-            importedCount++;
-          }
-          
-          // Reload budgets
-          await loadBudgets(userUID);
-          renderBudgetTable();
-          updateDashboard();
-          updateInvestmentSummary();
-          
-          showNotification(`Successfully imported ${importedCount} budgets`, 'success');
-        };
-        
-        reader.readAsText(file);
-      };
-      
-      fileInput.click();
-    }
-
-    // Show notification
-    function showNotification(message, type) {
-      // Remove existing notification
-      const existingNotification = document.querySelector('.notification');
-      if (existingNotification) {
-        existingNotification.remove();
-      }
-      
-      // Create new notification
-      const notification = document.createElement('div');
-      notification.className = `notification ${type}`;
-      notification.innerHTML = `
-        <div class="notification-content">
-          <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
-          <span>${message}</span>
-        </div>
-        <button class="notification-close"><i class="fas fa-times"></i></button>
-      `;
-      
-      document.body.appendChild(notification);
-      
-      // Add close event
-      notification.querySelector('.notification-close').addEventListener('click', () => {
-        notification.remove();
-      });
-      
-      // Auto remove after 5 seconds
-      setTimeout(() => {
-        if (notification.parentNode) {
-          notification.remove();
-        }
-      }, 5000);
-    }
-
-    // Utility function to format currency
-    function formatCurrency(amount) {
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0
-      }).format(amount);
-    }
-
-    // Event Listeners
-    document.getElementById('addBudgetBtn').addEventListener('click', addNewBudget);
-    document.getElementById('exportBudgetsBtn').addEventListener('click', exportBudgets);
-    document.getElementById('importBudgetsBtn').addEventListener('click', importBudgets);
-    document.getElementById('generateForecastBtn').addEventListener('click', generateForecast);
-    document.getElementById('dateRange').addEventListener('change', updateDashboard);
-    document.getElementById('budgetPeriod').addEventListener('change', () => {
-      renderBudgetTable();
-      updateBudgetProgress();
-      updateVarianceAnalysis();
-      updateInvestmentSummary();
-      updateDashboard();
-    });
-
-  </script>
-
   <style>
     * {
       box-sizing: border-box;
@@ -1820,6 +761,110 @@
       box-shadow: var(--card-shadow);
     }
 
+    /* New Features Styles */
+    .view-toggle-container {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .view-toggle-btn {
+      padding: 10px 20px;
+      background: white;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .view-toggle-btn.active {
+      background: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+
+    .view-toggle-btn:hover:not(.active) {
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+
+    .alerts-container {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 30px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .alert-item {
+      padding: 15px;
+      border-left: 4px solid var(--warning-color);
+      background: #fff7ed;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .alert-item.critical {
+      border-left-color: var(--danger-color);
+      background: #fef2f2;
+    }
+
+    .alert-item.info {
+      border-left-color: var(--info-color);
+      background: #eff6ff;
+    }
+
+    .goal-container {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 30px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .goal-progress {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .goal-text {
+      flex: 1;
+    }
+
+    .trend-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .trend-up {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--secondary-color);
+    }
+
+    .trend-down {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger-color);
+    }
+
+    .trend-neutral {
+      background: rgba(107, 114, 128, 0.1);
+      color: var(--gray-color);
+    }
+
     @media (max-width: 768px) {
       .top-bar {
         flex-direction: column;
@@ -1896,6 +941,1573 @@
       background: var(--primary-dark);
     }
   </style>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // Global variables
+    let allTransactions = [];
+    let allBudgets = [];
+    let allAccounts = [];
+    let forecasts = {};
+    let userUID = null;
+    let currentViewMode = 'monthly'; // 'monthly', 'weekly', 'general'
+    
+    // Chart instances
+    let budgetVsActualChart = null;
+    let spendingByCategoryChart = null;
+    let forecastChart = null;
+    let cashFlowChart = null;
+
+    // DOM elements
+    const logoutBtn = document.getElementById("logoutBtn");
+    const userDisplay = document.getElementById("userDisplay");
+    const loadingStatus = document.getElementById("loadingStatus");
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initialize date range picker with fixed ranges
+      $('#dateRange').daterangepicker({
+        opens: 'left',
+        startDate: moment().startOf('month'),
+        endDate: moment().endOf('month'),
+        ranges: {
+          'Today': [moment(), moment()],
+          'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+          'Last 7 Days': [moment().subtract(6, 'days'), moment()],
+          'Last 30 Days': [moment().subtract(29, 'days'), moment()],
+          'This Month': [moment().startOf('month'), moment().endOf('month')],
+          'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
+          'This Quarter': [moment().startOf('quarter'), moment().endOf('quarter')],
+          'This Year': [moment().startOf('year'), moment().endOf('year')],
+          'Last Year': [moment().subtract(1, 'year').startOf('year'), moment().subtract(1, 'year').endOf('year')]
+        }
+      });
+
+      // Set default budget period to current month
+      const currentMonth = moment().format('YYYY-MM');
+      document.getElementById('budgetPeriod').value = currentMonth;
+      
+      // Initialize view mode toggle
+      initializeViewModeToggle();
+      
+      // Generate forecast for next 12 months by default
+      generateForecast();
+      
+      // Initialize cash flow chart
+      initializeCashFlowChart();
+    });
+
+    // Initialize view mode toggle
+    function initializeViewModeToggle() {
+      const monthlyBtn = document.getElementById('viewMonthlyBtn');
+      const weeklyBtn = document.getElementById('viewWeeklyBtn');
+      const generalBtn = document.getElementById('viewGeneralBtn');
+      
+      monthlyBtn.addEventListener('click', () => {
+        setViewMode('monthly');
+      });
+      
+      weeklyBtn.addEventListener('click', () => {
+        setViewMode('weekly');
+      });
+      
+      generalBtn.addEventListener('click', () => {
+        setViewMode('general');
+      });
+      
+      // Set initial active state
+      setViewMode('monthly');
+    }
+
+    // Set view mode and update all components
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      
+      // Update toggle buttons
+      document.getElementById('viewMonthlyBtn').classList.remove('active');
+      document.getElementById('viewWeeklyBtn').classList.remove('active');
+      document.getElementById('viewGeneralBtn').classList.remove('active');
+      document.getElementById(`view${mode.charAt(0).toUpperCase() + mode.slice(1)}Btn`).classList.add('active');
+      
+      // Update date range based on view mode
+      updateDateRangeByViewMode();
+      
+      // Update all charts and data
+      updateDashboard();
+      updateForecastByViewMode();
+      updateCashFlowChart();
+      
+      // Show notification
+      showNotification(`View mode changed to ${mode}`, 'info');
+    }
+
+    // Update date range based on view mode
+    function updateDateRangeByViewMode() {
+      const dateRangePicker = $('#dateRange').data('daterangepicker');
+      
+      switch(currentViewMode) {
+        case 'monthly':
+          dateRangePicker.setStartDate(moment().startOf('month'));
+          dateRangePicker.setEndDate(moment().endOf('month'));
+          break;
+        case 'weekly':
+          dateRangePicker.setStartDate(moment().startOf('week'));
+          dateRangePicker.setEndDate(moment().endOf('week'));
+          break;
+        case 'general':
+          // Show last 30 days for general view
+          dateRangePicker.setStartDate(moment().subtract(29, 'days'));
+          dateRangePicker.setEndDate(moment());
+          break;
+      }
+      
+      // Trigger change event
+      $('#dateRange').trigger('change');
+    }
+
+    // Authentication
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+
+    // Main initialization
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
+        window.location.href = "login.html";
+        return;
+      }
+      
+      userUID = user.uid;
+      userDisplay.textContent = user.displayName || user.email || "User";
+      loadingStatus.textContent = "Loading Budget Data...";
+
+      try {
+        // Load all transactions
+        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
+        allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Load budgets
+        await loadBudgets(user.uid);
+        
+        // Extract unique accounts
+        allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
+        
+        // Initialize dashboard
+        initializeDashboard();
+        
+        // Generate alerts
+        generateAlerts();
+        
+        loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
+      } catch (error) {
+        loadingStatus.textContent = `Error loading data: ${error.message}`;
+        console.error("Error:", error);
+      }
+    });
+
+    // Load budgets from Firestore
+    async function loadBudgets(uid) {
+      try {
+        const budgetsSnap = await getDocs(collection(db, "users", uid, "budgets"));
+        allBudgets = budgetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`Loaded ${allBudgets.length} budgets`);
+      } catch (error) {
+        console.error("Error loading budgets:", error);
+        allBudgets = [];
+      }
+    }
+
+    // Initialize dashboard
+    function initializeDashboard() {
+      updateDashboard();
+      populateAccountDropdowns();
+      renderBudgetTable();
+      updateForecastChart();
+      updateVarianceAnalysis();
+      updateInvestmentSummary();
+      updateSavingsGoals();
+    }
+
+    // Update dashboard with current data
+    function updateDashboard() {
+      // Get current date range
+      const dateRange = document.getElementById('dateRange').value;
+      const [startDate, endDate] = dateRange.split(' - ').map(d => moment(d, 'MM/DD/YYYY'));
+      
+      // Filter transactions based on view mode
+      const filteredTx = filterTransactionsByViewMode(startDate, endDate);
+      
+      // Calculate summary
+      const summary = calculateFinancialSummary(filteredTx);
+      
+      // Update stats
+      updateDashboardStats(summary);
+      
+      // Update charts
+      updateBudgetVsActualChart(summary);
+      updateSpendingByCategoryChart(filteredTx);
+      
+      // Update budget progress
+      updateBudgetProgress();
+      
+      // Update trends
+      updateTrendAnalysis();
+    }
+
+    // Filter transactions based on view mode
+    function filterTransactionsByViewMode(startDate, endDate) {
+      return allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = moment(tx.DATE);
+        
+        // For weekly view, group by week
+        if (currentViewMode === 'weekly') {
+          const txWeek = txDate.week();
+          const startWeek = startDate.week();
+          const endWeek = endDate.week();
+          const txYear = txDate.year();
+          const startYear = startDate.year();
+          const endYear = endDate.year();
+          
+          // Handle year boundaries
+          if (startYear === endYear) {
+            return txYear === startYear && txWeek >= startWeek && txWeek <= endWeek;
+          } else {
+            return (txYear === startYear && txWeek >= startWeek) || 
+                   (txYear === endYear && txWeek <= endWeek);
+          }
+        }
+        
+        // For monthly view, group by month
+        if (currentViewMode === 'monthly') {
+          const txMonth = txDate.month();
+          const txYear = txDate.year();
+          const startMonth = startDate.month();
+          const startYear = startDate.year();
+          const endMonth = endDate.month();
+          const endYear = endDate.year();
+          
+          // Handle year boundaries
+          if (startYear === endYear) {
+            return txYear === startYear && txMonth >= startMonth && txMonth <= endMonth;
+          } else {
+            return (txYear === startYear && txMonth >= startMonth) || 
+                   (txYear === endYear && txMonth <= endMonth);
+          }
+        }
+        
+        // For general view, use exact date range
+        return txDate.isBetween(startDate, endDate, null, '[]');
+      });
+    }
+
+    // Calculate financial summary
+    function calculateFinancialSummary(transactions) {
+      const summary = {
+        income: 0,
+        expense: 0,
+        net: 0,
+        byAccount: {},
+        byCategory: {},
+        trends: {
+          income: 0,
+          expense: 0,
+          net: 0
+        }
+      };
+      
+      // Group by period based on view mode
+      const groupedData = {};
+      transactions.forEach(tx => {
+        let periodKey;
+        const txDate = moment(tx.DATE);
+        
+        if (currentViewMode === 'weekly') {
+          periodKey = `Week ${txDate.week()}, ${txDate.year()}`;
+        } else if (currentViewMode === 'monthly') {
+          periodKey = txDate.format('MMM YYYY');
+        } else {
+          periodKey = txDate.format('MMM DD');
+        }
+        
+        if (!groupedData[periodKey]) {
+          groupedData[periodKey] = { income: 0, expense: 0 };
+        }
+        
+        groupedData[periodKey].income += Number(tx.INCOME || 0);
+        groupedData[periodKey].expense += Number(tx.EXPENSE || 0);
+        
+        // Update account summary
+        const account = tx.ACCOUNT_HEADER || "Uncategorized";
+        if (!summary.byAccount[account]) {
+          summary.byAccount[account] = { income: 0, expense: 0, net: 0 };
+        }
+        
+        summary.byAccount[account].income += Number(tx.INCOME || 0);
+        summary.byAccount[account].expense += Number(tx.EXPENSE || 0);
+        summary.byAccount[account].net += Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0);
+        
+        // Update totals
+        summary.income += Number(tx.INCOME || 0);
+        summary.expense += Number(tx.EXPENSE || 0);
+        summary.net += Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0);
+      });
+      
+      // Calculate trends (compare with previous period)
+      if (Object.keys(groupedData).length >= 2) {
+        const periods = Object.keys(groupedData).sort();
+        const currentPeriod = periods[periods.length - 1];
+        const previousPeriod = periods[periods.length - 2];
+        
+        summary.trends.income = calculateTrend(
+          groupedData[previousPeriod].income,
+          groupedData[currentPeriod].income
+        );
+        
+        summary.trends.expense = calculateTrend(
+          groupedData[previousPeriod].expense,
+          groupedData[currentPeriod].expense
+        );
+        
+        summary.trends.net = calculateTrend(
+          groupedData[previousPeriod].income - groupedData[previousPeriod].expense,
+          groupedData[currentPeriod].income - groupedData[currentPeriod].expense
+        );
+      }
+      
+      return summary;
+    }
+
+    // Calculate trend percentage
+    function calculateTrend(previous, current) {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / Math.abs(previous)) * 100;
+    }
+
+    // Update dashboard statistics with trends
+    function updateDashboardStats(summary) {
+      document.getElementById('totalIncome').textContent = formatCurrency(summary.income);
+      document.getElementById('totalExpense').textContent = formatCurrency(summary.expense);
+      document.getElementById('netBalance').textContent = formatCurrency(summary.net);
+      
+      const savingsRate = summary.income > 0 ? ((summary.net / summary.income) * 100).toFixed(1) : 0;
+      document.getElementById('savingsRate').textContent = savingsRate + '%';
+      
+      // Update color for net balance
+      const netElem = document.getElementById('netBalance');
+      netElem.className = 'stat-value ' + (summary.net >= 0 ? 'income' : 'expense');
+      
+      // Add trend indicators
+      updateTrendIndicators(summary.trends);
+    }
+
+    // Update trend indicators
+    function updateTrendIndicators(trends) {
+      // Update income trend
+      const incomeTrendElem = document.getElementById('incomeTrend');
+      if (incomeTrendElem) {
+        const trend = trends.income || 0;
+        incomeTrendElem.textContent = `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`;
+        incomeTrendElem.className = `trend-indicator ${getTrendClass(trend)}`;
+      }
+      
+      // Update expense trend
+      const expenseTrendElem = document.getElementById('expenseTrend');
+      if (expenseTrendElem) {
+        const trend = trends.expense || 0;
+        expenseTrendElem.textContent = `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`;
+        expenseTrendElem.className = `trend-indicator ${getTrendClass(-trend)}`; // Negative trend is good for expenses
+      }
+    }
+
+    // Get trend class based on value
+    function getTrendClass(value) {
+      if (value > 2) return 'trend-up';
+      if (value < -2) return 'trend-down';
+      return 'trend-neutral';
+    }
+
+    // Update Budget vs Actual chart
+    function updateBudgetVsActualChart(summary) {
+      const ctx = document.getElementById('budgetVsActualChart')?.getContext('2d');
+      if (!ctx) return;
+      
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      
+      // Get budgets for current period
+      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
+      const totalBudgetedIncome = periodBudgets
+        .filter(b => b.type === 'Income')
+        .reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      
+      const totalBudgetedExpense = periodBudgets
+        .filter(b => b.type === 'Expense')
+        .reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      
+      // Destroy existing chart if it exists
+      if (budgetVsActualChart) {
+        try {
+          budgetVsActualChart.destroy();
+        } catch (e) {
+          console.log("Error destroying chart:", e);
+        }
+      }
+      
+      budgetVsActualChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Income', 'Expenses'],
+          datasets: [
+            {
+              label: 'Budgeted',
+              data: [totalBudgetedIncome, totalBudgetedExpense],
+              backgroundColor: 'rgba(99, 102, 241, 0.7)',
+              borderColor: 'rgba(99, 102, 241, 1)',
+              borderWidth: 1,
+              borderRadius: 6
+            },
+            {
+              label: 'Actual',
+              data: [summary.income, summary.expense],
+              backgroundColor: 'rgba(16, 185, 129, 0.7)',
+              borderColor: 'rgba(16, 185, 129, 1)',
+              borderWidth: 1,
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              },
+              title: {
+                display: true,
+                text: 'Amount ($)'
+              }
+            },
+            x: {
+              grid: {
+                display: false
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                padding: 15,
+                usePointStyle: true,
+                pointStyle: 'circle'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Update spending by category chart
+    function updateSpendingByCategoryChart(transactions) {
+      const ctx = document.getElementById('spendingByCategoryChart')?.getContext('2d');
+      if (!ctx) return;
+      
+      // Group by category/account
+      const categoryData = {};
+      transactions.forEach(tx => {
+        if (tx.EXPENSE > 0) {
+          const category = tx.ACCOUNT_HEADER || 'Uncategorized';
+          categoryData[category] = (categoryData[category] || 0) + Number(tx.EXPENSE);
+        }
+      });
+      
+      // Sort by amount and take top 8
+      const sortedCategories = Object.entries(categoryData)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+      
+      const labels = sortedCategories.map(([category]) => category);
+      const data = sortedCategories.map(([_, amount]) => amount);
+      
+      // Generate colors
+      const colors = [
+        'rgba(239, 68, 68, 0.8)',    // Red
+        'rgba(245, 158, 11, 0.8)',   // Amber
+        'rgba(16, 185, 129, 0.8)',   // Emerald
+        'rgba(59, 130, 246, 0.8)',   // Blue
+        'rgba(139, 92, 246, 0.8)',   // Violet
+        'rgba(236, 72, 153, 0.8)',   // Pink
+        'rgba(249, 115, 22, 0.8)',   // Orange
+        'rgba(6, 182, 212, 0.8)'     // Cyan
+      ];
+      
+      // Destroy existing chart if it exists
+      if (spendingByCategoryChart) {
+        try {
+          spendingByCategoryChart.destroy();
+        } catch (e) {
+          console.log("Error destroying chart:", e);
+        }
+      }
+      
+      spendingByCategoryChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: colors,
+            borderWidth: 1,
+            borderColor: 'rgba(255, 255, 255, 0.2)'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                padding: 15,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                font: {
+                  size: 11
+                }
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  let label = context.label || '';
+                  if (label) {
+                    label += ': ';
+                  }
+                  label += formatCurrency(context.parsed);
+                  return label;
+                }
+              }
+            }
+          },
+          cutout: '70%'
+        }
+      });
+    }
+
+    // Initialize cash flow chart
+    function initializeCashFlowChart() {
+      const canvas = document.getElementById('cashFlowChart');
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      
+      cashFlowChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: 'Income',
+              data: [],
+              borderColor: 'rgba(16, 185, 129, 1)',
+              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              tension: 0.3,
+              fill: false
+            },
+            {
+              label: 'Expenses',
+              data: [],
+              borderColor: 'rgba(239, 68, 68, 1)',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              tension: 0.3,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Amount ($)'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Update cash flow chart
+    function updateCashFlowChart() {
+      if (!cashFlowChart) return;
+      
+      // Get data based on view mode
+      const { labels, incomeData, expenseData } = getCashFlowData();
+      
+      cashFlowChart.data.labels = labels;
+      cashFlowChart.data.datasets[0].data = incomeData;
+      cashFlowChart.data.datasets[1].data = expenseData;
+      cashFlowChart.update();
+    }
+
+    // Get cash flow data based on view mode
+    function getCashFlowData() {
+      const dateRange = document.getElementById('dateRange').value;
+      const [startDate, endDate] = dateRange.split(' - ').map(d => moment(d, 'MM/DD/YYYY'));
+      
+      const result = {
+        labels: [],
+        incomeData: [],
+        expenseData: []
+      };
+      
+      let current = startDate.clone();
+      
+      while (current <= endDate) {
+        let label;
+        let periodEnd;
+        
+        if (currentViewMode === 'weekly') {
+          label = `Week ${current.week()}`;
+          periodEnd = current.clone().endOf('week');
+          if (periodEnd > endDate) periodEnd = endDate;
+        } else if (currentViewMode === 'monthly') {
+          label = current.format('MMM');
+          periodEnd = current.clone().endOf('month');
+          if (periodEnd > endDate) periodEnd = endDate;
+        } else {
+          label = current.format('MMM DD');
+          periodEnd = current.clone();
+        }
+        
+        // Calculate income and expense for this period
+        const periodTx = allTransactions.filter(tx => {
+          if (!tx.DATE) return false;
+          const txDate = moment(tx.DATE);
+          return txDate.isBetween(current, periodEnd, null, '[]');
+        });
+        
+        const income = periodTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
+        const expense = periodTx.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+        
+        result.labels.push(label);
+        result.incomeData.push(income);
+        result.expenseData.push(expense);
+        
+        // Move to next period
+        if (currentViewMode === 'weekly') {
+          current.add(1, 'week');
+        } else if (currentViewMode === 'monthly') {
+          current.add(1, 'month');
+        } else {
+          current.add(1, 'day');
+        }
+      }
+      
+      return result;
+    }
+
+    // Generate alerts based on budgets and spending
+    function generateAlerts() {
+      const alertsContainer = document.getElementById('alertsContainer');
+      if (!alertsContainer) return;
+      
+      let alertsHTML = '';
+      const today = moment();
+      const currentMonth = today.format('YYYY-MM');
+      
+      // Check for exceeded budgets
+      allBudgets.forEach(budget => {
+        if (budget.period === currentMonth) {
+          const actual = calculateActualForBudget(budget);
+          const variance = budget.amount - actual;
+          
+          if (variance < 0 && Math.abs(variance) > budget.amount * 0.1) {
+            alertsHTML += `
+              <div class="alert-item critical">
+                <div>
+                  <strong>Budget Exceeded:</strong> ${budget.account} exceeded by ${formatCurrency(Math.abs(variance))}
+                </div>
+                <small>${budget.type} • ${budget.frequency}</small>
+              </div>
+            `;
+          }
+        }
+      });
+      
+      // Check for upcoming bills
+      const upcomingBills = allBudgets.filter(b => 
+        b.type === 'Expense' && b.frequency !== 'One-time'
+      );
+      
+      if (upcomingBills.length > 0) {
+        alertsHTML += `
+          <div class="alert-item info">
+            <div>
+              <strong>Upcoming Bills:</strong> ${upcomingBills.length} recurring bills this month
+            </div>
+            <small>Total: ${formatCurrency(upcomingBills.reduce((sum, b) => sum + Number(b.amount || 0), 0))}</small>
+          </div>
+        `;
+      }
+      
+      // Check for low savings
+      const savingsBudgets = allBudgets.filter(b => b.type === 'Savings');
+      const totalSavingsBudget = savingsBudgets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      
+      if (totalSavingsBudget < 1000) {
+        alertsHTML += `
+          <div class="alert-item">
+            <div>
+              <strong>Low Savings Rate:</strong> Consider increasing your savings budget
+            </div>
+            <small>Current: ${formatCurrency(totalSavingsBudget)}/month</small>
+          </div>
+        `;
+      }
+      
+      if (alertsHTML === '') {
+        alertsHTML = '<div class="alert-item info"><div><strong>All Good!</strong> No alerts at this time</div></div>';
+      }
+      
+      alertsContainer.innerHTML = alertsHTML;
+    }
+
+    // Update trend analysis
+    function updateTrendAnalysis() {
+      const trendElement = document.getElementById('trendAnalysis');
+      if (!trendElement) return;
+      
+      const dateRange = document.getElementById('dateRange').value;
+      const [startDate, endDate] = dateRange.split(' - ').map(d => moment(d, 'MM/DD/YYYY'));
+      
+      // Get previous period for comparison
+      const previousStart = startDate.clone().subtract(endDate.diff(startDate, 'days') + 1, 'days');
+      const previousEnd = startDate.clone().subtract(1, 'days');
+      
+      // Calculate current period totals
+      const currentTx = allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = moment(tx.DATE);
+        return txDate.isBetween(startDate, endDate, null, '[]');
+      });
+      
+      const previousTx = allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = moment(tx.DATE);
+        return txDate.isBetween(previousStart, previousEnd, null, '[]');
+      });
+      
+      const currentIncome = currentTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
+      const currentExpense = currentTx.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+      const previousIncome = previousTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
+      const previousExpense = previousTx.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+      
+      const incomeChange = previousIncome > 0 ? ((currentIncome - previousIncome) / previousIncome * 100).toFixed(1) : 0;
+      const expenseChange = previousExpense > 0 ? ((currentExpense - previousExpense) / previousExpense * 100).toFixed(1) : 0;
+      
+      trendElement.innerHTML = `
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+          <div>
+            <small>Income Trend</small>
+            <div class="${incomeChange >= 0 ? 'trend-up' : 'trend-down'}" style="padding: 4px 8px; border-radius: 6px; display: inline-block;">
+              ${incomeChange >= 0 ? '↗' : '↘'} ${incomeChange}%
+            </div>
+          </div>
+          <div>
+            <small>Expense Trend</small>
+            <div class="${expenseChange <= 0 ? 'trend-up' : 'trend-down'}" style="padding: 4px 8px; border-radius: 6px; display: inline-block;">
+              ${expenseChange <= 0 ? '↘' : '↗'} ${expenseChange}%
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Update savings goals
+    function updateSavingsGoals() {
+      const goalsContainer = document.getElementById('savingsGoals');
+      if (!goalsContainer) return;
+      
+      // Calculate total savings
+      const savingsBudgets = allBudgets.filter(b => b.type === 'Savings');
+      const totalMonthlySavings = savingsBudgets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      const annualSavings = totalMonthlySavings * 12;
+      
+      // Example goal: Save $10,000
+      const goalAmount = 10000;
+      const progress = Math.min(100, (annualSavings / goalAmount) * 100);
+      
+      goalsContainer.innerHTML = `
+        <div class="goal-progress">
+          <div class="goal-text">
+            <strong>Annual Savings Goal: ${formatCurrency(goalAmount)}</strong>
+            <div style="font-size: 12px; color: var(--gray-color); margin-top: 4px;">
+              On track to save ${formatCurrency(annualSavings)} this year
+            </div>
+          </div>
+          <div style="flex: 1; max-width: 200px;">
+            <div class="progress">
+              <div class="progress-bar success" style="width: ${progress}%">${progress.toFixed(0)}%</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Update forecast based on view mode
+    function updateForecastByViewMode() {
+      const forecastType = document.getElementById('forecastType');
+      if (forecastType) {
+        forecastType.value = currentViewMode;
+        generateForecast();
+      }
+    }
+
+    // Save budget to Firestore
+    async function saveBudget(budgetData) {
+      try {
+        const budgetId = budgetData.id || `budget_${Date.now()}`;
+        const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
+        await setDoc(budgetRef, { 
+          ...budgetData, 
+          id: budgetId, 
+          userId: userUID,
+          lastUpdated: new Date().toISOString() 
+        });
+        
+        // Reload budgets
+        await loadBudgets(userUID);
+        generateAlerts();
+        return true;
+      } catch (error) {
+        console.error("Error saving budget:", error);
+        return false;
+      }
+    }
+
+    // Delete budget
+    async function deleteBudget(budgetId) {
+      try {
+        const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
+        await deleteDoc(budgetRef);
+        await loadBudgets(userUID);
+        generateAlerts();
+        return true;
+      } catch (error) {
+        console.error("Error deleting budget:", error);
+        return false;
+      }
+    }
+
+    // Populate account dropdowns
+    function populateAccountDropdowns() {
+      const accountSelects = document.querySelectorAll('.account-select');
+      accountSelects.forEach(select => {
+        // Clear existing options except the first
+        while (select.options.length > 1) {
+          select.remove(1);
+        }
+        
+        // Add account options
+        allAccounts.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account;
+          option.textContent = account;
+          select.appendChild(option);
+        });
+      });
+    }
+
+    // Render budget table
+    function renderBudgetTable() {
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
+      const tbody = document.getElementById('budgetTableBody');
+      
+      if (periodBudgets.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center no-data">No budgets set for ${budgetPeriod}</td></tr>`;
+        return;
+      }
+      
+      let html = '';
+      periodBudgets.forEach((budget, index) => {
+        // Calculate actual spending for this budget
+        const actual = calculateActualForBudget(budget);
+        const variance = budget.amount - actual;
+        const variancePercent = budget.amount > 0 ? (variance / budget.amount * 100).toFixed(1) : 0;
+        
+        // Determine variance class
+        let varianceClass = '';
+        let varianceIcon = '';
+        if (variance > 0) {
+          varianceClass = 'variance-positive';
+          varianceIcon = '<i class="fas fa-arrow-down text-success"></i>';
+        } else if (variance < 0) {
+          varianceClass = 'variance-negative';
+          varianceIcon = '<i class="fas fa-arrow-up text-danger"></i>';
+        } else {
+          varianceClass = 'variance-neutral';
+          varianceIcon = '<i class="fas fa-equals text-muted"></i>';
+        }
+        
+        // Determine budget type color
+        const typeClass = budget.type === 'Income' ? 'type-income' : 
+                         budget.type === 'Expense' ? 'type-expense' :
+                         budget.type === 'Investment' ? 'type-investment' : 'type-savings';
+        
+        html += `
+          <tr>
+            <td class="text-center">${index + 1}</td>
+            <td>
+              <div class="account-name">
+                <span class="account-icon ${typeClass}">
+                  <i class="fas ${getBudgetTypeIcon(budget.type)}"></i>
+                </span>
+                ${budget.account}
+              </div>
+            </td>
+            <td><span class="budget-type ${typeClass}">${budget.type}</span></td>
+            <td><span class="frequency-badge">${budget.frequency}</span></td>
+            <td class="text-right amount">${formatCurrency(budget.amount)}</td>
+            <td class="text-right amount">${formatCurrency(actual)}</td>
+            <td class="text-right ${varianceClass}">
+              ${varianceIcon} ${formatCurrency(Math.abs(variance))} (${Math.abs(variancePercent)}%)
+            </td>
+            <td class="actions">
+              <button class="btn-icon edit-budget" data-id="${budget.id}" title="Edit Budget">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button class="btn-icon delete-budget" data-id="${budget.id}" title="Delete Budget">
+                <i class="fas fa-trash"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+      
+      tbody.innerHTML = html;
+      
+      // Add event listeners for edit/delete buttons
+      document.querySelectorAll('.edit-budget').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const budgetId = e.currentTarget.getAttribute('data-id');
+          editBudget(budgetId);
+        });
+      });
+      
+      document.querySelectorAll('.delete-budget').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const budgetId = e.currentTarget.getAttribute('data-id');
+          if (confirm('Are you sure you want to delete this budget?')) {
+            await deleteBudget(budgetId);
+            renderBudgetTable();
+            updateDashboard();
+          }
+        });
+      });
+    }
+
+    // Get icon for budget type
+    function getBudgetTypeIcon(type) {
+      switch(type) {
+        case 'Income': return 'fa-money-bill-wave';
+        case 'Expense': return 'fa-shopping-cart';
+        case 'Investment': return 'fa-chart-line';
+        case 'Savings': return 'fa-piggy-bank';
+        default: return 'fa-dollar-sign';
+      }
+    }
+
+    // Calculate actual spending for a budget
+    function calculateActualForBudget(budget) {
+      const budgetPeriod = budget.period;
+      const [year, month] = budgetPeriod.split('-').map(Number);
+      
+      // Filter transactions for this budget period and account
+      const filteredTx = allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = new Date(tx.DATE);
+        return txDate.getFullYear() === year && 
+               txDate.getMonth() + 1 === month &&
+               tx.ACCOUNT_HEADER === budget.account;
+      });
+      
+      // Calculate total based on budget type
+      if (budget.type === 'Income') {
+        return filteredTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
+      } else {
+        return filteredTx.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+      }
+    }
+
+    // Update budget progress
+    function updateBudgetProgress() {
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
+      
+      let totalBudgeted = 0;
+      let totalActual = 0;
+      
+      periodBudgets.forEach(budget => {
+        totalBudgeted += Number(budget.amount || 0);
+        totalActual += calculateActualForBudget(budget);
+      });
+      
+      const progressPercent = totalBudgeted > 0 ? Math.min(100, (totalActual / totalBudgeted) * 100) : 0;
+      const progressBar = document.getElementById('budgetProgressBar');
+      if (progressBar) {
+        progressBar.style.width = `${progressPercent}%`;
+        progressBar.textContent = `${progressPercent.toFixed(1)}%`;
+        
+        // Update progress bar color based on percentage
+        if (progressPercent > 90) {
+          progressBar.className = 'progress-bar danger';
+        } else if (progressPercent > 75) {
+          progressBar.className = 'progress-bar warning';
+        } else {
+          progressBar.className = 'progress-bar success';
+        }
+      }
+      
+      const progressText = document.getElementById('budgetProgressText');
+      if (progressText) {
+        progressText.textContent = 
+          `${formatCurrency(totalActual)} of ${formatCurrency(totalBudgeted)}`;
+      }
+    }
+
+    // Generate forecast
+    function generateForecast() {
+      const forecastType = document.getElementById('forecastType').value;
+      const forecastPeriods = parseInt(document.getElementById('forecastPeriods').value);
+      const forecastMethod = document.getElementById('forecastMethod').value;
+      
+      // Calculate forecast based on historical data
+      forecasts = calculateForecast(forecastType, forecastPeriods, forecastMethod);
+      
+      // Update forecast chart
+      updateForecastChart();
+    }
+
+    // Calculate forecast
+    function calculateForecast(type, periods, method) {
+      const forecastData = {
+        labels: [],
+        data: []
+      };
+      
+      // Get historical data based on type
+      const historicalData = getHistoricalData(type);
+      
+      // Generate forecast labels
+      const startDate = moment();
+      for (let i = 0; i < periods; i++) {
+        let label;
+        if (type === 'monthly') {
+          label = startDate.clone().add(i, 'months').format('MMM YYYY');
+        } else if (type === 'weekly') {
+          label = `W${i + 1}`;
+        } else if (type === 'quarterly') {
+          label = `Q${Math.floor(i / 3) + 1} ${startDate.clone().add(i * 3, 'months').format('YY')}`;
+        } else {
+          label = `${startDate.clone().add(i, 'years').format('YYYY')}`;
+        }
+        forecastData.labels.push(label);
+      }
+      
+      // Simple forecasting methods
+      if (method === 'average') {
+        const avg = historicalData.length > 0 ? 
+          historicalData.reduce((a, b) => a + b, 0) / historicalData.length : 0;
+        forecastData.data = Array(periods).fill(avg);
+      } else if (method === 'trend') {
+        // Simple linear trend
+        if (historicalData.length > 1) {
+          const lastValue = historicalData[historicalData.length - 1];
+          const growthRate = 0.03; // 3% growth assumption
+          forecastData.data = Array(periods).fill(0).map((_, i) => 
+            lastValue * Math.pow(1 + growthRate/12, i + 1)
+          );
+        } else {
+          forecastData.data = Array(periods).fill(0);
+        }
+      } else if (method === 'last') {
+        const lastValue = historicalData.length > 0 ? historicalData[historicalData.length - 1] : 0;
+        forecastData.data = Array(periods).fill(lastValue);
+      }
+      
+      return forecastData;
+    }
+
+    // Get historical data for forecasting
+    function getHistoricalData(type) {
+      const data = [];
+      const now = moment();
+      
+      // Get last 12 periods of data
+      for (let i = 11; i >= 0; i--) {
+        let periodStart, periodEnd;
+        
+        if (type === 'monthly') {
+          periodStart = now.clone().subtract(i, 'months').startOf('month');
+          periodEnd = now.clone().subtract(i, 'months').endOf('month');
+        } else if (type === 'weekly') {
+          periodStart = now.clone().subtract(i, 'weeks').startOf('week');
+          periodEnd = now.clone().subtract(i, 'weeks').endOf('week');
+        } else if (type === 'quarterly') {
+          periodStart = now.clone().subtract(i * 3, 'months').startOf('quarter');
+          periodEnd = now.clone().subtract(i * 3, 'months').endOf('quarter');
+        } else {
+          periodStart = now.clone().subtract(i, 'years').startOf('year');
+          periodEnd = now.clone().subtract(i, 'years').endOf('year');
+        }
+        
+        // Calculate total for period
+        const periodTotal = allTransactions
+          .filter(tx => {
+            if (!tx.DATE) return false;
+            const txDate = moment(tx.DATE);
+            return txDate.isBetween(periodStart, periodEnd, null, '[]');
+          })
+          .reduce((sum, tx) => sum + Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0), 0);
+        
+        data.push(periodTotal);
+      }
+      
+      return data;
+    }
+
+    // Update forecast chart
+    function updateForecastChart() {
+      const ctx = document.getElementById('forecastChart')?.getContext('2d');
+      if (!ctx) return;
+      
+      // Destroy existing chart if it exists
+      if (forecastChart) {
+        try {
+          forecastChart.destroy();
+        } catch (e) {
+          console.log("Error destroying chart:", e);
+        }
+      }
+      
+      forecastChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: forecasts.labels || [],
+          datasets: [{
+            label: 'Forecasted Net Balance',
+            data: forecasts.data || [],
+            borderColor: 'rgba(139, 92, 246, 1)',
+            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            tension: 0.3,
+            fill: true,
+            pointBackgroundColor: 'rgba(139, 92, 246, 1)',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                padding: 15,
+                usePointStyle: true,
+                pointStyle: 'circle'
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              },
+              title: {
+                display: true,
+                text: 'Amount ($)'
+              }
+            },
+            x: {
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Update variance analysis
+    function updateVarianceAnalysis() {
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
+      
+      let totalVariance = 0;
+      let overBudgetCount = 0;
+      let underBudgetCount = 0;
+      
+      periodBudgets.forEach(budget => {
+        const actual = calculateActualForBudget(budget);
+        const variance = budget.amount - actual;
+        
+        if (variance < 0) {
+          overBudgetCount++;
+        } else if (variance > 0) {
+          underBudgetCount++;
+        }
+        
+        totalVariance += variance;
+      });
+      
+      const varianceTotal = document.getElementById('varianceTotal');
+      const overBudgetCountElem = document.getElementById('overBudgetCount');
+      const underBudgetCountElem = document.getElementById('underBudgetCount');
+      const onBudgetCountElem = document.getElementById('onBudgetCount');
+      
+      if (varianceTotal) varianceTotal.textContent = formatCurrency(totalVariance);
+      if (overBudgetCountElem) overBudgetCountElem.textContent = overBudgetCount;
+      if (underBudgetCountElem) underBudgetCountElem.textContent = underBudgetCount;
+      if (onBudgetCountElem) onBudgetCountElem.textContent = periodBudgets.length - overBudgetCount - underBudgetCount;
+      
+      // Update color for total variance
+      if (varianceTotal) {
+        if (totalVariance >= 0) {
+          varianceTotal.className = 'variance-value positive';
+        } else {
+          varianceTotal.className = 'variance-value negative';
+        }
+      }
+    }
+
+    // Update investment summary
+    function updateInvestmentSummary() {
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      
+      // Calculate investment budgets
+      const investmentBudgets = allBudgets.filter(b => 
+        b.type === 'Investment' && b.period === budgetPeriod
+      );
+      
+      const totalInvestmentBudget = investmentBudgets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      
+      // Calculate actual investments
+      const [year, month] = budgetPeriod.split('-').map(Number);
+      const investmentTransactions = allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = new Date(tx.DATE);
+        return txDate.getFullYear() === year && 
+               txDate.getMonth() + 1 === month &&
+               (tx.ACCOUNT_HEADER || '').toLowerCase().includes('investment');
+      });
+      
+      const actualInvestment = investmentTransactions.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+      
+      // Calculate growth (simplified)
+      const growthRate = 0.07; // 7% annual return
+      const futureValue = actualInvestment * Math.pow(1 + growthRate/12, 60); // 5 years
+      
+      const totalInvestmentsElem = document.getElementById('totalInvestments');
+      const monthlyInvestmentElem = document.getElementById('monthlyInvestment');
+      const investmentGrowthElem = document.getElementById('investmentGrowth');
+      const futureValueElem = document.getElementById('futureValue');
+      
+      if (totalInvestmentsElem) totalInvestmentsElem.textContent = formatCurrency(actualInvestment * 12); // Annualized
+      if (monthlyInvestmentElem) monthlyInvestmentElem.textContent = formatCurrency(totalInvestmentBudget);
+      if (investmentGrowthElem) investmentGrowthElem.textContent = (growthRate * 100).toFixed(1) + '%';
+      if (futureValueElem) futureValueElem.textContent = formatCurrency(futureValue);
+    }
+
+    // Add new budget
+    async function addNewBudget() {
+      const account = document.getElementById('newBudgetAccount').value;
+      const type = document.getElementById('newBudgetType').value;
+      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const frequency = document.getElementById('newBudgetFrequency').value;
+      const period = document.getElementById('budgetPeriod').value;
+      
+      if (!account || !amount || isNaN(amount)) {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const budgetData = {
+        account,
+        type,
+        amount,
+        frequency,
+        period,
+        created: new Date().toISOString()
+      };
+      
+      const success = await saveBudget(budgetData);
+      if (success) {
+        // Clear form
+        document.getElementById('newBudgetAmount').value = '';
+        
+        // Update UI
+        renderBudgetTable();
+        updateDashboard();
+        updateVarianceAnalysis();
+        updateInvestmentSummary();
+        
+        showNotification('Budget added successfully!', 'success');
+      } else {
+        showNotification('Error saving budget. Please try again.', 'error');
+      }
+    }
+
+    // Edit budget
+    function editBudget(budgetId) {
+      const budget = allBudgets.find(b => b.id === budgetId);
+      if (!budget) return;
+      
+      // Populate edit form
+      document.getElementById('newBudgetAccount').value = budget.account;
+      document.getElementById('newBudgetType').value = budget.type;
+      document.getElementById('newBudgetAmount').value = budget.amount;
+      document.getElementById('newBudgetFrequency').value = budget.frequency;
+      
+      // Scroll to form
+      document.getElementById('budgetForm').scrollIntoView({ behavior: 'smooth' });
+      
+      // Change button text
+      const addBtn = document.getElementById('addBudgetBtn');
+      addBtn.innerHTML = '<i class="fas fa-save"></i> Update Budget';
+      addBtn.onclick = async () => {
+        await updateExistingBudget(budgetId);
+      };
+      
+      showNotification('Editing budget for ' + budget.account, 'info');
+    }
+
+    // Update existing budget
+    async function updateExistingBudget(budgetId) {
+      const account = document.getElementById('newBudgetAccount').value;
+      const type = document.getElementById('newBudgetType').value;
+      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const frequency = document.getElementById('newBudgetFrequency').value;
+      const period = document.getElementById('budgetPeriod').value;
+      
+      if (!account || !amount || isNaN(amount)) {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const budgetData = {
+        id: budgetId,
+        account,
+        type,
+        amount,
+        frequency,
+        period,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const success = await saveBudget(budgetData);
+      if (success) {
+        // Reset form
+        document.getElementById('newBudgetAmount').value = '';
+        document.getElementById('addBudgetBtn').innerHTML = '<i class="fas fa-plus"></i> Add Budget';
+        document.getElementById('addBudgetBtn').onclick = addNewBudget;
+        
+        // Update UI
+        renderBudgetTable();
+        updateDashboard();
+        updateVarianceAnalysis();
+        updateInvestmentSummary();
+        
+        showNotification('Budget updated successfully!', 'success');
+      } else {
+        showNotification('Error updating budget. Please try again.', 'error');
+      }
+    }
+
+    // Export budgets to CSV
+    function exportBudgets() {
+      const budgetPeriod = document.getElementById('budgetPeriod').value;
+      const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
+      
+      if (periodBudgets.length === 0) {
+        showNotification('No budgets to export for this period', 'warning');
+        return;
+      }
+      
+      // Create CSV content
+      let csv = 'Account,Type,Frequency,Amount,Period\n';
+      periodBudgets.forEach(budget => {
+        csv += `"${budget.account}",${budget.type},${budget.frequency},${budget.amount},${budget.period}\n`;
+      });
+      
+      // Create download link
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `budgets_${budgetPeriod}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      showNotification('Budgets exported successfully!', 'success');
+    }
+
+    // Import budgets from CSV
+    function importBudgets() {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.csv';
+      
+      fileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const csv = event.target.result;
+          const lines = csv.split('\n');
+          const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+          
+          let importedCount = 0;
+          for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            
+            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+            if (values.length < headers.length) continue;
+            
+            const budgetData = {};
+            headers.forEach((header, index) => {
+              budgetData[header.toLowerCase()] = values[index];
+            });
+            
+            // Convert amount to number
+            budgetData.amount = parseFloat(budgetData.amount) || 0;
+            
+            // Add current period if not specified
+            if (!budgetData.period) {
+              budgetData.period = document.getElementById('budgetPeriod').value;
+            }
+            
+            await saveBudget(budgetData);
+            importedCount++;
+          }
+          
+          // Reload budgets
+          await loadBudgets(userUID);
+          renderBudgetTable();
+          updateDashboard();
+          updateInvestmentSummary();
+          
+          showNotification(`Successfully imported ${importedCount} budgets`, 'success');
+        };
+        
+        reader.readAsText(file);
+      };
+      
+      fileInput.click();
+    }
+
+    // Show notification
+    function showNotification(message, type) {
+      // Remove existing notification
+      const existingNotification = document.querySelector('.notification');
+      if (existingNotification) {
+        existingNotification.remove();
+      }
+      
+      // Create new notification
+      const notification = document.createElement('div');
+      notification.className = `notification ${type}`;
+      notification.innerHTML = `
+        <div class="notification-content">
+          <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
+          <span>${message}</span>
+        </div>
+        <button class="notification-close"><i class="fas fa-times"></i></button>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Add close event
+      notification.querySelector('.notification-close').addEventListener('click', () => {
+        notification.remove();
+      });
+      
+      // Auto remove after 5 seconds
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.remove();
+        }
+      }, 5000);
+    }
+
+    // Utility function to format currency
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+      }).format(amount);
+    }
+
+    // Event Listeners
+    document.getElementById('addBudgetBtn').addEventListener('click', addNewBudget);
+    document.getElementById('exportBudgetsBtn').addEventListener('click', exportBudgets);
+    document.getElementById('importBudgetsBtn').addEventListener('click', importBudgets);
+    document.getElementById('generateForecastBtn').addEventListener('click', generateForecast);
+    
+    document.getElementById('dateRange').addEventListener('change', () => {
+      updateDashboard();
+      updateCashFlowChart();
+      generateAlerts();
+    });
+    
+    document.getElementById('budgetPeriod').addEventListener('change', () => {
+      renderBudgetTable();
+      updateBudgetProgress();
+      updateVarianceAnalysis();
+      updateInvestmentSummary();
+      updateDashboard();
+      generateAlerts();
+    });
+
+  </script>
 </head>
 <body>
   <div class="top-bar">
@@ -1935,14 +2547,27 @@
       </div>
     </div>
 
-    <!-- Stats Overview -->
+    <!-- View Mode Toggle -->
+    <div class="view-toggle-container">
+      <button id="viewMonthlyBtn" class="view-toggle-btn active">
+        <i class="fas fa-calendar-alt"></i> Monthly View
+      </button>
+      <button id="viewWeeklyBtn" class="view-toggle-btn">
+        <i class="fas fa-calendar-week"></i> Weekly View
+      </button>
+      <button id="viewGeneralBtn" class="view-toggle-btn">
+        <i class="fas fa-chart-bar"></i> General View
+      </button>
+    </div>
+
+    <!-- Stats Overview with Trends -->
     <div class="stats-container">
       <div class="stat-card">
-        <h3>Total Income</h3>
+        <h3>Total Income <span id="incomeTrend" class="trend-indicator"></span></h3>
         <div class="stat-value" id="totalIncome">$0</div>
       </div>
       <div class="stat-card">
-        <h3>Total Expenses</h3>
+        <h3>Total Expenses <span id="expenseTrend" class="trend-indicator"></span></h3>
         <div class="stat-value" id="totalExpense">$0</div>
       </div>
       <div class="stat-card">
@@ -1955,12 +2580,30 @@
       </div>
     </div>
 
+    <!-- Alerts Section -->
+    <div class="alerts-container">
+      <h3 style="margin-bottom: 15px; color: var(--dark-color);">
+        <i class="fas fa-bell"></i> Financial Alerts
+      </h3>
+      <div id="alertsContainer">
+        <div class="alert-item info">
+          <div><strong>Loading alerts...</strong></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Date Range Filter -->
     <div class="form-container">
       <div class="form-row">
         <div class="form-group">
           <label>Date Range:</label>
           <input type="text" id="dateRange" class="form-control" />
+        </div>
+        <div class="form-group">
+          <label>Trend Analysis:</label>
+          <div id="trendAnalysis" style="padding: 12px 0; min-height: 46px; display: flex; align-items: center;">
+            Loading trends...
+          </div>
         </div>
       </div>
     </div>
@@ -1985,6 +2628,16 @@
       </div>
     </div>
 
+    <!-- Cash Flow Chart -->
+    <div class="chart-card">
+      <div class="chart-title">
+        <i class="fas fa-exchange-alt"></i> Cash Flow
+      </div>
+      <div class="chart-container">
+        <canvas id="cashFlowChart"></canvas>
+      </div>
+    </div>
+
     <!-- Budget Management -->
     <h2 class="section-header">
       <i class="fas fa-wallet"></i> Budget Management
@@ -2005,6 +2658,23 @@
             </div>
             <div id="budgetProgressText" style="margin-top: 8px; font-size: 13px; color: var(--gray-color);">
               $0 of $0
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Savings Goals -->
+    <div class="goal-container">
+      <h3 style="margin-bottom: 15px; color: var(--dark-color);">
+        <i class="fas fa-bullseye"></i> Savings Goals
+      </h3>
+      <div id="savingsGoals">
+        <div class="goal-progress">
+          <div class="goal-text">
+            <strong>No goals set</strong>
+            <div style="font-size: 12px; color: var(--gray-color); margin-top: 4px;">
+              Set up your savings goals to track progress
             </div>
           </div>
         </div>
