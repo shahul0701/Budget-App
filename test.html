@@ -662,27 +662,7 @@
             </div>
         </div>
 
-        <!-- PDF Export Options -->
-        <div class="pdf-section">
-            <h5><i class="fas fa-file-pdf me-2"></i>Export Reports</h5>
-            <div class="export-options">
-                <button class="btn btn-outline-danger" onclick="exportPDF('summary')">
-                    <i class="fas fa-file-alt me-2"></i> Summary Report
-                </button>
-                <button class="btn btn-outline-danger" onclick="exportPDF('detailed')">
-                    <i class="fas fa-file-invoice me-2"></i> Detailed Report
-                </button>
-                <button class="btn btn-outline-danger" onclick="exportPDF('charts')">
-                    <i class="fas fa-chart-bar me-2"></i> Charts Report
-                </button>
-                <button class="btn btn-outline-danger" onclick="exportPDF('all')">
-                    <i class="fas fa-file-archive me-2"></i> Complete Report
-                </button>
-            </div>
-        </div>
-
-        <!-- Rest of the sections remain the same as before -->
-        <!-- Top & Least Expenses/Income -->
+        <!-- Top Expenses & Income -->
         <div class="row mt-4">
             <div class="col-lg-6">
                 <div class="card h-100">
@@ -692,9 +672,7 @@
                     <div class="card-body">
                         <div id="topExpensesList">
                             <div class="text-center text-muted py-4">
-                                <div class="spinner-border text-primary mb-3" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
+                                <i class="fas fa-receipt fa-2x mb-3"></i>
                                 <p>Loading expenses...</p>
                             </div>
                         </div>
@@ -710,9 +688,7 @@
                     <div class="card-body">
                         <div id="topIncomeList">
                             <div class="text-center text-muted py-4">
-                                <div class="spinner-border text-primary mb-3" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
+                                <i class="fas fa-money-bill-wave fa-2x mb-3"></i>
                                 <p>Loading income...</p>
                             </div>
                         </div>
@@ -773,11 +749,25 @@
                     <div class="card-body">
                         <div id="aiInsights">
                             <div class="text-center text-muted py-4">
-                                <div class="spinner-border text-primary mb-3" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
+                                <i class="fas fa-chart-pie fa-2x mb-3"></i>
                                 <p>Analyzing your finances...</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Analysis -->
+        <div class="row mt-4">
+            <div class="col-lg-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-tags me-2"></i>Category Analysis
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="categoryChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -800,11 +790,15 @@
                                 <th>Type</th>
                                 <th>Amount</th>
                                 <th>Period</th>
-                                <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="recentTransactions">
-                            <!-- Transactions will be populated here -->
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">
+                                    <i class="fas fa-spinner fa-spin me-2"></i>
+                                    Loading transactions...
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -871,44 +865,21 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script type="module">
-        // Import Firebase modules
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { 
-            getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, 
-            query, orderBy, setDoc, getDoc, where, limit, onSnapshot 
-        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-            authDomain: "budget-app-1365f.firebaseapp.com",
-            projectId: "budget-app-1365f",
-            storageBucket: "budget-app-1365f.appspot.com",
-            messagingSenderId: "1036194450411",
-            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-            measurementId: "G-YFFJL2H54X"
-        };
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
-        // Global Variables
+    <script>
+        // Initialize variables
         let currentUser = null;
         let budgetSettings = {
-            weeklyLimit: 0,
-            monthlyLimit: 0,
-            quarterlyLimit: 0,
-            yearlyLimit: 0,
+            weeklyLimit: 1000,
+            monthlyLimit: 4000,
+            quarterlyLimit: 12000,
+            yearlyLimit: 48000,
             rolloverEnabled: false,
             rolloverBalance: 0,
             customStartDate: null,
             customEndDate: null,
             warningThreshold: 80
         };
+        
         let allTransactions = [];
         let filteredTransactions = [];
         let currentPeriod = 'monthly';
@@ -916,261 +887,197 @@
         let notifications = [];
         let spendingChart = null;
         let categoryChart = null;
-        const DateTime = luxon.DateTime;
 
-        // DOM Elements
-        const periodSelect = document.getElementById('periodSelect');
-        const customDateRangeContainer = document.getElementById('customDateRangeContainer');
-        const customFromDate = document.getElementById('customFromDate');
-        const customToDate = document.getElementById('customToDate');
-        const applyCustomRange = document.getElementById('applyCustomRange');
-        const rolloverToggle = document.getElementById('rolloverToggle');
-        const periodLabel = document.getElementById('periodLabel');
-        const periodBudget = document.getElementById('periodBudget');
-        const currentPeriodLabel = document.getElementById('currentPeriodLabel');
-        const rolloverBalance = document.getElementById('rolloverBalance');
-        const rolloverLabel = document.getElementById('rolloverLabel');
-        const periodProgressLabel = document.getElementById('periodProgressLabel');
-        const periodTabs = document.querySelectorAll('.period-tab');
-        const limitFormContainer = document.getElementById('limitFormContainer');
-        const allLimitsModal = new bootstrap.Modal('#allLimitsModal');
-        const saveAllLimitsBtn = document.getElementById('saveAllLimits');
-        const setAllLimitsBtn = document.getElementById('setAllLimitsBtn');
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            initApp();
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('Initializing application...');
+            
+            // Check if user is logged in (simulating authentication)
+            try {
+                // Simulate user authentication
+                currentUser = {
+                    uid: 'demo-user-123',
+                    email: 'demo@example.com'
+                };
+                
+                console.log('User authenticated (demo mode)');
+                
+                // Load theme preference
+                loadThemePreference();
+                
+                // Initialize UI components
+                initializePeriodTabs();
+                updateLimitForms();
+                
+                // Load sample data for demo
+                await loadSampleData();
+                
+                // Update all displays
+                updateAllDisplays();
+                
+                // Set up event listeners
+                setupEventListeners();
+                
+                console.log('Application initialized successfully');
+                
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showAlert('Failed to initialize application', 'error');
+            }
         });
 
-        // Initialize Application
-        async function initApp() {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    currentUser = user;
-                    console.log('User authenticated:', user.email);
+        // Load Sample Data for Demo
+        async function loadSampleData() {
+            console.log('Loading sample data...');
+            
+            // Generate sample transactions
+            const sampleTransactions = generateSampleTransactions();
+            allTransactions = sampleTransactions;
+            
+            // Filter for current period
+            filterTransactionsForCurrentPeriod();
+            
+            console.log(`Loaded ${allTransactions.length} sample transactions`);
+        }
+
+        // Generate Sample Transactions
+        function generateSampleTransactions() {
+            const transactions = [];
+            const now = new Date();
+            const categories = ['Groceries', 'Dining', 'Entertainment', 'Transport', 'Shopping', 'Utilities', 'Healthcare', 'Education'];
+            const incomeSources = ['Salary', 'Freelance', 'Investment', 'Bonus', 'Gift'];
+            
+            // Generate expenses for last 60 days
+            for (let i = 0; i < 60; i++) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                
+                // Add 1-3 expenses per day
+                const numExpenses = Math.floor(Math.random() * 3) + 1;
+                for (let j = 0; j < numExpenses; j++) {
+                    const amount = Math.floor(Math.random() * 200) + 10;
+                    const category = categories[Math.floor(Math.random() * categories.length)];
                     
-                    // Load theme preference
-                    loadThemePreference();
-                    
-                    // Initialize UI
-                    showLoadingState();
-                    
-                    // Load data
-                    await loadBudgetSettings();
-                    await loadAllTransactions();
-                    await loadNotifications();
-                    
-                    // Initialize UI components
-                    initializePeriodTabs();
-                    updateLimitForms();
-                    
-                    // Update display
-                    updateBudgetDisplay();
-                    updateLimitSummary();
-                    updateTopLists();
-                    updateSpendingAnalysis();
-                    generateFinancialInsights();
-                    updateRecentTransactions();
-                    
-                    // Set up real-time listeners
-                    setupRealtimeListeners();
-                    
-                    // Set up event listeners
-                    setupEventListeners();
-                    
-                    // Hide loading state
-                    hideLoadingState();
-                    
-                } else {
-                    showLoginPrompt();
+                    transactions.push({
+                        id: `expense-${i}-${j}`,
+                        amount: amount,
+                        type: 'Expense',
+                        category: category,
+                        description: `${category} purchase`,
+                        date: new Date(date),
+                        bank: 'Checking Account'
+                    });
                 }
-            });
-        }
-
-        // Show Login Prompt
-        function showLoginPrompt() {
-            Swal.fire({
-                title: 'Login Required',
-                text: 'Please login to access Advanced Budget Features',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'Login',
-                cancelButtonText: 'Back to Home'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    window.location.href = 'index.html';
-                } else {
-                    window.location.href = 'home.html';
+                
+                // Add income occasionally
+                if (Math.random() > 0.7) {
+                    const amount = Math.floor(Math.random() * 1000) + 500;
+                    const source = incomeSources[Math.floor(Math.random() * incomeSources.length)];
+                    
+                    transactions.push({
+                        id: `income-${i}`,
+                        amount: amount,
+                        type: 'Income',
+                        category: source,
+                        description: `${source} payment`,
+                        date: new Date(date),
+                        bank: 'Savings Account'
+                    });
                 }
-            });
-        }
-
-        // Load Budget Settings
-        async function loadBudgetSettings() {
-            if (!currentUser) return;
-            
-            try {
-                const settingsDoc = await getDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'));
-                
-                if (settingsDoc.exists()) {
-                    budgetSettings = { ...budgetSettings, ...settingsDoc.data() };
-                    console.log('Loaded budget settings:', budgetSettings);
-                    
-                    // Update UI elements
-                    rolloverToggle.checked = budgetSettings.rolloverEnabled || false;
-                    
-                    // Set current date for custom range inputs
-                    const today = new Date().toISOString().split('T')[0];
-                    const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 2).toISOString().split('T')[0];
-                    customFromDate.value = budgetSettings.customStartDate || firstDayOfMonth;
-                    customToDate.value = budgetSettings.customEndDate || today;
-                    
-                } else {
-                    // Save default settings
-                    await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings);
-                }
-            } catch (error) {
-                console.error('Error loading budget settings:', error);
-                showAlert('Failed to load budget settings', 'error');
             }
-        }
-
-        // Save Budget Settings
-        async function saveBudgetSettings() {
-            if (!currentUser) return;
             
-            try {
-                budgetSettings.updatedAt = new Date();
-                await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings, { merge: true });
-                showAlert('Settings saved successfully', 'success');
-            } catch (error) {
-                console.error('Error saving budget settings:', error);
-                showAlert('Failed to save settings', 'error');
-            }
-        }
-
-        // Load All Transactions
-        async function loadAllTransactions() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Loading transactions for user:', currentUser.uid);
-                
-                const transactionsRef = collection(db, 'users', currentUser.uid, 'transactions');
-                const q = query(transactionsRef, orderBy('DATE', 'desc'));
-                
-                const snapshot = await getDocs(q);
-                allTransactions = [];
-                
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    const transaction = {
-                        id: doc.id,
-                        ...data,
-                        amount: parseFloat(data.INCOME || data.EXPENSE || 0),
-                        type: data.TYPE || 'Expense',
-                        category: data.ACCOUNT_HEADER || 'Uncategorized',
-                        bank: data.BANK_NAME || data.MODE || 'Unknown',
-                        description: data.DESCRIPTION || data.NOTES || 'No description',
-                        date: new Date(data.DATE),
-                        period: getTransactionPeriod(new Date(data.DATE))
-                    };
-                    
-                    allTransactions.push(transaction);
-                });
-                
-                console.log(`Loaded ${allTransactions.length} total transactions`);
-                
-                // Filter for current period
-                filterTransactionsForCurrentPeriod();
-                
-            } catch (error) {
-                console.error('Error loading transactions:', error);
-                showAlert('Failed to load transactions', 'error');
-            }
-        }
-
-        // Get Transaction Period
-        function getTransactionPeriod(date) {
-            const year = date.getFullYear();
-            const month = date.getMonth();
-            const week = Math.floor(date.getDate() / 7);
-            const quarter = Math.floor(month / 3);
-            
-            return {
-                year,
-                month,
-                week,
-                quarter,
-                date: date.toISOString().split('T')[0]
-            };
+            return transactions;
         }
 
         // Filter Transactions for Current Period
         function filterTransactionsForCurrentPeriod() {
             const now = new Date();
-            let filtered = [];
+            let startDate, endDate;
             
             switch (currentPeriod) {
                 case 'weekly':
-                    const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
-                    const weekEnd = new Date(weekStart);
-                    weekEnd.setDate(weekStart.getDate() + 6);
-                    filtered = allTransactions.filter(tx => 
-                        tx.date >= weekStart && tx.date <= weekEnd
-                    );
-                    currentPeriodLabel.textContent = `This Week (${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()})`;
+                    // Get start of current week (Sunday)
+                    startDate = new Date(now);
+                    startDate.setDate(now.getDate() - now.getDay());
+                    startDate.setHours(0, 0, 0, 0);
+                    
+                    // Get end of current week (Saturday)
+                    endDate = new Date(startDate);
+                    endDate.setDate(startDate.getDate() + 6);
+                    endDate.setHours(23, 59, 59, 999);
+                    
+                    currentPeriodLabel.textContent = `This Week (${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()})`;
                     break;
                     
                 case 'monthly':
-                    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                    filtered = allTransactions.filter(tx => 
-                        tx.date >= monthStart && tx.date <= monthEnd
-                    );
-                    currentPeriodLabel.textContent = `This Month (${monthStart.toLocaleDateString('default', { month: 'long' })} ${now.getFullYear()})`;
+                    // Get start of current month
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    startDate.setHours(0, 0, 0, 0);
+                    
+                    // Get end of current month
+                    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    endDate.setHours(23, 59, 59, 999);
+                    
+                    currentPeriodLabel.textContent = `This Month (${now.toLocaleDateString('default', { month: 'long' })} ${now.getFullYear()})`;
                     break;
                     
                 case 'quarterly':
                     const quarter = Math.floor(now.getMonth() / 3);
-                    const quarterStart = new Date(now.getFullYear(), quarter * 3, 1);
-                    const quarterEnd = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-                    filtered = allTransactions.filter(tx => 
-                        tx.date >= quarterStart && tx.date <= quarterEnd
-                    );
+                    // Get start of current quarter
+                    startDate = new Date(now.getFullYear(), quarter * 3, 1);
+                    startDate.setHours(0, 0, 0, 0);
+                    
+                    // Get end of current quarter
+                    endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+                    endDate.setHours(23, 59, 59, 999);
+                    
                     currentPeriodLabel.textContent = `This Quarter (Q${quarter + 1} ${now.getFullYear()})`;
                     break;
                     
                 case 'yearly':
-                    const yearStart = new Date(now.getFullYear(), 0, 1);
-                    const yearEnd = new Date(now.getFullYear(), 11, 31);
-                    filtered = allTransactions.filter(tx => 
-                        tx.date >= yearStart && tx.date <= yearEnd
-                    );
+                    // Get start of current year
+                    startDate = new Date(now.getFullYear(), 0, 1);
+                    startDate.setHours(0, 0, 0, 0);
+                    
+                    // Get end of current year
+                    endDate = new Date(now.getFullYear(), 11, 31);
+                    endDate.setHours(23, 59, 59, 999);
+                    
                     currentPeriodLabel.textContent = `This Year (${now.getFullYear()})`;
                     break;
                     
                 case 'custom':
                     if (budgetSettings.customStartDate && budgetSettings.customEndDate) {
-                        const customStart = new Date(budgetSettings.customStartDate);
-                        const customEnd = new Date(budgetSettings.customEndDate);
-                        filtered = allTransactions.filter(tx => 
-                            tx.date >= customStart && tx.date <= customEnd
-                        );
-                        currentPeriodLabel.textContent = `Custom Range (${customStart.toLocaleDateString()} - ${customEnd.toLocaleDateString()})`;
+                        startDate = new Date(budgetSettings.customStartDate);
+                        endDate = new Date(budgetSettings.customEndDate);
+                        endDate.setHours(23, 59, 59, 999);
+                        currentPeriodLabel.textContent = `Custom Range (${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()})`;
+                    } else {
+                        // Default to current month if no custom dates
+                        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        currentPeriodLabel.textContent = `This Month (${now.toLocaleDateString('default', { month: 'long' })} ${now.getFullYear()})`;
                     }
                     break;
                     
                 default:
-                    filtered = allTransactions;
+                    // Default to monthly
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    currentPeriodLabel.textContent = `This Month (${now.toLocaleDateString('default', { month: 'long' })} ${now.getFullYear()})`;
             }
             
-            filteredTransactions = filtered;
+            filteredTransactions = allTransactions.filter(tx => {
+                const txDate = new Date(tx.date);
+                return txDate >= startDate && txDate <= endDate;
+            });
+            
             console.log(`Filtered ${filteredTransactions.length} transactions for ${currentPeriod} period`);
         }
 
         // Initialize Period Tabs
         function initializePeriodTabs() {
+            const periodTabs = document.querySelectorAll('.period-tab');
             periodTabs.forEach(tab => {
                 tab.addEventListener('click', () => {
                     // Remove active class from all tabs
@@ -1185,9 +1092,7 @@
                     customDateRangeContainer.style.display = currentPeriod === 'custom' ? 'block' : 'none';
                     // Refresh data
                     filterTransactionsForCurrentPeriod();
-                    updateBudgetDisplay();
-                    updateLimitSummary();
-                    updateLimitForms();
+                    updateAllDisplays();
                 });
             });
         }
@@ -1195,86 +1100,49 @@
         // Update Limit Forms
         function updateLimitForms() {
             let formHTML = '';
+            let currentLimit = budgetSettings[`${currentPeriod}Limit`] || 0;
             
-            switch (currentPeriod) {
-                case 'weekly':
-                    formHTML = `
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label class="form-label">Set Weekly Budget Limit</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" id="weeklyLimitInputForm" class="form-control" 
-                                           step="0.01" min="0" placeholder="Enter weekly limit"
-                                           value="${budgetSettings.weeklyLimit || ''}">
-                                    <button class="btn btn-primary" onclick="setPeriodLimit('weekly')">Set</button>
-                                </div>
-                            </div>
+            formHTML = `
+                <div class="col-md-8">
+                    <div class="mb-3">
+                        <label class="form-label">Set ${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)} Budget Limit</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" id="${currentPeriod}LimitInputForm" class="form-control" 
+                                   step="0.01" min="0" placeholder="Enter ${currentPeriod} limit"
+                                   value="${currentLimit}">
+                            <button class="btn btn-primary" onclick="setPeriodLimit('${currentPeriod}')">Set</button>
                         </div>
-                    `;
-                    periodLabel.textContent = 'Weekly Budget';
-                    periodProgressLabel.textContent = 'Weekly Budget Usage';
-                    break;
-                    
-                case 'monthly':
-                    formHTML = `
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label class="form-label">Set Monthly Budget Limit</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" id="monthlyLimitInputForm" class="form-control" 
-                                           step="0.01" min="0" placeholder="Enter monthly limit"
-                                           value="${budgetSettings.monthlyLimit || ''}">
-                                    <button class="btn btn-primary" onclick="setPeriodLimit('monthly')">Set</button>
-                                </div>
-                            </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="mb-3">
+                        <label class="form-label">Warning Threshold</label>
+                        <div class="input-group">
+                            <input type="range" id="warningThreshold" class="form-range" min="50" max="95" value="${budgetSettings.warningThreshold || 80}">
+                            <span class="input-group-text" id="thresholdValue">${budgetSettings.warningThreshold || 80}%</span>
                         </div>
-                    `;
-                    periodLabel.textContent = 'Monthly Budget';
-                    periodProgressLabel.textContent = 'Monthly Budget Usage';
-                    break;
-                    
-                case 'quarterly':
-                    formHTML = `
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label class="form-label">Set Quarterly Budget Limit</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" id="quarterlyLimitInputForm" class="form-control" 
-                                           step="0.01" min="0" placeholder="Enter quarterly limit"
-                                           value="${budgetSettings.quarterlyLimit || ''}">
-                                    <button class="btn btn-primary" onclick="setPeriodLimit('quarterly')">Set</button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    periodLabel.textContent = 'Quarterly Budget';
-                    periodProgressLabel.textContent = 'Quarterly Budget Usage';
-                    break;
-                    
-                case 'yearly':
-                    formHTML = `
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label class="form-label">Set Yearly Budget Limit</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" id="yearlyLimitInputForm" class="form-control" 
-                                           step="0.01" min="0" placeholder="Enter yearly limit"
-                                           value="${budgetSettings.yearlyLimit || ''}">
-                                    <button class="btn btn-primary" onclick="setPeriodLimit('yearly')">Set</button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    periodLabel.textContent = 'Yearly Budget';
-                    periodProgressLabel.textContent = 'Yearly Budget Usage';
-                    break;
-            }
+                        <small class="text-muted">Alert when spending reaches this %</small>
+                    </div>
+                </div>
+            `;
+            
+            periodLabel.textContent = `${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)} Budget`;
+            periodProgressLabel.textContent = `${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)} Budget Usage`;
             
             limitFormContainer.innerHTML = formHTML;
+            
+            // Add event listener for threshold slider
+            const warningThresholdInput = document.getElementById('warningThreshold');
+            const thresholdValueSpan = document.getElementById('thresholdValue');
+            
+            if (warningThresholdInput && thresholdValueSpan) {
+                warningThresholdInput.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    thresholdValueSpan.textContent = `${value}%`;
+                    budgetSettings.warningThreshold = parseInt(value);
+                });
+            }
         }
 
         // Set Period Limit
@@ -1289,9 +1157,19 @@
             }
             
             budgetSettings[`${period}Limit`] = limit;
-            await saveBudgetSettings();
-            updateBudgetDisplay();
-            updateLimitSummary();
+            
+            // If rollover is enabled, update rollover balance
+            if (budgetSettings.rolloverEnabled) {
+                const currentSpending = calculateCurrentSpending();
+                const previousLimit = budgetSettings[`${period}Limit`] || 0;
+                if (previousLimit > 0) {
+                    const previousRemaining = Math.max(0, previousLimit - currentSpending);
+                    budgetSettings.rolloverBalance = previousRemaining;
+                    updateRolloverBalance();
+                }
+            }
+            
+            updateAllDisplays();
             showAlert(`${period.charAt(0).toUpperCase() + period.slice(1)} limit set to ${formatCurrency(limit)}`, 'success');
         }
 
@@ -1306,7 +1184,7 @@
             // Update display
             periodBudget.textContent = formatCurrency(limit);
             document.getElementById('currentSpending').textContent = formatCurrency(spending);
-            document.getElementById('remainingBudget').textContent = formatCurrency(available);
+            document.getElementById('remainingBudget').textContent = formatCurrency(Math.max(0, available));
             rolloverBalance.textContent = formatCurrency(rollover);
             document.getElementById('budgetPercentage').textContent = `${percentage.toFixed(1)}%`;
             document.getElementById('budgetProgressBar').style.width = `${Math.min(percentage, 100)}%`;
@@ -1330,7 +1208,6 @@
             periods.forEach(period => {
                 const limit = budgetSettings[`${period}Limit`] || 0;
                 const spent = calculatePeriodSpending(period);
-                const remaining = Math.max(0, limit - spent);
                 
                 document.getElementById(`${period}Limit`).textContent = formatCurrency(limit);
                 document.getElementById(`${period}Spent`).textContent = formatCurrency(spent);
@@ -1356,7 +1233,8 @@
             
             switch (period) {
                 case 'weekly':
-                    startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+                    startDate = new Date(now);
+                    startDate.setDate(now.getDate() - now.getDay());
                     endDate = new Date(startDate);
                     endDate.setDate(startDate.getDate() + 6);
                     break;
@@ -1377,10 +1255,13 @@
                     return 0;
             }
             
+            startDate.setHours(0, 0, 0, 0);
+            endDate.setHours(23, 59, 59, 999);
+            
             const expenses = allTransactions.filter(tx => 
                 tx.type === 'Expense' && 
-                tx.date >= startDate && 
-                tx.date <= endDate
+                new Date(tx.date) >= startDate && 
+                new Date(tx.date) <= endDate
             );
             
             return expenses.reduce((total, tx) => total + tx.amount, 0);
@@ -1390,6 +1271,12 @@
         function calculateCurrentSpending() {
             const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
             return expenses.reduce((total, tx) => total + tx.amount, 0);
+        }
+
+        // Calculate Current Income
+        function calculateCurrentIncome() {
+            const income = filteredTransactions.filter(tx => tx.type === 'Income');
+            return income.reduce((total, tx) => total + tx.amount, 0);
         }
 
         // Update Budget Status
@@ -1402,7 +1289,7 @@
                 statusDot.className = 'status-dot status-danger';
                 statusText.textContent = 'Exceeded';
                 budgetStatusEl.style.color = 'var(--danger-color)';
-            } else if (percentage >= 80) {
+            } else if (percentage >= (budgetSettings.warningThreshold || 80)) {
                 statusDot.className = 'status-dot status-warning';
                 statusText.textContent = 'Warning';
                 budgetStatusEl.style.color = 'var(--warning-color)';
@@ -1418,13 +1305,460 @@
             const progressBar = document.getElementById('budgetProgressBar');
             if (percentage >= 100) {
                 progressBar.className = 'progress-bar bg-danger';
-            } else if (percentage >= 80) {
+            } else if (percentage >= (budgetSettings.warningThreshold || 80)) {
                 progressBar.className = 'progress-bar bg-warning';
             } else if (percentage >= 70) {
                 progressBar.className = 'progress-bar bg-info';
             } else {
                 progressBar.className = 'progress-bar bg-success';
             }
+        }
+
+        // Update Top Expenses List
+        function updateTopExpenses() {
+            const expenses = filteredTransactions
+                .filter(tx => tx.type === 'Expense')
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 5);
+            
+            const topExpensesList = document.getElementById('topExpensesList');
+            
+            if (expenses.length === 0) {
+                topExpensesList.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-receipt fa-2x mb-3"></i>
+                        <p>No expenses this period</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            expenses.forEach((expense, index) => {
+                const date = new Date(expense.date).toLocaleDateString();
+                html += `
+                    <div class="top-item">
+                        <div>
+                            <strong>${index + 1}. ${expense.description}</strong>
+                            <div class="small text-muted">
+                                ${date} • ${expense.category} • ${expense.bank}
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold text-danger">${formatCurrency(expense.amount)}</div>
+                            <small class="text-muted">Expense</small>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            topExpensesList.innerHTML = html;
+        }
+
+        // Update Top Income List
+        function updateTopIncome() {
+            const income = filteredTransactions
+                .filter(tx => tx.type === 'Income')
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 5);
+            
+            const topIncomeList = document.getElementById('topIncomeList');
+            
+            if (income.length === 0) {
+                topIncomeList.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-money-bill-wave fa-2x mb-3"></i>
+                        <p>No income this period</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            income.forEach((inc, index) => {
+                const date = new Date(inc.date).toLocaleDateString();
+                html += `
+                    <div class="top-item">
+                        <div>
+                            <strong>${index + 1}. ${inc.description}</strong>
+                            <div class="small text-muted">
+                                ${date} • ${inc.category} • ${inc.bank}
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold text-success">${formatCurrency(inc.amount)}</div>
+                            <small class="text-muted">Income</small>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            topIncomeList.innerHTML = html;
+        }
+
+        // Update Spending Analysis
+        function updateSpendingAnalysis() {
+            updateSpendingChart();
+            updateSpendingMetrics();
+        }
+
+        // Update Spending Chart
+        function updateSpendingChart() {
+            const ctx = document.getElementById('spendingChart');
+            if (!ctx) return;
+            
+            // Destroy existing chart
+            if (spendingChart) {
+                spendingChart.destroy();
+            }
+            
+            // Prepare data for last 30 days
+            const days = 30;
+            const dailyData = [];
+            const labels = [];
+            
+            for (let i = days - 1; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                labels.push(dateStr);
+                
+                // Calculate total spending for this day
+                const daySpending = allTransactions
+                    .filter(tx => {
+                        const txDate = new Date(tx.date);
+                        return txDate.getDate() === date.getDate() &&
+                               txDate.getMonth() === date.getMonth() &&
+                               txDate.getFullYear() === date.getFullYear() &&
+                               tx.type === 'Expense';
+                    })
+                    .reduce((sum, tx) => sum + tx.amount, 0);
+                
+                dailyData.push(daySpending);
+            }
+            
+            // Create chart
+            spendingChart = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Daily Spending',
+                        data: dailyData,
+                        borderColor: 'rgba(220, 53, 69, 1)',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    return `$${context.parsed.y.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            },
+                            ticks: {
+                                callback: (value) => `$${value}`
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update Category Chart
+        function updateCategoryChart() {
+            const ctx = document.getElementById('categoryChart');
+            if (!ctx) return;
+            
+            // Destroy existing chart
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+            
+            // Prepare category data
+            const categoryData = {};
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            expenses.forEach(tx => {
+                const category = tx.category || 'Uncategorized';
+                if (!categoryData[category]) {
+                    categoryData[category] = 0;
+                }
+                categoryData[category] += tx.amount;
+            });
+            
+            // Sort categories by amount
+            const sortedCategories = Object.entries(categoryData)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+            
+            if (sortedCategories.length === 0) {
+                ctx.style.display = 'none';
+                return;
+            }
+            
+            ctx.style.display = 'block';
+            
+            // Create chart
+            categoryChart = new Chart(ctx.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: sortedCategories.map(([category]) => category),
+                    datasets: [{
+                        data: sortedCategories.map(([_, amount]) => amount),
+                        backgroundColor: [
+                            'rgba(220, 53, 69, 0.8)',
+                            'rgba(255, 193, 7, 0.8)',
+                            'rgba(13, 202, 240, 0.8)',
+                            'rgba(111, 66, 193, 0.8)',
+                            'rgba(25, 135, 84, 0.8)',
+                            'rgba(253, 126, 20, 0.8)',
+                            'rgba(108, 117, 125, 0.8)',
+                            'rgba(32, 201, 151, 0.8)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const value = context.parsed;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update Spending Metrics
+        function updateSpendingMetrics() {
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            if (expenses.length === 0) {
+                document.getElementById('highestSpendingDay').textContent = '-';
+                document.getElementById('avgDailySpend').textContent = '$0.00';
+                document.getElementById('projectedPeriod').textContent = '$0.00';
+                return;
+            }
+            
+            // Find highest spending day
+            const dailySpending = {};
+            expenses.forEach(tx => {
+                const dateStr = new Date(tx.date).toLocaleDateString();
+                if (!dailySpending[dateStr]) {
+                    dailySpending[dateStr] = 0;
+                }
+                dailySpending[dateStr] += tx.amount;
+            });
+            
+            let highestDay = '';
+            let highestAmount = 0;
+            Object.entries(dailySpending).forEach(([date, amount]) => {
+                if (amount > highestAmount) {
+                    highestAmount = amount;
+                    highestDay = date;
+                }
+            });
+            
+            document.getElementById('highestSpendingDay').textContent = highestDay || '-';
+            
+            // Calculate average daily spending
+            const totalSpending = calculateCurrentSpending();
+            const daysInPeriod = getDaysInPeriod();
+            const avgDaily = totalSpending / Math.max(1, daysInPeriod);
+            document.getElementById('avgDailySpend').textContent = formatCurrency(avgDaily);
+            
+            // Project period spending
+            const projectedPeriod = avgDaily * daysInPeriod;
+            document.getElementById('projectedPeriod').textContent = formatCurrency(projectedPeriod);
+        }
+
+        // Get Days in Current Period
+        function getDaysInPeriod() {
+            const now = new Date();
+            
+            switch (currentPeriod) {
+                case 'weekly':
+                    return 7;
+                case 'monthly':
+                    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+                case 'quarterly':
+                    const quarter = Math.floor(now.getMonth() / 3);
+                    const start = new Date(now.getFullYear(), quarter * 3, 1);
+                    const end = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+                    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                case 'yearly':
+                    return new Date(now.getFullYear(), 11, 31).getDate();
+                case 'custom':
+                    if (budgetSettings.customStartDate && budgetSettings.customEndDate) {
+                        const start = new Date(budgetSettings.customStartDate);
+                        const end = new Date(budgetSettings.customEndDate);
+                        return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                    }
+                    return 30;
+                default:
+                    return 30;
+            }
+        }
+
+        // Generate Financial Insights
+        function generateFinancialInsights() {
+            const currentSpending = calculateCurrentSpending();
+            const currentIncome = calculateCurrentIncome();
+            const savingsRate = currentIncome > 0 ? ((currentIncome - currentSpending) / currentIncome * 100) : 0;
+            
+            let insightsHTML = '';
+            
+            if (filteredTransactions.length === 0) {
+                insightsHTML = `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-info-circle me-2"></i>Welcome!</h6>
+                        <p>Start by adding transactions to get personalized financial insights.</p>
+                    </div>
+                `;
+            } else {
+                insightsHTML = `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-chart-line me-2"></i>${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)} Overview</h6>
+                        <p>Spending: <strong>${formatCurrency(currentSpending)}</strong></p>
+                        <p>Income: <strong>${formatCurrency(currentIncome)}</strong></p>
+                        <p>Savings Rate: <strong>${savingsRate.toFixed(1)}%</strong></p>
+                    </div>
+                `;
+                
+                // Add budget utilization insight
+                const limit = budgetSettings[`${currentPeriod}Limit`] || 0;
+                if (limit > 0) {
+                    const utilization = (currentSpending / limit * 100);
+                    if (utilization > 90) {
+                        insightsHTML += `
+                            <div class="insight-item">
+                                <h6><i class="fas fa-exclamation-triangle me-2 text-danger"></i>Budget Alert</h6>
+                                <p>You've used ${utilization.toFixed(1)}% of your ${currentPeriod} budget.</p>
+                            </div>
+                        `;
+                    }
+                }
+                
+                // Add category insight
+                const categoryData = {};
+                const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+                expenses.forEach(tx => {
+                    const category = tx.category || 'Uncategorized';
+                    categoryData[category] = (categoryData[category] || 0) + tx.amount;
+                });
+                
+                const topCategory = Object.entries(categoryData).sort((a, b) => b[1] - a[1])[0];
+                if (topCategory) {
+                    insightsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-tags me-2"></i>Top Spending Category</h6>
+                            <p><strong>${topCategory[0]}</strong>: ${formatCurrency(topCategory[1])}</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            document.getElementById('aiInsights').innerHTML = insightsHTML;
+        }
+
+        // Update Recent Transactions
+        function updateRecentTransactions() {
+            const recentTransactionsEl = document.getElementById('recentTransactions');
+            
+            if (filteredTransactions.length === 0) {
+                recentTransactionsEl.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            <i class="fas fa-receipt fa-2x mb-3"></i>
+                            <p>No transactions this period</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            // Show last 10 transactions
+            const recentTx = filteredTransactions.slice(0, 10);
+            
+            let html = '';
+            recentTx.forEach(tx => {
+                const date = new Date(tx.date).toLocaleDateString();
+                const typeBadge = tx.type === 'Income' ? 
+                    '<span class="badge bg-success">Income</span>' : 
+                    '<span class="badge bg-danger">Expense</span>';
+                
+                html += `
+                    <tr>
+                        <td>${date}</td>
+                        <td>${tx.description}</td>
+                        <td><span class="category-badge ${tx.type === 'Income' ? 'income-category' : 'expense-category'}">${tx.category}</span></td>
+                        <td>${typeBadge}</td>
+                        <td class="fw-bold ${tx.type === 'Income' ? 'text-success' : 'text-danger'}">
+                            ${tx.type === 'Income' ? '+' : '-'}${formatCurrency(tx.amount)}
+                        </td>
+                        <td>${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}</td>
+                    </tr>
+                `;
+            });
+            
+            recentTransactionsEl.innerHTML = html;
+        }
+
+        // Update Rollover Balance
+        function updateRolloverBalance() {
+            const rolloverBalanceEl = document.getElementById('rolloverBalance');
+            rolloverBalanceEl.textContent = formatCurrency(budgetSettings.rolloverBalance || 0);
+        }
+
+        // Update All Displays
+        function updateAllDisplays() {
+            updateBudgetDisplay();
+            updateLimitSummary();
+            updateTopExpenses();
+            updateTopIncome();
+            updateSpendingAnalysis();
+            updateCategoryChart();
+            generateFinancialInsights();
+            updateRecentTransactions();
         }
 
         // Setup Event Listeners
@@ -1435,7 +1769,7 @@
                 customDateRangeContainer.style.display = currentPeriod === 'custom' ? 'block' : 'none';
                 
                 // Update active tab
-                periodTabs.forEach(tab => {
+                document.querySelectorAll('.period-tab').forEach(tab => {
                     tab.classList.remove('active');
                     if (tab.dataset.period === currentPeriod) {
                         tab.classList.add('active');
@@ -1443,65 +1777,190 @@
                 });
                 
                 filterTransactionsForCurrentPeriod();
-                updateBudgetDisplay();
                 updateLimitForms();
+                updateAllDisplays();
             });
             
             // Apply custom date range
-            applyCustomRange.addEventListener('click', () => {
-                if (!customFromDate.value || !customToDate.value) {
+            document.getElementById('applyCustomRange').addEventListener('click', () => {
+                const fromDate = document.getElementById('customFromDate').value;
+                const toDate = document.getElementById('customToDate').value;
+                
+                if (!fromDate || !toDate) {
                     showAlert('Please select both from and to dates', 'error');
                     return;
                 }
                 
-                budgetSettings.customStartDate = customFromDate.value;
-                budgetSettings.customEndDate = customToDate.value;
-                saveBudgetSettings();
+                if (new Date(fromDate) > new Date(toDate)) {
+                    showAlert('From date must be before to date', 'error');
+                    return;
+                }
+                
+                budgetSettings.customStartDate = fromDate;
+                budgetSettings.customEndDate = toDate;
                 filterTransactionsForCurrentPeriod();
-                updateBudgetDisplay();
+                updateAllDisplays();
                 showAlert('Custom date range applied', 'success');
             });
             
             // Roll-over toggle
-            rolloverToggle.addEventListener('change', async () => {
-                budgetSettings.rolloverEnabled = rolloverToggle.checked;
-                await saveBudgetSettings();
+            document.getElementById('rolloverToggle').addEventListener('change', () => {
+                budgetSettings.rolloverEnabled = document.getElementById('rolloverToggle').checked;
                 updateBudgetDisplay();
+                updateRolloverBalance();
                 
-                if (rolloverToggle.checked) {
+                if (budgetSettings.rolloverEnabled) {
                     showAlert('Roll-over budget enabled', 'success');
                 } else {
                     showAlert('Roll-over budget disabled', 'info');
                 }
             });
             
+            // Analyze spending button
+            document.getElementById('analyzeSpendingBtn').addEventListener('click', () => {
+                analyzeSpendingPatterns();
+            });
+            
+            // Generate tips button
+            document.getElementById('generateTipsBtn').addEventListener('click', () => {
+                generateSavingsTips();
+            });
+            
             // Set all limits button
-            setAllLimitsBtn.addEventListener('click', () => {
-                document.getElementById('weeklyLimitInput').value = budgetSettings.weeklyLimit || '';
-                document.getElementById('monthlyLimitInput').value = budgetSettings.monthlyLimit || '';
-                document.getElementById('quarterlyLimitInput').value = budgetSettings.quarterlyLimit || '';
-                document.getElementById('yearlyLimitInput').value = budgetSettings.yearlyLimit || '';
-                allLimitsModal.show();
+            document.getElementById('setAllLimitsBtn').addEventListener('click', () => {
+                showAllLimitsModal();
+            });
+            
+            // Export report button
+            document.getElementById('exportReportBtn').addEventListener('click', () => {
+                exportPDF('summary');
             });
             
             // Save all limits
-            saveAllLimitsBtn.addEventListener('click', async () => {
-                budgetSettings.weeklyLimit = parseFloat(document.getElementById('weeklyLimitInput').value) || 0;
-                budgetSettings.monthlyLimit = parseFloat(document.getElementById('monthlyLimitInput').value) || 0;
-                budgetSettings.quarterlyLimit = parseFloat(document.getElementById('quarterlyLimitInput').value) || 0;
-                budgetSettings.yearlyLimit = parseFloat(document.getElementById('yearlyLimitInput').value) || 0;
-                
-                await saveBudgetSettings();
-                updateBudgetDisplay();
-                updateLimitSummary();
-                updateLimitForms();
-                allLimitsModal.hide();
-                showAlert('All period limits saved successfully', 'success');
+            document.getElementById('saveAllLimits').addEventListener('click', () => {
+                saveAllLimits();
             });
             
             // Theme toggle
             document.getElementById('themeToggle').addEventListener('click', toggleTheme);
             document.getElementById('themeToggleFloat').addEventListener('click', toggleTheme);
+            
+            // Set current dates for custom range inputs
+            const today = new Date().toISOString().split('T')[0];
+            const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+            document.getElementById('customFromDate').value = firstDayOfMonth;
+            document.getElementById('customToDate').value = today;
+            budgetSettings.customStartDate = firstDayOfMonth;
+            budgetSettings.customEndDate = today;
+        }
+
+        // Show All Limits Modal
+        function showAllLimitsModal() {
+            document.getElementById('weeklyLimitInput').value = budgetSettings.weeklyLimit;
+            document.getElementById('monthlyLimitInput').value = budgetSettings.monthlyLimit;
+            document.getElementById('quarterlyLimitInput').value = budgetSettings.quarterlyLimit;
+            document.getElementById('yearlyLimitInput').value = budgetSettings.yearlyLimit;
+            
+            const modal = new bootstrap.Modal(document.getElementById('allLimitsModal'));
+            modal.show();
+        }
+
+        // Save All Limits
+        function saveAllLimits() {
+            budgetSettings.weeklyLimit = parseFloat(document.getElementById('weeklyLimitInput').value) || 0;
+            budgetSettings.monthlyLimit = parseFloat(document.getElementById('monthlyLimitInput').value) || 0;
+            budgetSettings.quarterlyLimit = parseFloat(document.getElementById('quarterlyLimitInput').value) || 0;
+            budgetSettings.yearlyLimit = parseFloat(document.getElementById('yearlyLimitInput').value) || 0;
+            
+            updateAllDisplays();
+            
+            const modal = bootstrap.Modal.getInstance(document.getElementById('allLimitsModal'));
+            modal.hide();
+            
+            showAlert('All period limits saved successfully', 'success');
+        }
+
+        // Analyze Spending Patterns
+        function analyzeSpendingPatterns() {
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            if (expenses.length === 0) {
+                showAlert('No expenses to analyze', 'info');
+                return;
+            }
+            
+            const totalSpending = calculateCurrentSpending();
+            const avgTransaction = totalSpending / expenses.length;
+            
+            // Group by category
+            const categoryData = {};
+            expenses.forEach(tx => {
+                const category = tx.category || 'Uncategorized';
+                categoryData[category] = (categoryData[category] || 0) + tx.amount;
+            });
+            
+            const topCategory = Object.entries(categoryData).sort((a, b) => b[1] - a[1])[0];
+            
+            Swal.fire({
+                title: '📊 Spending Analysis',
+                html: `
+                    <div class="text-start">
+                        <p><strong>Total Spending:</strong> ${formatCurrency(totalSpending)}</p>
+                        <p><strong>Number of Transactions:</strong> ${expenses.length}</p>
+                        <p><strong>Average Transaction:</strong> ${formatCurrency(avgTransaction)}</p>
+                        ${topCategory ? `
+                            <p><strong>Top Category:</strong> ${topCategory[0]}</p>
+                            <p><strong>Amount:</strong> ${formatCurrency(topCategory[1])}</p>
+                            <p><strong>Percentage:</strong> ${((topCategory[1] / totalSpending) * 100).toFixed(1)}%</p>
+                        ` : ''}
+                    </div>
+                `,
+                icon: 'info',
+                confirmButtonText: 'OK'
+            });
+        }
+
+        // Generate Savings Tips
+        function generateSavingsTips() {
+            const currentSpending = calculateCurrentSpending();
+            const currentIncome = calculateCurrentIncome();
+            const savingsRate = currentIncome > 0 ? ((currentIncome - currentSpending) / currentIncome * 100) : 0;
+            
+            let tips = [];
+            
+            if (savingsRate < 20) {
+                tips.push("Consider setting aside 20% of your income for savings each month.");
+            }
+            
+            if (currentSpending > (budgetSettings.monthlyLimit || 0) * 0.8) {
+                tips.push("You're approaching your monthly budget limit. Review discretionary spending.");
+            }
+            
+            // Check for frequent small expenses
+            const smallExpenses = filteredTransactions
+                .filter(tx => tx.type === 'Expense' && tx.amount < 20)
+                .length;
+            
+            if (smallExpenses > 10) {
+                tips.push(`You have ${smallExpenses} small purchases. These can add up quickly!`);
+            }
+            
+            if (tips.length === 0) {
+                tips.push("Great job! Your finances look healthy. Keep tracking your spending.");
+            }
+            
+            Swal.fire({
+                title: '💡 Savings Tips',
+                html: `
+                    <div class="text-start">
+                        <p><strong>Current Savings Rate:</strong> ${savingsRate.toFixed(1)}%</p>
+                        <hr>
+                        ${tips.map(tip => `<p>• ${tip}</p>`).join('')}
+                    </div>
+                `,
+                icon: 'info',
+                confirmButtonText: 'Got it!'
+            });
         }
 
         // Export PDF
@@ -1514,93 +1973,32 @@
             doc.text('Budget Report', 20, 20);
             doc.setFontSize(12);
             doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 30);
+            doc.text(`Period: ${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}`, 20, 37);
             
-            // Add period information
-            doc.text(`Period: ${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}`, 20, 40);
-            doc.text(`Date Range: ${currentPeriodLabel.textContent.replace('This ', '')}`, 20, 45);
+            let yPosition = 50;
             
-            let yPosition = 60;
+            // Add summary statistics
+            doc.setFontSize(16);
+            doc.text('Summary Statistics', 20, yPosition);
+            yPosition += 15;
             
-            switch(type) {
-                case 'summary':
-                    // Add summary statistics
-                    doc.setFontSize(16);
-                    doc.text('Summary Statistics', 20, yPosition);
-                    yPosition += 15;
-                    
-                    doc.setFontSize(12);
-                    const summaryData = [
-                        ['Period Limit', formatCurrency(budgetSettings[`${currentPeriod}Limit`] || 0)],
-                        ['Current Spending', formatCurrency(calculateCurrentSpending())],
-                        ['Remaining Budget', formatCurrency((budgetSettings[`${currentPeriod}Limit`] || 0) - calculateCurrentSpending())],
-                        ['Roll-over Balance', formatCurrency(budgetSettings.rolloverBalance || 0)]
-                    ];
-                    
-                    summaryData.forEach(([label, value]) => {
-                        doc.text(`${label}: ${value}`, 20, yPosition);
-                        yPosition += 10;
-                    });
-                    break;
-                    
-                case 'detailed':
-                    // Add detailed transactions
-                    doc.setFontSize(16);
-                    doc.text('Recent Transactions', 20, yPosition);
-                    yPosition += 15;
-                    
-                    doc.setFontSize(10);
-                    filteredTransactions.slice(0, 20).forEach((tx, index) => {
-                        if (yPosition > 280) {
-                            doc.addPage();
-                            yPosition = 20;
-                        }
-                        doc.text(`${tx.date.toLocaleDateString()} - ${tx.description}`, 20, yPosition);
-                        doc.text(formatCurrency(tx.amount), 180, yPosition, { align: 'right' });
-                        yPosition += 8;
-                    });
-                    break;
-                    
-                case 'all':
-                    // Combine all reports
-                    exportPDF('summary');
-                    // Note: For a complete report, you would need to handle multiple pages
-                    showAlert('Complete report generation would require more complex PDF generation', 'info');
-                    return;
-            }
+            doc.setFontSize(12);
+            const summaryData = [
+                ['Period Limit', formatCurrency(budgetSettings[`${currentPeriod}Limit`] || 0)],
+                ['Current Spending', formatCurrency(calculateCurrentSpending())],
+                ['Remaining Budget', formatCurrency((budgetSettings[`${currentPeriod}Limit`] || 0) - calculateCurrentSpending())],
+                ['Roll-over Balance', formatCurrency(budgetSettings.rolloverBalance || 0)],
+                ['Budget Utilization', `${((calculateCurrentSpending() / (budgetSettings[`${currentPeriod}Limit`] || 1)) * 100).toFixed(1)}%`]
+            ];
+            
+            summaryData.forEach(([label, value]) => {
+                doc.text(`${label}: ${value}`, 20, yPosition);
+                yPosition += 10;
+            });
             
             // Save the PDF
             doc.save(`budget-report-${currentPeriod}-${new Date().toISOString().split('T')[0]}.pdf`);
             showAlert('PDF exported successfully', 'success');
-        }
-
-        // Load Notifications
-        async function loadNotifications() {
-            // Implementation similar to previous version
-        }
-
-        // Setup Realtime Listeners
-        function setupRealtimeListeners() {
-            // Implementation similar to previous version
-        }
-
-        // Update Top Lists
-        function updateTopLists() {
-            // Implementation similar to previous version
-        }
-
-        // Update Spending Analysis
-        function updateSpendingAnalysis() {
-            // Implementation similar to previous version
-        }
-
-        // Generate Financial Insights
-        function generateFinancialInsights() {
-            // Implementation similar to previous version
-        }
-
-        // Update Recent Transactions
-        function updateRecentTransactions() {
-            // Implementation similar to previous version
         }
 
         // Theme Management
@@ -1652,15 +2050,7 @@
             }, 5000);
         }
 
-        function showLoadingState() {
-            // Implementation
-        }
-
-        function hideLoadingState() {
-            // Implementation
-        }
-
-        // Make functions available globally for onclick handlers
+        // Make functions available globally
         window.setPeriodLimit = setPeriodLimit;
         window.exportPDF = exportPDF;
     </script>
