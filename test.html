@@ -760,9 +760,13 @@
       border-radius: 50%;
       cursor: pointer;
       transition: transform 0.2s;
+      border: 2px solid transparent;
     }
     .color-option:hover {
       transform: scale(1.1);
+    }
+    .color-option.selected {
+      border-color: var(--text-primary);
     }
   </style>
 </head>
@@ -990,7 +994,7 @@
               <div class="col-md-12">
                 <label class="form-label">Color Code</label>
                 <div class="d-flex gap-2" id="colorPicker">
-                  <div class="color-option" data-color="#6f42c1" style="background: #6f42c1;"></div>
+                  <div class="color-option selected" data-color="#6f42c1" style="background: #6f42c1;"></div>
                   <div class="color-option" data-color="#198754" style="background: #198754;"></div>
                   <div class="color-option" data-color="#0dcaf0" style="background: #0dcaf0;"></div>
                   <div class="color-option" data-color="#ffc107" style="background: #ffc107;"></div>
@@ -1149,6 +1153,45 @@
     </div>
   </div>
 
+  <!-- Edit Alert Modal -->
+  <div class="modal fade" id="editAlertModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="fa fa-edit me-2"></i>Edit Budget Alert</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editAlertForm">
+            <input type="hidden" id="editAlertId">
+            <div class="mb-3">
+              <label class="form-label">Category</label>
+              <input type="text" id="editAlertCategory" class="form-control" readonly>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Limit Amount</label>
+              <input type="number" id="editAlertLimit" class="form-control" step="0.01" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Alert Threshold (%)</label>
+              <input type="number" id="editAlertThreshold" class="form-control" min="0" max="100" value="80" required>
+            </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="editAlertEnabled" checked>
+              <label class="form-check-label" for="editAlertEnabled">
+                Alert Enabled
+              </label>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button id="updateAlertBtn" class="btn btn-primary">Update</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- AI Assistant Modal -->
   <div class="modal fade" id="aiAssistantModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
@@ -1257,6 +1300,7 @@
     const setBudgetModal = new bootstrap.Modal(document.getElementById("setBudgetModal"));
     const forecastModal = new bootstrap.Modal(document.getElementById("forecastModal"));
     const manageAlertsModal = new bootstrap.Modal(document.getElementById("manageAlertsModal"));
+    const editAlertModal = new bootstrap.Modal(document.getElementById("editAlertModal"));
     const aiAssistantModal = new bootstrap.Modal(document.getElementById("aiAssistantModal"));
 
     // Form elements
@@ -1358,6 +1402,8 @@
         return true;
       } catch (err) {
         console.error("loadTransactions error:", err);
+        // Return empty array if no transactions
+        allTransactions = [];
         return false;
       }
     }
@@ -1376,6 +1422,7 @@
         return true;
       } catch (err) {
         console.error("loadBudgets error:", err);
+        allBudgets = [];
         return false;
       }
     }
@@ -1432,6 +1479,7 @@
         return true;
       } catch (err) {
         console.error("loadAlerts error:", err);
+        allAlerts = [];
         return false;
       }
     }
@@ -1480,9 +1528,14 @@
         }
       });
 
-      // Period selectors
-      document.getElementById('spendingPeriod').addEventListener('change', updateSpendingChart);
-      document.getElementById('trendPeriod').addEventListener('change', updateIncomeExpenseChart);
+      // Period selectors - FIXED: Added proper event listeners
+      document.getElementById('spendingPeriod').addEventListener('change', function() {
+        updateSpendingChart();
+      });
+      
+      document.getElementById('trendPeriod').addEventListener('change', function() {
+        updateIncomeExpenseChart();
+      });
       
       // Forecast tabs
       document.querySelectorAll('.forecast-tab').forEach(tab => {
@@ -1496,13 +1549,13 @@
       // Color picker
       document.querySelectorAll('.color-option').forEach(option => {
         option.addEventListener('click', function() {
-          document.querySelectorAll('.color-option').forEach(o => o.style.border = 'none');
-          this.style.border = '2px solid var(--text-primary)';
+          document.querySelectorAll('.color-option').forEach(o => o.classList.remove('selected'));
+          this.classList.add('selected');
         });
       });
       
-      // Initialize color picker
-      document.querySelectorAll('.color-option')[0].style.border = '2px solid var(--text-primary)';
+      // Edit alert modal button
+      document.getElementById('updateAlertBtn').addEventListener('click', updateAlert);
     }
 
     // Update dashboard
@@ -1947,6 +2000,15 @@
               labels: {
                 color: 'var(--text-primary)'
               }
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              callbacks: {
+                label: function(context) {
+                  return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
+                }
+              }
             }
           },
           scales: {
@@ -1997,6 +2059,15 @@
                 color: 'var(--text-primary)',
                 boxWidth: 12,
                 padding: 15
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                  const percentage = Math.round((context.parsed / total) * 100);
+                  return `${context.label}: $${context.parsed.toFixed(2)} (${percentage}%)`;
+                }
               }
             }
           }
@@ -2055,6 +2126,13 @@
             legend: {
               labels: {
                 color: 'var(--text-primary)'
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
+                }
               }
             }
           }
@@ -2171,13 +2249,21 @@
         .sort((a, b) => b[1] - a[1])
         .slice(0, 6); // Top 6 categories
       
-      const colors = [
-        '#6f42c1', '#198754', '#0dcaf0', '#ffc107', '#dc3545', '#fd7e14'
-      ];
+      // If no data, show empty state
+      if (sortedCategories.length === 0) {
+        spendingChart.data.labels = ['No Data'];
+        spendingChart.data.datasets[0].data = [1];
+        spendingChart.data.datasets[0].backgroundColor = ['#e9ecef'];
+      } else {
+        const colors = [
+          '#6f42c1', '#198754', '#0dcaf0', '#ffc107', '#dc3545', '#fd7e14'
+        ];
+        
+        spendingChart.data.labels = sortedCategories.map(([category]) => category);
+        spendingChart.data.datasets[0].data = sortedCategories.map(([_, amount]) => amount);
+        spendingChart.data.datasets[0].backgroundColor = colors.slice(0, sortedCategories.length);
+      }
       
-      spendingChart.data.labels = sortedCategories.map(([category]) => category);
-      spendingChart.data.datasets[0].data = sortedCategories.map(([_, amount]) => amount);
-      spendingChart.data.datasets[0].backgroundColor = colors.slice(0, sortedCategories.length);
       spendingChart.update();
     }
 
@@ -2191,7 +2277,8 @@
       
       for (let i = months - 1; i >= 0; i--) {
         const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        labels.push(date.toLocaleDateString('default', { month: 'short' }));
+        const monthName = date.toLocaleDateString('default', { month: 'short' });
+        labels.push(`${monthName} '${date.getFullYear().toString().slice(-2)}`);
         
         let monthlyIncome = 0;
         let monthlyExpenses = 0;
@@ -2211,9 +2298,17 @@
         expenseData.push(monthlyExpenses);
       }
       
-      incomeExpenseChart.data.labels = labels;
-      incomeExpenseChart.data.datasets[0].data = incomeData;
-      incomeExpenseChart.data.datasets[1].data = expenseData;
+      // If no data, show empty state
+      if (incomeData.every(v => v === 0) && expenseData.every(v => v === 0)) {
+        incomeExpenseChart.data.labels = ['No Data'];
+        incomeExpenseChart.data.datasets[0].data = [0];
+        incomeExpenseChart.data.datasets[1].data = [0];
+      } else {
+        incomeExpenseChart.data.labels = labels;
+        incomeExpenseChart.data.datasets[0].data = incomeData;
+        incomeExpenseChart.data.datasets[1].data = expenseData;
+      }
+      
       incomeExpenseChart.update();
     }
 
@@ -2227,7 +2322,8 @@
       const historicalMonths = Math.min(6, months);
       for (let i = historicalMonths - 1; i >= 0; i--) {
         const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        labels.push(date.toLocaleDateString('default', { month: 'short' }));
+        const monthName = date.toLocaleDateString('default', { month: 'short' });
+        labels.push(`${monthName} '${date.getFullYear().toString().slice(-2)}`);
         
         let monthlyIncome = 0;
         let monthlyExpenses = 0;
@@ -2248,12 +2344,15 @@
       }
       
       // Add forecast data
-      const avgIncome = incomeData.reduce((a, b) => a + b, 0) / incomeData.length || 0;
-      const avgExpenses = expenseData.reduce((a, b) => a + b, 0) / expenseData.length || 0;
+      const avgIncome = incomeData.filter(v => v > 0).length > 0 ? 
+        incomeData.filter(v => v > 0).reduce((a, b) => a + b, 0) / incomeData.filter(v => v > 0).length : 0;
+      const avgExpenses = expenseData.filter(v => v > 0).length > 0 ? 
+        expenseData.filter(v => v > 0).reduce((a, b) => a + b, 0) / expenseData.filter(v => v > 0).length : 0;
       
       for (let i = 1; i <= months - historicalMonths; i++) {
         const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
-        labels.push(date.toLocaleDateString('default', { month: 'short' }));
+        const monthName = date.toLocaleDateString('default', { month: 'short' });
+        labels.push(`${monthName} '${date.getFullYear().toString().slice(-2)}`);
         
         // Simple forecast with growth
         const forecastIncome = avgIncome * (1 + 0.02 * i); // 2% monthly growth
@@ -2267,6 +2366,11 @@
       forecastChart.data.datasets[0].data = incomeData;
       forecastChart.data.datasets[1].data = expenseData;
       forecastChart.update();
+    }
+
+    function updateForecast(months) {
+      updateForecastChart(months);
+      updateForecastCards();
     }
 
     // Generate tips
@@ -2394,7 +2498,7 @@
             </div>
             <div class="alert-progress">
               <div class="progress-bar-container">
-                <div class="progress-bar-fill" style="width: ${alert.percentage}%; background: ${
+                <div class="progress-bar-fill" style="width: ${Math.min(alert.percentage, 100)}%; background: ${
                   alert.type === 'critical' ? '#dc3545' : 
                   alert.type === 'warning' ? '#ffc107' : '#0dcaf0'
                 }">
@@ -2483,6 +2587,8 @@
         'Business': 'fa-briefcase',
         'Other': 'fa-ellipsis-h'
       };
+      
+      if (!category) return 'fa-tag';
       
       for (const [key, icon] of Object.entries(icons)) {
         if (category.toLowerCase().includes(key.toLowerCase())) {
@@ -2588,7 +2694,7 @@
       const amount = budgetAmount.value;
       const threshold = alertThreshold.value;
       const notes = budgetNotes.value;
-      const color = document.querySelector('.color-option[style*="border"]')?.dataset.color || '#6f42c1';
+      const color = document.querySelector('.color-option.selected')?.dataset.color || '#6f42c1';
       
       if (!category || !amount) {
         Swal.fire({ 
@@ -2676,8 +2782,10 @@
       }
       
       // Forecast data
-      const avgIncome = incomeData.slice(-3).reduce((a, b) => a + b, 0) / 3 || incomeData.reduce((a, b) => a + b, 0) / incomeData.length || 0;
-      const avgExpenses = expenseData.slice(-3).reduce((a, b) => a + b, 0) / 3 || expenseData.reduce((a, b) => a + b, 0) / expenseData.length || 0;
+      const avgIncome = incomeData.filter(v => v > 0).length > 0 ? 
+        incomeData.filter(v => v > 0).reduce((a, b) => a + b, 0) / incomeData.filter(v => v > 0).length : 0;
+      const avgExpenses = expenseData.filter(v => v > 0).length > 0 ? 
+        expenseData.filter(v => v > 0).reduce((a, b) => a + b, 0) / expenseData.filter(v => v > 0).length : 0;
       
       for (let i = 1; i <= months - 6; i++) {
         const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
@@ -2825,7 +2933,7 @@
               <td>$${spent.toFixed(2)}</td>
               <td>
                 <div class="progress" style="height: 8px;">
-                  <div class="progress-bar bg-${statusClass}" style="width: ${percentage}%"></div>
+                  <div class="progress-bar bg-${statusClass}" style="width: ${Math.min(percentage, 100)}%"></div>
                 </div>
                 <small>${percentage.toFixed(1)}%</small>
               </td>
@@ -2833,7 +2941,7 @@
                 <span class="badge bg-${statusClass}">${alertStatus}</span>
               </td>
               <td>
-                <button class="btn btn-sm btn-outline-primary" onclick="editAlert('${budget.id}')">
+                <button class="btn btn-sm btn-outline-primary" onclick="window.editBudgetAlert('${budget.id}')">
                   <i class="fa fa-edit"></i>
                 </button>
               </td>
@@ -2845,6 +2953,67 @@
       alertsTable.innerHTML = html || '<tr><td colspan="6" class="text-center">No alerts configured</td></tr>';
       
       manageAlertsModal.show();
+    }
+
+    // Global function for editing alerts
+    window.editBudgetAlert = function(budgetId) {
+      const budget = allBudgets.find(b => b.id === budgetId);
+      if (!budget) return;
+      
+      document.getElementById('editAlertId').value = budgetId;
+      document.getElementById('editAlertCategory').value = budget.category;
+      document.getElementById('editAlertLimit').value = budget.amount;
+      document.getElementById('editAlertThreshold').value = budget.alertThreshold || 80;
+      document.getElementById('editAlertEnabled').checked = true;
+      
+      editAlertModal.show();
+    };
+
+    async function updateAlert() {
+      const budgetId = document.getElementById('editAlertId').value;
+      const newLimit = document.getElementById('editAlertLimit').value;
+      const newThreshold = document.getElementById('editAlertThreshold').value;
+      const enabled = document.getElementById('editAlertEnabled').checked;
+      
+      if (!budgetId || !newLimit) {
+        Swal.fire({ 
+          icon: 'warning', 
+          title: 'Validation Error', 
+          text: 'Please fill in all fields' 
+        });
+        return;
+      }
+      
+      try {
+        showLoading("Updating alert...");
+        
+        const budgetRef = doc(db, "users", currentUser.uid, "budgets", budgetId);
+        await updateDoc(budgetRef, {
+          amount: parseFloat(newLimit),
+          alertThreshold: parseFloat(newThreshold) || 80,
+          enabled: enabled,
+          updatedAt: new Date()
+        });
+        
+        hideLoading();
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Success', 
+          text: 'Alert updated successfully' 
+        });
+        editAlertModal.hide();
+        
+        await loadBudgets();
+        updateDashboard();
+      } catch (err) {
+        hideLoading();
+        console.error("updateAlert error:", err);
+        Swal.fire({ 
+          icon: 'error', 
+          title: 'Error', 
+          text: 'Failed to update alert' 
+        });
+      }
     }
 
     async function addAlert() {
