@@ -3,15 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Budget Limits & Financial Insights</title>
-    <!-- CSS Libraries -->
+    <title>Advanced Budget & Financial Insights</title>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+    
+    <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.0/dist/chartjs-adapter-luxon.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <style>
         :root {
@@ -22,7 +27,6 @@
             --danger-color: #dc3545;
             --info-color: #0dcaf0;
             --light-bg: #f4f6fb;
-            --dark-bg: #1a1d28;
             --card-bg: #ffffff;
             --text-primary: #222;
             --border-color: #eaeef2;
@@ -43,6 +47,7 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             transition: background-color 0.3s, color 0.3s;
             padding: 20px;
+            min-height: 100vh;
         }
 
         .app-container {
@@ -54,8 +59,8 @@
             background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
             color: white;
             padding: 25px;
-            border-radius: 12px 12px 0 0;
-            margin-bottom: 0;
+            border-radius: 12px;
+            margin-bottom: 20px;
         }
 
         .card {
@@ -103,19 +108,19 @@
             border-radius: 6px;
         }
 
-        .form-control, .form-select {
-            background-color: var(--card-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
+        .loading-spinner {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            vertical-align: text-bottom;
+            border: 0.25em solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spinner-border .75s linear infinite;
         }
 
-        .table {
-            color: var(--text-primary);
-        }
-
-        .chart-container {
-            height: 300px;
-            margin: 20px 0;
+        @keyframes spinner-border {
+            to { transform: rotate(360deg); }
         }
 
         .theme-toggle {
@@ -133,21 +138,7 @@
             box-shadow: 0 4px 12px rgba(111, 66, 193, 0.3);
             z-index: 1000;
             cursor: pointer;
-        }
-
-        .loading-spinner {
-            display: inline-block;
-            width: 2rem;
-            height: 2rem;
-            vertical-align: text-bottom;
-            border: 0.25em solid currentColor;
-            border-right-color: transparent;
-            border-radius: 50%;
-            animation: spinner-border .75s linear infinite;
-        }
-
-        @keyframes spinner-border {
-            to { transform: rotate(360deg); }
+            border: none;
         }
 
         .login-container {
@@ -170,42 +161,43 @@
     </style>
 </head>
 <body>
-    <!-- Firebase Login Modal -->
-    <div class="modal fade" id="loginModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Connect to Firebase</h5>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Email</label>
-                        <input type="email" id="loginEmail" class="form-control" placeholder="your@email.com" value="test@example.com">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" id="loginPassword" class="form-control" placeholder="Password" value="password123">
-                    </div>
-                    <div class="alert alert-info">
-                        <small>
-                            <i class="fas fa-info-circle me-2"></i>
-                            Using test credentials. In production, use your actual Firebase credentials.
-                        </small>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" onclick="loginToFirebase()">
-                        <span id="loginSpinner" class="loading-spinner spinner-border-sm me-2 d-none"></span>
-                        Connect to Firebase
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="useDemoData()">Use Demo Data</button>
-                </div>
-            </div>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--light-bg); display: flex; justify-content: center; align-items: center; z-index: 9999;">
+        <div class="text-center">
+            <div class="loading-spinner text-primary" style="width: 3rem; height: 3rem;"></div>
+            <h4 class="mt-3">Loading Budget App...</h4>
         </div>
     </div>
 
-    <!-- Main App Container (Initially Hidden) -->
-    <div id="appContainer" class="d-none">
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-container" style="display: none;">
+        <h2 class="text-center mb-4">Budget & Financial Insights</h2>
+        <div class="mb-4">
+            <h5>Connect to Firebase</h5>
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" id="loginEmail" class="form-control" placeholder="your@email.com" value="test@example.com">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" id="loginPassword" class="form-control" placeholder="Password" value="password123">
+            </div>
+            <button class="btn btn-primary w-100 mb-3" onclick="loginToFirebase()">
+                <span id="loginSpinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+                Connect to Firebase
+            </button>
+            
+            <h5 class="mt-4">Or Use Demo Mode</h5>
+            <p class="text-muted small mb-3">Try the app with sample data</p>
+            <button class="btn btn-outline-primary w-100" onclick="useDemoData()">
+                <i class="fas fa-play-circle me-2"></i>Launch Demo Mode
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App (Initially Hidden) -->
+    <div id="appContainer" class="app-container" style="display: none;">
+        <!-- Header -->
         <div class="header">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
@@ -213,7 +205,7 @@
                     <p class="mb-0">Real-time budget tracking with individual account limits</p>
                 </div>
                 <div class="d-flex align-items-center gap-3">
-                    <span id="dataSourceBadge" class="badge bg-info data-source-badge">
+                    <span id="dataSourceBadge" class="badge bg-info">
                         <i class="fas fa-database me-1"></i>
                         <span id="dataSourceText">Demo Data</span>
                     </span>
@@ -225,7 +217,7 @@
         </div>
 
         <!-- Period Selector -->
-        <div class="row mt-4">
+        <div class="row">
             <div class="col-md-3">
                 <div class="card">
                     <div class="card-body">
@@ -235,7 +227,6 @@
                             <option value="monthly" selected>Monthly</option>
                             <option value="quarterly">Quarterly</option>
                             <option value="yearly">Yearly</option>
-                            <option value="custom">Custom Range</option>
                         </select>
                     </div>
                 </div>
@@ -248,7 +239,7 @@
                                 <h5 class="mb-1" id="currentPeriodLabel">Current Month: August 2024</h5>
                                 <p class="text-muted mb-0" id="periodDateRange">Aug 1 - Aug 31, 2024</p>
                             </div>
-                            <button class="btn btn-primary" onclick="loadFirebaseData()">
+                            <button class="btn btn-primary" onclick="loadData()">
                                 <i class="fas fa-sync-alt me-2"></i>Refresh Data
                             </button>
                         </div>
@@ -302,7 +293,7 @@
                         <i class="fas fa-chart-line me-2"></i>Spending Trend
                     </div>
                     <div class="card-body">
-                        <div class="chart-container">
+                        <div style="height: 300px;">
                             <canvas id="spendingChart"></canvas>
                         </div>
                     </div>
@@ -452,92 +443,20 @@
                 </div>
             </div>
         </div>
-
-        <!-- Forecasting Section -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="fas fa-crystal-ball me-2"></i>Spending Forecast
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body text-center">
-                                <h6>Next Month Forecast</h6>
-                                <div id="nextMonthForecast" class="stats-value">$0.00</div>
-                                <div class="progress mt-2">
-                                    <div class="progress-bar bg-info" style="width: 50%"></div>
-                                </div>
-                                <small class="text-muted">Based on current trend</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body text-center">
-                                <h6>Savings Projection</h6>
-                                <div id="savingsProjection" class="stats-value">$0.00</div>
-                                <div class="progress mt-2">
-                                    <div class="progress-bar bg-success" style="width: 30%"></div>
-                                </div>
-                                <small class="text-muted">End of period</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body text-center">
-                                <h6>Risk Level</h6>
-                                <div id="riskLevel" class="stats-value">Low</div>
-                                <div class="mt-2">
-                                    <span class="badge bg-success">Safe</span>
-                                </div>
-                                <small class="text-muted">Budget utilization</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Theme Toggle Float Button -->
-    <button id="themeToggleFloat" class="theme-toggle">
+    <button id="themeToggleFloat" class="theme-toggle" style="display: none;">
         <i class="fas fa-moon"></i>
     </button>
 
-    <!-- Scripts -->
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
-        // Import Firebase from CDN
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { 
-            getFirestore, collection, addDoc, getDocs, setDoc, doc, 
-            query, orderBy, where, getDoc, updateDoc, deleteDoc,
-            serverTimestamp 
-        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-        import { 
-            getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-            signOut, onAuthStateChanged 
-        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-        // Your Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-            authDomain: "budget-app-1365f.firebaseapp.com",
-            projectId: "budget-app-1365f",
-            storageBucket: "budget-app-1365f.appspot.com",
-            messagingSenderId: "1036194450411",
-            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-            measurementId: "G-YFFJL2H54X"
-        };
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
         // Global variables
+        let db = null;
+        let auth = null;
         let currentUser = null;
         let isDemoMode = false;
         let allTransactions = [];
@@ -549,9 +468,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Initializing application...');
             
-            // Show login modal
-            const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
-            loginModal.show();
+            // Initialize Firebase
+            initializeFirebase();
             
             // Setup event listeners
             setupEventListeners();
@@ -559,21 +477,38 @@
             // Load theme preference
             loadThemePreference();
             
-            // Check for existing auth
-            checkAuthState();
+            // Hide loading screen after a short delay
+            setTimeout(() => {
+                document.getElementById('loadingScreen').style.display = 'none';
+                document.getElementById('loginScreen').style.display = 'block';
+            }, 1000);
         });
 
-        // Check authentication state
-        async function checkAuthState() {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    currentUser = user;
-                    console.log('User is signed in:', user.email);
-                    await initializeAppWithUser();
-                } else {
-                    console.log('No user signed in');
-                }
-            });
+        // Initialize Firebase
+        function initializeFirebase() {
+            try {
+                // Your Firebase configuration
+                const firebaseConfig = {
+                    apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+                    authDomain: "budget-app-1365f.firebaseapp.com",
+                    projectId: "budget-app-1365f",
+                    storageBucket: "budget-app-1365f.appspot.com",
+                    messagingSenderId: "1036194450411",
+                    appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+                    measurementId: "G-YFFJL2H54X"
+                };
+
+                // Initialize Firebase
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                auth = firebase.auth();
+                
+                console.log('Firebase initialized successfully');
+                
+            } catch (error) {
+                console.error('Firebase initialization error:', error);
+                showAlert('Firebase initialization failed. Using demo mode.', 'warning');
+            }
         }
 
         // Login to Firebase
@@ -587,20 +522,30 @@
                 return;
             }
             
+            if (!auth) {
+                showAlert('Firebase not initialized. Using demo mode.', 'warning');
+                useDemoData();
+                return;
+            }
+            
             loginSpinner.classList.remove('d-none');
             
             try {
                 // Try to sign in
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const userCredential = await auth.signInWithEmailAndPassword(email, password);
                 currentUser = userCredential.user;
-                console.log('Login successful');
+                console.log('Login successful:', currentUser.email);
                 
-                // Close modal
-                const loginModal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
-                loginModal.hide();
+                // Switch to app
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('appContainer').style.display = 'block';
+                document.getElementById('themeToggleFloat').style.display = 'flex';
+                document.getElementById('dataSourceText').textContent = 'Firebase Data';
+                isDemoMode = false;
                 
-                // Initialize app
-                await initializeAppWithUser();
+                // Load data
+                await loadAllData();
+                showAlert('Connected to Firebase successfully!', 'success');
                 
             } catch (error) {
                 console.error('Login error:', error);
@@ -608,16 +553,20 @@
                 // If user doesn't exist, try to create account
                 if (error.code === 'auth/user-not-found') {
                     try {
-                        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
                         currentUser = userCredential.user;
                         console.log('New user created');
                         
-                        // Close modal
-                        const loginModal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
-                        loginModal.hide();
+                        // Switch to app
+                        document.getElementById('loginScreen').style.display = 'none';
+                        document.getElementById('appContainer').style.display = 'block';
+                        document.getElementById('themeToggleFloat').style.display = 'flex';
+                        document.getElementById('dataSourceText').textContent = 'Firebase Data';
+                        isDemoMode = false;
                         
-                        // Initialize app
-                        await initializeAppWithUser();
+                        // Load data
+                        await loadAllData();
+                        showAlert('Account created successfully!', 'success');
                         
                     } catch (createError) {
                         console.error('Create user error:', createError);
@@ -636,30 +585,15 @@
             isDemoMode = true;
             currentUser = null;
             
-            // Close modal
-            const loginModal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
-            loginModal.hide();
-            
-            // Show app
-            document.getElementById('appContainer').classList.remove('d-none');
+            // Switch to app
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'block';
+            document.getElementById('themeToggleFloat').style.display = 'flex';
             document.getElementById('dataSourceText').textContent = 'Demo Data';
             
             // Load demo data
             loadDemoData();
             showAlert('Using demo data. Sign in to connect to your Firebase account.', 'info');
-        }
-
-        // Initialize app with user
-        async function initializeAppWithUser() {
-            isDemoMode = false;
-            
-            // Show app
-            document.getElementById('appContainer').classList.remove('d-none');
-            document.getElementById('dataSourceText').textContent = 'Firebase Data';
-            
-            // Load data
-            await loadAllData();
-            showAlert('Connected to Firebase successfully!', 'success');
         }
 
         // Load all data
@@ -685,63 +619,59 @@
             }
         }
 
-        // Load transactions from Firebase
+        // Load transactions
         async function loadTransactions() {
             if (isDemoMode) {
                 // Generate demo transactions
                 allTransactions = generateDemoTransactions();
+                console.log('Generated', allTransactions.length, 'demo transactions');
                 return;
             }
             
-            if (!currentUser) {
-                console.log('No user, cannot load transactions');
+            if (!currentUser || !db) {
+                console.log('No user or Firebase, using demo data');
+                allTransactions = generateDemoTransactions();
+                isDemoMode = true;
+                document.getElementById('dataSourceText').textContent = 'Demo Data';
                 return;
             }
             
             try {
                 console.log('Loading transactions from Firebase...');
                 
-                // Try different collection paths
-                const collectionPaths = [
-                    'transactions',
-                    'users/' + currentUser.uid + '/transactions',
-                    'budget-transactions',
-                    'expenses'
-                ];
+                // Try to load from different collections
+                const collections = ['transactions', 'budget-transactions', 'expenses'];
+                let transactionsLoaded = false;
                 
-                let transactionsFound = false;
-                
-                for (const path of collectionPaths) {
+                for (const collectionName of collections) {
                     try {
-                        const transactionsRef = collection(db, path);
-                        const q = query(transactionsRef, orderBy('DATE', 'desc'), orderBy('TIMESTAMP', 'desc'));
-                        const snapshot = await getDocs(q);
+                        const querySnapshot = await db.collection(collectionName)
+                            .orderBy('DATE', 'desc')
+                            .limit(100)
+                            .get();
                         
-                        if (!snapshot.empty) {
-                            console.log(`Found ${snapshot.size} transactions in ${path}`);
+                        if (!querySnapshot.empty) {
+                            console.log(`Found ${querySnapshot.size} transactions in ${collectionName}`);
                             allTransactions = [];
                             
-                            snapshot.forEach(doc => {
+                            querySnapshot.forEach(doc => {
                                 const data = doc.data();
-                                console.log('Transaction data:', data);
-                                
-                                // Parse transaction
                                 const transaction = parseTransaction(data);
                                 if (transaction) {
                                     allTransactions.push(transaction);
                                 }
                             });
                             
-                            transactionsFound = true;
+                            transactionsLoaded = true;
                             break;
                         }
                     } catch (error) {
-                        console.log(`No transactions found in ${path}:`, error.message);
+                        console.log(`No transactions in ${collectionName}:`, error.message);
                     }
                 }
                 
-                if (!transactionsFound) {
-                    console.log('No transactions found in any collection');
+                if (!transactionsLoaded) {
+                    console.log('No transactions found, using demo data');
                     allTransactions = generateDemoTransactions();
                     showAlert('No transactions found. Using demo data.', 'info');
                 }
@@ -772,7 +702,6 @@
                     amount = parseFloat(data.AMOUNT);
                     type = data.TYPE || (amount >= 0 ? 'Income' : 'Expense');
                 } else {
-                    console.log('No amount found in transaction:', data);
                     return null;
                 }
                 
@@ -786,7 +715,7 @@
                     date = data.TIMESTAMP.toDate();
                 }
                 
-                // Get category/account header
+                // Get category
                 let category = data.ACCOUNT_HEADER || data.CATEGORY || data.ACCOUNT || 'Uncategorized';
                 
                 // Get description
@@ -802,8 +731,7 @@
                     category: category,
                     type: type,
                     amount: Math.abs(amount),
-                    bank: bank,
-                    rawData: data // Keep original data for debugging
+                    bank: bank
                 };
                 
             } catch (error) {
@@ -842,8 +770,8 @@
                     });
                 }
                 
-                // Add income occasionally (every 7-14 days)
-                if (i % Math.floor(Math.random() * 7 + 7) === 0) {
+                // Add income occasionally
+                if (i % 7 === 0) {
                     const amount = Math.floor(Math.random() * 1000) + 500;
                     const category = 'Salary';
                     const bank = banks[Math.floor(Math.random() * banks.length)];
@@ -866,7 +794,7 @@
         // Load account limits
         async function loadAccountLimits() {
             if (isDemoMode) {
-                // Load demo limits
+                // Load demo limits from localStorage
                 const demoLimits = localStorage.getItem('demoAccountLimits');
                 if (demoLimits) {
                     accountLimits = JSON.parse(demoLimits);
@@ -884,51 +812,29 @@
                 return;
             }
             
-            if (!currentUser) return;
+            if (!currentUser || !db) return;
             
             try {
                 console.log('Loading account limits from Firebase...');
                 
-                // Try different collection paths
-                const collectionPaths = [
-                    'accountLimits',
-                    'users/' + currentUser.uid + '/accountLimits',
-                    'budgetLimits',
-                    'limits'
-                ];
+                // Try to load from user's accountLimits collection
+                const querySnapshot = await db.collection('users').doc(currentUser.uid).collection('accountLimits').get();
                 
-                let limitsFound = false;
-                
-                for (const path of collectionPaths) {
-                    try {
-                        const limitsRef = collection(db, path);
-                        const snapshot = await getDocs(limitsRef);
-                        
-                        if (!snapshot.empty) {
-                            console.log(`Found ${snapshot.size} account limits in ${path}`);
-                            accountLimits = {};
-                            
-                            snapshot.forEach(doc => {
-                                const data = doc.data();
-                                const accountName = data.accountName || data.account || data.category || doc.id;
-                                accountLimits[accountName] = {
-                                    weekly: parseFloat(data.weekly) || 0,
-                                    monthly: parseFloat(data.monthly) || 0,
-                                    quarterly: parseFloat(data.quarterly) || 0,
-                                    yearly: parseFloat(data.yearly) || 0
-                                };
-                            });
-                            
-                            limitsFound = true;
-                            break;
-                        }
-                    } catch (error) {
-                        console.log(`No limits found in ${path}:`, error.message);
-                    }
-                }
-                
-                if (!limitsFound) {
-                    console.log('No account limits found, creating defaults');
+                if (!querySnapshot.empty) {
+                    accountLimits = {};
+                    querySnapshot.forEach(doc => {
+                        const data = doc.data();
+                        const accountName = data.accountName || data.account || data.category || doc.id;
+                        accountLimits[accountName] = {
+                            weekly: parseFloat(data.weekly) || 0,
+                            monthly: parseFloat(data.monthly) || 0,
+                            quarterly: parseFloat(data.quarterly) || 0,
+                            yearly: parseFloat(data.yearly) || 0
+                        };
+                    });
+                    console.log(`Loaded ${Object.keys(accountLimits).length} account limits`);
+                } else {
+                    console.log('No account limits found');
                     accountLimits = {};
                 }
                 
@@ -947,26 +853,24 @@
                 return;
             }
             
-            if (!currentUser) {
+            if (!currentUser || !db) {
                 showAlert('Please sign in to save account limits', 'error');
                 return;
             }
             
             try {
                 // Save each account limit to Firebase
-                const promises = Object.entries(accountLimits).map(async ([accountName, limits]) => {
-                    const docRef = doc(db, 'users', currentUser.uid, 'accountLimits', accountName);
-                    await setDoc(docRef, {
+                for (const [accountName, limits] of Object.entries(accountLimits)) {
+                    await db.collection('users').doc(currentUser.uid).collection('accountLimits').doc(accountName).set({
                         accountName: accountName,
                         weekly: limits.weekly,
                         monthly: limits.monthly,
                         quarterly: limits.quarterly,
                         yearly: limits.yearly,
-                        updatedAt: serverTimestamp()
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
-                });
+                }
                 
-                await Promise.all(promises);
                 showAlert('Account limits saved to Firebase', 'success');
                 
             } catch (error) {
@@ -1089,10 +993,9 @@
             if (confirm(`Are you sure you want to delete the limit for ${accountName}?`)) {
                 delete accountLimits[accountName];
                 
-                if (!isDemoMode && currentUser) {
+                if (!isDemoMode && currentUser && db) {
                     try {
-                        const docRef = doc(db, 'users', currentUser.uid, 'accountLimits', accountName);
-                        await deleteDoc(docRef);
+                        await db.collection('users').doc(currentUser.uid).collection('accountLimits').doc(accountName).delete();
                     } catch (error) {
                         console.error('Error deleting limit:', error);
                     }
@@ -1163,7 +1066,6 @@
             updateTopCategories();
             updateAccountLimitsTable();
             updateRecentTransactions();
-            updateForecast();
         }
 
         // Update period display
@@ -1213,11 +1115,9 @@
         function updateStats() {
             const filteredTransactions = filterTransactionsByPeriod(allTransactions, currentPeriod);
             const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
-            const income = filteredTransactions.filter(tx => tx.type === 'Income');
             
             // Calculate totals
             const totalExpenses = expenses.reduce((sum, tx) => sum + tx.amount, 0);
-            const totalIncome = income.reduce((sum, tx) => sum + tx.amount, 0);
             
             // Calculate total budget (sum of all account limits for current period)
             const totalBudget = Object.values(accountLimits).reduce((sum, limits) => {
@@ -1472,93 +1372,10 @@
             container.innerHTML = html;
         }
 
-        // Update forecast
-        function updateForecast() {
-            const filteredTransactions = filterTransactionsByPeriod(allTransactions, currentPeriod);
-            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
-            const totalExpenses = expenses.reduce((sum, tx) => sum + tx.amount, 0);
-            
-            // Simple forecast: average daily spending * days in next period
-            const daysInPeriod = getDaysInPeriod(currentPeriod);
-            const avgDailySpending = totalExpenses / Math.max(1, daysInPeriod);
-            const nextPeriodForecast = avgDailySpending * daysInPeriod;
-            
-            // Calculate savings projection
-            const totalBudget = Object.values(accountLimits).reduce((sum, limits) => {
-                return sum + (limits[currentPeriod] || 0);
-            }, 0);
-            const savingsProjection = Math.max(0, totalBudget - totalExpenses);
-            
-            // Determine risk level
-            const budgetUsage = totalBudget > 0 ? (totalExpenses / totalBudget * 100) : 0;
-            let riskLevel = 'Low';
-            let riskColor = 'success';
-            
-            if (budgetUsage >= 100) {
-                riskLevel = 'Critical';
-                riskColor = 'danger';
-            } else if (budgetUsage >= 80) {
-                riskLevel = 'High';
-                riskColor = 'warning';
-            } else if (budgetUsage >= 50) {
-                riskLevel = 'Medium';
-                riskColor = 'info';
-            }
-            
-            // Update forecast display
-            document.getElementById('nextMonthForecast').textContent = `$${nextPeriodForecast.toFixed(2)}`;
-            document.getElementById('savingsProjection').textContent = `$${savingsProjection.toFixed(2)}`;
-            document.getElementById('riskLevel').textContent = riskLevel;
-            
-            const riskBadge = document.querySelector('#riskLevel').closest('.card-body').querySelector('.badge');
-            riskBadge.className = `badge bg-${riskColor}`;
-            riskBadge.textContent = riskLevel;
-            
-            // Update progress bars
-            const forecastProgress = document.querySelector('#nextMonthForecast').closest('.card-body').querySelector('.progress-bar');
-            const savingsProgress = document.querySelector('#savingsProjection').closest('.card-body').querySelector('.progress-bar');
-            
-            forecastProgress.style.width = `${Math.min(budgetUsage, 100)}%`;
-            savingsProgress.style.width = `${Math.min(100 - budgetUsage, 100)}%`;
-        }
-
-        // Helper function to get days in period
-        function getDaysInPeriod(period) {
-            const now = new Date();
-            
-            switch (period) {
-                case 'weekly': return 7;
-                case 'monthly': 
-                    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-                case 'quarterly': 
-                    const quarter = Math.floor(now.getMonth() / 3);
-                    const start = new Date(now.getFullYear(), quarter * 3, 1);
-                    const end = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-                    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-                case 'yearly': 
-                    return new Date(now.getFullYear(), 11, 31).getDate();
-                default: return 30;
-            }
-        }
-
-        // Load Firebase data
-        async function loadFirebaseData() {
-            if (isDemoMode) {
-                // Reload demo data
-                loadDemoData();
-                showAlert('Demo data reloaded', 'info');
-                return;
-            }
-            
-            if (!currentUser) {
-                showAlert('Please sign in to load Firebase data', 'error');
-                return;
-            }
-            
-            showLoadingState();
+        // Load data
+        async function loadData() {
             await loadAllData();
-            hideLoadingState();
-            showAlert('Data refreshed from Firebase', 'success');
+            showAlert('Data refreshed', 'success');
         }
 
         // Load demo data
@@ -1611,7 +1428,7 @@
 
         // Show loading state
         function showLoadingState() {
-            // You can add a loading spinner overlay if needed
+            // You can add a loading overlay if needed
             console.log('Loading...');
         }
 
@@ -1622,7 +1439,7 @@
 
         // Format date
         function formatDate(date) {
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
         // Show alert
