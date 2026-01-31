@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Budget Limits & Forecasting</title>
+    <title>Budget Limits & Financial Insights</title>
     <!-- CSS Libraries -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
     
     <style>
         :root {
@@ -42,7 +43,7 @@
         }
 
         .app-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 30px auto;
             padding: 20px;
         }
@@ -99,24 +100,27 @@
         }
 
         .progress {
-            height: 10px;
+            height: 12px;
             margin: 15px 0;
+            border-radius: 6px;
         }
 
         .budget-progress .progress-bar {
             transition: width 0.5s ease;
+            border-radius: 6px;
         }
 
-        .alert-card {
-            border-left: 4px solid var(--danger-color);
+        .insight-card {
+            border-left: 4px solid var(--info-color);
         }
 
-        .warning-card {
-            border-left: 4px solid var(--warning-color);
+        .tip-card {
+            background: linear-gradient(135deg, #fff8e1, #ffecb3);
+            border: none;
         }
 
-        .success-card {
-            border-left: 4px solid var(--success-color);
+        [data-theme="dark"] .tip-card {
+            background: linear-gradient(135deg, #5d4037, #3e2723);
         }
 
         .action-btn {
@@ -166,7 +170,7 @@
             font-weight: 600;
         }
 
-        .forecast-chart {
+        .chart-container {
             height: 300px;
             margin: 20px 0;
         }
@@ -245,11 +249,63 @@
             background-color: var(--danger-color);
         }
 
+        .insight-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: rgba(13, 202, 240, 0.1);
+            border-radius: 8px;
+            border-left: 3px solid var(--info-color);
+        }
+
+        .category-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 2px;
+        }
+
+        .expense-category {
+            background: rgba(220, 53, 69, 0.1);
+            color: var(--danger-color);
+        }
+
+        .income-category {
+            background: rgba(25, 135, 84, 0.1);
+            color: var(--success-color);
+        }
+
+        .top-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: var(--light-bg);
+            border-radius: 6px;
+        }
+
+        .trend-up {
+            color: var(--success-color);
+        }
+
+        .trend-down {
+            color: var(--danger-color);
+        }
+
         .email-settings {
             background: rgba(13, 202, 240, 0.1);
             border-radius: 8px;
             padding: 15px;
             margin-top: 20px;
+        }
+
+        .month-selector {
+            background: rgba(111, 66, 193, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
         }
 
         @media (max-width: 768px) {
@@ -260,6 +316,30 @@
             .stats-value {
                 font-size: 22px;
             }
+            
+            .chart-container {
+                height: 250px;
+            }
+        }
+
+        .alert-popup {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            min-width: 300px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
     </style>
 </head>
@@ -269,10 +349,17 @@
         <div class="header">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h1><i class="fas fa-chart-line me-2"></i>Budget Limits & Forecasting</h1>
-                    <p class="mb-0">Monitor your spending and forecast future expenses</p>
+                    <h1><i class="fas fa-chart-pie me-2"></i>Budget Limits & Financial Insights</h1>
+                    <p class="mb-0">Monitor spending, set limits, and get personalized savings tips</p>
                 </div>
                 <div class="d-flex align-items-center gap-3">
+                    <div class="month-selector">
+                        <select id="monthSelect" class="form-select form-select-sm">
+                            <option value="current">Current Month</option>
+                            <option value="last">Last Month</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+                    </div>
                     <button id="notificationBtn" class="btn btn-light position-relative">
                         <i class="fas fa-bell"></i>
                         <span id="notificationCount" class="notification-badge">0</span>
@@ -286,21 +373,21 @@
 
         <!-- Top Stats -->
         <div class="row mt-4">
-            <div class="col-md-3">
+            <div class="col-lg-3 col-md-6">
                 <div class="card stats-card">
                     <div class="stats-label">Monthly Budget</div>
                     <div id="monthlyBudget" class="stats-value">$0.00</div>
                     <div class="stats-label">Set Limit</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-lg-3 col-md-6">
                 <div class="card stats-card">
                     <div class="stats-label">Current Spending</div>
                     <div id="currentSpending" class="stats-value">$0.00</div>
-                    <div class="stats-label">This Month</div>
+                    <div class="stats-label" id="currentMonthLabel">This Month</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-lg-3 col-md-6">
                 <div class="card stats-card">
                     <div class="stats-label">Remaining Budget</div>
                     <div id="remainingBudget" class="stats-value">$0.00</div>
@@ -310,155 +397,244 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-lg-3 col-md-6">
                 <div class="card stats-card">
-                    <div class="stats-label">Forecasted Monthly</div>
-                    <div id="forecastedAmount" class="stats-value">$0.00</div>
-                    <div class="stats-label">Based on History</div>
+                    <div class="stats-label">Savings Potential</div>
+                    <div id="savingsPotential" class="stats-value">$0.00</div>
+                    <div class="stats-label" id="savingsTip">Click for tips</div>
                 </div>
             </div>
         </div>
 
-        <!-- Budget Progress -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="fas fa-tachometer-alt me-2"></i>Budget Usage Progress
+        <!-- Budget Progress & Limits -->
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-tachometer-alt me-2"></i>Budget Usage & Limits
+                    </div>
+                    <div class="card-body">
+                        <div class="budget-progress">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>Monthly Budget Usage</span>
+                                <span id="budgetPercentage">0%</span>
+                            </div>
+                            <div class="progress">
+                                <div id="budgetProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-md-4">
+                                    <small class="text-muted">Safe: &lt; 70%</small>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <small class="text-muted">Warning: 70-90%</small>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <small class="text-muted">Danger: &gt; 90%</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Set Monthly Budget Limit</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text">$</span>
+                                        <input type="number" id="monthlyLimit" class="form-control" step="0.01" min="0" placeholder="Enter monthly limit">
+                                        <button id="setLimitBtn" class="btn btn-primary">Set</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Warning Threshold</label>
+                                    <div class="input-group">
+                                        <input type="range" id="warningThreshold" class="form-range" min="50" max="95" value="80">
+                                        <span class="input-group-text" id="thresholdValue">80%</span>
+                                    </div>
+                                    <small class="text-muted">Get alerts when spending reaches this percentage</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="card-body">
-                <div class="budget-progress">
-                    <div class="d-flex justify-content-between mb-2">
-                        <span>Monthly Budget Usage</span>
-                        <span id="budgetPercentage">0%</span>
+            
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="fas fa-bullseye me-2"></i>Quick Actions
                     </div>
-                    <div class="progress">
-                        <div id="budgetProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    <div class="card-body d-flex flex-column justify-content-center">
+                        <button id="analyzeSpendingBtn" class="btn btn-primary mb-3 action-btn">
+                            <i class="fas fa-chart-line me-2"></i> Analyze Spending Patterns
+                        </button>
+                        <button id="generateTipsBtn" class="btn btn-success mb-3 action-btn">
+                            <i class="fas fa-lightbulb me-2"></i> Get Savings Tips
+                        </button>
+                        <button id="setCategoryLimitsBtn" class="btn btn-info mb-3 action-btn">
+                            <i class="fas fa-tags me-2"></i> Set Category Limits
+                        </button>
+                        <button id="exportReportBtn" class="btn btn-warning action-btn">
+                            <i class="fas fa-file-export me-2"></i> Export Report
+                        </button>
                     </div>
-                    <div class="row mt-3">
-                        <div class="col-md-4">
-                            <small class="text-muted">Safe: &lt; 70%</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top & Least Expenses/Income -->
+        <div class="row mt-4">
+            <div class="col-lg-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="fas fa-arrow-up me-2 text-danger"></i>Top 5 Expenses
+                    </div>
+                    <div class="card-body">
+                        <div id="topExpensesList">
+                            <div class="text-center text-muted py-4">
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading expenses...</p>
+                            </div>
                         </div>
-                        <div class="col-md-4 text-center">
-                            <small class="text-muted">Warning: 70-90%</small>
-                        </div>
-                        <div class="col-md-4 text-end">
-                            <small class="text-muted">Danger: &gt; 90%</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="fas fa-arrow-down me-2 text-success"></i>Top 5 Income Sources
+                    </div>
+                    <div class="card-body">
+                        <div id="topIncomeList">
+                            <div class="text-center text-muted py-4">
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading income...</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Budget Limits Configuration -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="fas fa-cog me-2"></i>Configure Budget Limits
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label class="form-label">Monthly Budget Limit</label>
-                            <div class="input-group">
-                                <span class="input-group-text">$</span>
-                                <input type="number" id="monthlyLimit" class="form-control" step="0.01" min="0" placeholder="Enter monthly limit">
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Warning Threshold (%)</label>
-                            <div class="input-group">
-                                <input type="number" id="warningThreshold" class="form-control" value="80" min="1" max="100">
-                                <span class="input-group-text">%</span>
-                            </div>
-                            <small class="text-muted">Get notified when spending reaches this percentage</small>
-                        </div>
+        <!-- Spending Analysis & Insights -->
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-chart-bar me-2"></i>Spending Analysis
                     </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label class="form-label">Category Limits (Optional)</label>
-                            <div id="categoryLimitsContainer">
-                                <!-- Category limits will be added here -->
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="spendingChart"></canvas>
+                        </div>
+                        <div class="row mt-4">
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6>Highest Spending Day</h6>
+                                        <div id="highestSpendingDay" class="stats-value">-</div>
+                                        <small class="text-muted">Most expensive day</small>
+                                    </div>
+                                </div>
                             </div>
-                            <button id="addCategoryLimit" class="btn btn-sm btn-outline-primary mt-2">
-                                <i class="fas fa-plus me-1"></i> Add Category Limit
-                            </button>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6>Average Daily Spend</h6>
+                                        <div id="avgDailySpend" class="stats-value">$0.00</div>
+                                        <small class="text-muted">This month</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6>Projected Monthly</h6>
+                                        <div id="projectedMonthly" class="stats-value">$0.00</div>
+                                        <small class="text-muted">Based on current trend</small>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="email-settings">
-                    <h6><i class="fas fa-envelope me-2"></i>Email Notifications</h6>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="enableEmailNotifications" checked>
-                        <label class="form-check-label" for="enableEmailNotifications">
-                            Send email notifications when budget is exceeded
-                        </label>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="fas fa-brain me-2"></i>AI Financial Insights
                     </div>
-                    <div class="mb-2">
-                        <label class="form-label">Notification Email</label>
-                        <input type="email" id="notificationEmail" class="form-control" placeholder="your@email.com">
+                    <div class="card-body">
+                        <div id="aiInsights">
+                            <div class="text-center text-muted py-4">
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Analyzing your finances...</p>
+                            </div>
+                        </div>
                     </div>
-                    <small class="text-muted">You'll receive alerts when your spending exceeds limits</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Analysis -->
+        <div class="row mt-4">
+            <div class="col-lg-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-tags me-2"></i>Category Analysis
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <h6>Top Spending Categories</h6>
+                                <div id="topCategoriesList">
+                                    <!-- Will be populated dynamically -->
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Set Category Limits</h6>
+                                <div id="categoryLimitsContainer">
+                                    <!-- Category limits will be added here -->
+                                </div>
+                                <button id="addCategoryLimit" class="btn btn-sm btn-outline-primary mt-2">
+                                    <i class="fas fa-plus me-1"></i> Add Category Limit
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Savings Tips & Recommendations -->
+        <div class="card mt-4 tip-card">
+            <div class="card-header">
+                <i class="fas fa-lightbulb me-2"></i>Personalized Savings Tips
+            </div>
+            <div class="card-body">
+                <div id="savingsTips">
+                    <div class="insight-item">
+                        <h6><i class="fas fa-coins me-2"></i>Start Here</h6>
+                        <p>Complete your budget setup and analyze your spending to get personalized tips!</p>
+                    </div>
                 </div>
                 <div class="mt-3">
-                    <button id="saveBudgetSettings" class="btn btn-primary action-btn">
-                        <i class="fas fa-save me-1"></i> Save Budget Settings
+                    <button id="refreshTipsBtn" class="btn btn-success action-btn">
+                        <i class="fas fa-sync-alt me-2"></i> Generate New Tips
                     </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Forecast Analysis -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="fas fa-chart-bar me-2"></i>Expense Forecasting
-            </div>
-            <div class="card-body">
-                <div class="forecast-chart">
-                    <canvas id="forecastChart"></canvas>
-                </div>
-                <div class="row mt-4">
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6>Next Month Forecast</h6>
-                                <div id="nextMonthForecast" class="stats-value">$0.00</div>
-                                <small class="text-muted">Based on 3-month average</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6>Yearly Projection</h6>
-                                <div id="yearlyProjection" class="stats-value">$0.00</div>
-                                <small class="text-muted">Annual spending estimate</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6>Savings Potential</h6>
-                                <div id="savingsPotential" class="stats-value">$0.00</div>
-                                <small class="text-muted">If you reduce by 10%</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Alerts & Notifications -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <i class="fas fa-exclamation-triangle me-2"></i>Budget Alerts
-            </div>
-            <div class="card-body">
-                <div id="alertsContainer">
-                    <!-- Alerts will be populated here -->
-                    <div class="text-center text-muted py-4">
-                        <i class="fas fa-check-circle fa-2x mb-3"></i>
-                        <p>No active alerts. Your budget is on track!</p>
-                    </div>
                 </div>
             </div>
         </div>
@@ -476,6 +652,7 @@
                                 <th>Date</th>
                                 <th>Description</th>
                                 <th>Category</th>
+                                <th>Type</th>
                                 <th>Amount</th>
                                 <th>Status</th>
                             </tr>
@@ -485,67 +662,40 @@
                         </tbody>
                     </table>
                 </div>
+                <div class="text-center mt-3">
+                    <button id="loadMoreTransactions" class="btn btn-outline-primary">
+                        <i class="fas fa-plus me-1"></i> Load More Transactions
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Theme Toggle Float Button -->
-        <button id="themeToggleFloat" class="theme-toggle">
-            <i class="fas fa-moon"></i>
-        </button>
+        <!-- Alert Popup Container -->
+        <div id="alertContainer"></div>
     </div>
 
+    <!-- Theme Toggle Float Button -->
+    <button id="themeToggleFloat" class="theme-toggle">
+        <i class="fas fa-moon"></i>
+    </button>
+
     <!-- Modals -->
-    <!-- Notification Modal -->
-    <div class="modal fade" id="notificationModal" tabindex="-1">
+    <!-- Category Limits Modal -->
+    <div class="modal fade" id="categoryLimitsModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-bell me-2"></i>Budget Notifications</h5>
+                    <h5 class="modal-title"><i class="fas fa-tags me-2"></i>Set Category Budget Limits</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div id="notificationsList">
-                        <!-- Notifications will be populated here -->
+                    <div id="categoryLimitsModalContent">
+                        <!-- Content will be populated dynamically -->
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button id="clearNotifications" type="button" class="btn btn-primary">Clear All</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Budget Exceeded Modal (Auto-shows when limit exceeded) -->
-    <div class="modal fade" id="budgetExceededModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Budget Limit Exceeded!</h5>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-danger">
-                        <h6><i class="fas fa-fire me-2"></i>Warning!</h6>
-                        <p id="exceededMessage">Your monthly spending has exceeded the budget limit.</p>
-                    </div>
-                    <div class="mt-3">
-                        <p><strong>Details:</strong></p>
-                        <ul>
-                            <li>Budget Limit: <span id="modalBudgetLimit">$0.00</span></li>
-                            <li>Current Spending: <span id="modalCurrentSpending">$0.00</span></li>
-                            <li>Exceeded By: <span id="modalExceededAmount">$0.00</span></li>
-                        </ul>
-                    </div>
-                    <div class="form-check mt-3">
-                        <input class="form-check-input" type="checkbox" id="dontShowAgain">
-                        <label class="form-check-label" for="dontShowAgain">
-                            Don't show this warning again this month
-                        </label>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-danger" data-bs-dismiss="modal">Acknowledge</button>
-                    <button type="button" class="btn btn-primary" id="adjustBudgetBtn">Adjust Budget</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveCategoryLimits">Save Limits</button>
                 </div>
             </div>
         </div>
@@ -581,40 +731,57 @@
         // Global Variables
         let currentUser = null;
         let budgetSettings = {};
-        let transactions = [];
+        let allTransactions = [];
+        let filteredTransactions = [];
         let notifications = [];
-        let forecastChart = null;
+        let spendingChart = null;
+        let categoryChart = null;
         let currentTheme = 'light';
         let hasShownExceededModal = false;
+        let currentMonth = new Date().getMonth();
+        let currentYear = new Date().getFullYear();
+        let categories = new Set();
+
+        // Initialize DateTime from luxon
+        const DateTime = luxon.DateTime;
 
         // DOM Elements
         const monthlyBudgetEl = document.getElementById('monthlyBudget');
         const currentSpendingEl = document.getElementById('currentSpending');
         const remainingBudgetEl = document.getElementById('remainingBudget');
         const budgetStatusEl = document.getElementById('budgetStatus');
-        const forecastedAmountEl = document.getElementById('forecastedAmount');
+        const savingsPotentialEl = document.getElementById('savingsPotential');
         const budgetPercentageEl = document.getElementById('budgetPercentage');
         const budgetProgressBar = document.getElementById('budgetProgressBar');
         const monthlyLimitInput = document.getElementById('monthlyLimit');
         const warningThresholdInput = document.getElementById('warningThreshold');
+        const thresholdValue = document.getElementById('thresholdValue');
         const categoryLimitsContainer = document.getElementById('categoryLimitsContainer');
-        const enableEmailNotifications = document.getElementById('enableEmailNotifications');
-        const notificationEmail = document.getElementById('notificationEmail');
-        const saveBudgetSettingsBtn = document.getElementById('saveBudgetSettings');
-        const addCategoryLimitBtn = document.getElementById('addCategoryLimit');
         const notificationBtn = document.getElementById('notificationBtn');
         const notificationCount = document.getElementById('notificationCount');
         const themeToggle = document.getElementById('themeToggle');
         const themeToggleFloat = document.getElementById('themeToggleFloat');
-        const notificationModal = new bootstrap.Modal('#notificationModal');
-        const budgetExceededModal = new bootstrap.Modal('#budgetExceededModal');
-        const alertsContainer = document.getElementById('alertsContainer');
+        const monthSelect = document.getElementById('monthSelect');
+        const setLimitBtn = document.getElementById('setLimitBtn');
+        const analyzeSpendingBtn = document.getElementById('analyzeSpendingBtn');
+        const generateTipsBtn = document.getElementById('generateTipsBtn');
+        const setCategoryLimitsBtn = document.getElementById('setCategoryLimitsBtn');
+        const exportReportBtn = document.getElementById('exportReportBtn');
+        const refreshTipsBtn = document.getElementById('refreshTipsBtn');
+        const topExpensesList = document.getElementById('topExpensesList');
+        const topIncomeList = document.getElementById('topIncomeList');
+        const aiInsights = document.getElementById('aiInsights');
+        const savingsTips = document.getElementById('savingsTips');
         const recentTransactionsEl = document.getElementById('recentTransactions');
-        const nextMonthForecastEl = document.getElementById('nextMonthForecast');
-        const yearlyProjectionEl = document.getElementById('yearlyProjection');
-        const savingsPotentialEl = document.getElementById('savingsPotential');
-        const clearNotificationsBtn = document.getElementById('clearNotifications');
-        const adjustBudgetBtn = document.getElementById('adjustBudgetBtn');
+        const loadMoreTransactionsBtn = document.getElementById('loadMoreTransactions');
+        const addCategoryLimitBtn = document.getElementById('addCategoryLimit');
+        const categoryLimitsModal = new bootstrap.Modal('#categoryLimitsModal');
+        const saveCategoryLimitsBtn = document.getElementById('saveCategoryLimits');
+        const highestSpendingDayEl = document.getElementById('highestSpendingDay');
+        const avgDailySpendEl = document.getElementById('avgDailySpend');
+        const projectedMonthlyEl = document.getElementById('projectedMonthly');
+        const currentMonthLabel = document.getElementById('currentMonthLabel');
+        const savingsTip = document.getElementById('savingsTip');
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -632,37 +799,86 @@
                     // Load theme preference
                     loadThemePreference();
                     
+                    // Initialize UI
+                    showLoadingState();
+                    
                     // Load data
                     await loadBudgetSettings();
-                    await loadTransactions();
+                    await loadAllTransactions();
                     await loadNotifications();
+                    
+                    // Calculate and update display
+                    updateBudgetDisplay();
+                    updateTopLists();
+                    updateSpendingAnalysis();
+                    updateCategoryAnalysis();
+                    generateFinancialInsights();
+                    generateSavingsTips();
+                    updateRecentTransactions();
                     
                     // Set up real-time listeners
                     setupRealtimeListeners();
                     
-                    // Calculate and update display
-                    updateBudgetDisplay();
-                    updateForecast();
-                    checkBudgetLimits();
-                    
                     // Set up event listeners
                     setupEventListeners();
+                    
+                    // Hide loading state
+                    hideLoadingState();
+                    
                 } else {
-                    // Redirect to login or show login prompt
-                    Swal.fire({
-                        title: 'Authentication Required',
-                        text: 'Please login to use Budget Limits',
-                        icon: 'warning',
-                        confirmButtonText: 'Login',
-                        showCancelButton: true,
-                        cancelButtonText: 'Cancel'
-                    }).then((result) => {
-                        if (result.isConfirmed) {
-                            window.location.href = 'index.html'; // Adjust based on your login page
-                        }
-                    });
+                    // Show login prompt
+                    showLoginPrompt();
                 }
             });
+        }
+
+        // Show Login Prompt
+        function showLoginPrompt() {
+            Swal.fire({
+                title: 'Login Required',
+                text: 'Please login to access Budget Limits & Insights',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Login',
+                cancelButtonText: 'Back to Home'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    window.location.href = 'index.html';
+                } else {
+                    window.location.href = 'home.html';
+                }
+            });
+        }
+
+        // Show Loading State
+        function showLoadingState() {
+            // Show loading indicators in various sections
+            const loadingHTML = `
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading your financial data...</p>
+                </div>
+            `;
+            
+            topExpensesList.innerHTML = loadingHTML;
+            topIncomeList.innerHTML = loadingHTML;
+            aiInsights.innerHTML = loadingHTML;
+            recentTransactionsEl.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // Hide Loading State
+        function hideLoadingState() {
+            // This function is called when data is loaded
         }
 
         // Load Budget Settings
@@ -679,77 +895,134 @@
                     // Update form inputs
                     monthlyLimitInput.value = budgetSettings.monthlyLimit || '';
                     warningThresholdInput.value = budgetSettings.warningThreshold || 80;
-                    notificationEmail.value = budgetSettings.notificationEmail || currentUser.email || '';
-                    enableEmailNotifications.checked = budgetSettings.emailNotifications !== false;
+                    thresholdValue.textContent = `${budgetSettings.warningThreshold || 80}%`;
                     
-                    // Load category limits
-                    if (budgetSettings.categoryLimits) {
-                        categoryLimitsContainer.innerHTML = '';
-                        budgetSettings.categoryLimits.forEach((limit, index) => {
-                            addCategoryLimitRow(limit.category, limit.limit, index);
-                        });
-                    }
                 } else {
                     // Initialize default settings
                     budgetSettings = {
                         monthlyLimit: 1000,
                         warningThreshold: 80,
-                        emailNotifications: true,
-                        notificationEmail: currentUser.email || '',
                         categoryLimits: [],
-                        createdAt: new Date()
+                        createdAt: new Date(),
+                        updatedAt: new Date()
                     };
                     console.log('Created default budget settings');
+                    
+                    // Save default settings
+                    await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings);
                 }
             } catch (error) {
                 console.error('Error loading budget settings:', error);
-                showError('Failed to load budget settings');
+                showAlert('Failed to load budget settings', 'error');
             }
         }
 
-        // Load Transactions
-        async function loadTransactions() {
+        // Load All Transactions
+        async function loadAllTransactions() {
             if (!currentUser) return;
             
             try {
-                const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
+                console.log('Loading transactions for user:', currentUser.uid);
                 
-                // Get transactions from current month
                 const transactionsRef = collection(db, 'users', currentUser.uid, 'transactions');
-                const q = query(
-                    transactionsRef,
-                    where('TYPE', '==', 'Expense'),
-                    orderBy('DATE', 'desc')
-                );
+                const q = query(transactionsRef, orderBy('DATE', 'desc'));
                 
                 const snapshot = await getDocs(q);
-                transactions = [];
+                allTransactions = [];
+                categories.clear();
                 
                 snapshot.forEach(doc => {
                     const data = doc.data();
-                    const txDate = new Date(data.DATE);
+                    const transaction = {
+                        id: doc.id,
+                        ...data,
+                        amount: parseFloat(data.INCOME || data.EXPENSE || 0),
+                        type: data.TYPE || 'Expense',
+                        category: data.ACCOUNT_HEADER || 'Uncategorized',
+                        bank: data.BANK_NAME || data.MODE || 'Unknown',
+                        description: data.DESCRIPTION || data.NOTES || 'No description',
+                        date: new Date(data.DATE)
+                    };
                     
-                    // Only include expenses from current month
-                    if (txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear) {
-                        transactions.push({
-                            id: doc.id,
-                            ...data,
-                            amount: parseFloat(data.EXPENSE) || 0
-                        });
+                    allTransactions.push(transaction);
+                    
+                    // Collect unique categories
+                    if (transaction.category) {
+                        categories.add(transaction.category);
                     }
                 });
                 
-                console.log(`Loaded ${transactions.length} transactions for current month`);
+                console.log(`Loaded ${allTransactions.length} total transactions`);
+                console.log('Unique categories:', Array.from(categories));
                 
-                // Update recent transactions table
-                updateRecentTransactions();
+                // Filter for current month by default
+                filterTransactionsForCurrentMonth();
                 
             } catch (error) {
                 console.error('Error loading transactions:', error);
-                showError('Failed to load transactions');
+                console.error('Error details:', error.message, error.stack);
+                showAlert('Failed to load transactions. Please check your connection.', 'error');
+                
+                // Show sample data for demo purposes
+                showSampleData();
             }
+        }
+
+        // Show Sample Data (for demo/testing)
+        function showSampleData() {
+            console.log('Showing sample data for demo');
+            
+            allTransactions = [
+                {
+                    id: '1',
+                    type: 'Expense',
+                    category: 'Groceries',
+                    amount: 150.50,
+                    description: 'Weekly grocery shopping',
+                    date: new Date(),
+                    bank: 'Checking'
+                },
+                {
+                    id: '2',
+                    type: 'Expense',
+                    category: 'Dining',
+                    amount: 75.25,
+                    description: 'Dinner at restaurant',
+                    date: new Date(),
+                    bank: 'Credit Card'
+                },
+                {
+                    id: '3',
+                    type: 'Income',
+                    category: 'Salary',
+                    amount: 3000,
+                    description: 'Monthly salary',
+                    date: new Date(),
+                    bank: 'Savings'
+                }
+            ];
+            
+            filterTransactionsForCurrentMonth();
+        }
+
+        // Filter Transactions for Current Month
+        function filterTransactionsForCurrentMonth() {
+            const now = new Date();
+            currentMonth = now.getMonth();
+            currentYear = now.getFullYear();
+            
+            filteredTransactions = allTransactions.filter(tx => {
+                const txDate = tx.date;
+                return txDate.getMonth() === currentMonth && 
+                       txDate.getFullYear() === currentYear;
+            });
+            
+            console.log(`Filtered ${filteredTransactions.length} transactions for current month`);
+            
+            // Update month label
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                              'July', 'August', 'September', 'October', 'November', 'December'];
+            currentMonthLabel.textContent = `${monthNames[currentMonth]} ${currentYear}`;
         }
 
         // Load Notifications
@@ -771,7 +1044,6 @@
                 });
                 
                 updateNotificationBadge();
-                updateNotificationsList();
                 
             } catch (error) {
                 console.error('Error loading notifications:', error);
@@ -784,16 +1056,25 @@
             
             // Listen for new transactions
             const transactionsRef = collection(db, 'users', currentUser.uid, 'transactions');
-            const transactionsQuery = query(transactionsRef, where('TYPE', '==', 'Expense'));
+            const transactionsQuery = query(transactionsRef, orderBy('DATE', 'desc'), limit(1));
             
             onSnapshot(transactionsQuery, (snapshot) => {
                 snapshot.docChanges().forEach((change) => {
-                    if (change.type === 'added' || change.type === 'modified') {
-                        // Reload transactions and check limits
-                        loadTransactions().then(() => {
+                    if (change.type === 'added') {
+                        // Reload transactions
+                        loadAllTransactions().then(() => {
                             updateBudgetDisplay();
+                            updateTopLists();
+                            updateSpendingAnalysis();
+                            generateFinancialInsights();
                             checkBudgetLimits();
                         });
+                        
+                        // Show notification for new transaction
+                        const newTx = change.doc.data();
+                        if (newTx.TYPE === 'Expense') {
+                            showAlert(`New expense recorded: $${parseFloat(newTx.EXPENSE || 0).toFixed(2)}`, 'info');
+                        }
                     }
                 });
             });
@@ -816,7 +1097,7 @@
                 monthlyBudgetEl.textContent = '$0.00';
                 currentSpendingEl.textContent = '$0.00';
                 remainingBudgetEl.textContent = '$0.00';
-                forecastedAmountEl.textContent = '$0.00';
+                savingsPotentialEl.textContent = '$0.00';
                 budgetPercentageEl.textContent = '0%';
                 budgetProgressBar.style.width = '0%';
                 return;
@@ -824,7 +1105,7 @@
             
             const monthlyLimit = parseFloat(budgetSettings.monthlyLimit);
             const currentSpending = calculateCurrentSpending();
-            const remaining = monthlyLimit - currentSpending;
+            const remaining = Math.max(0, monthlyLimit - currentSpending);
             const percentage = (currentSpending / monthlyLimit) * 100;
             
             // Update display
@@ -839,11 +1120,23 @@
             
             // Update progress bar color
             updateProgressBarColor(percentage);
+            
+            // Calculate and update savings potential
+            updateSavingsPotential();
         }
 
         // Calculate Current Spending
         function calculateCurrentSpending() {
-            return transactions.reduce((total, tx) => {
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            return expenses.reduce((total, tx) => {
+                return total + (parseFloat(tx.amount) || 0);
+            }, 0);
+        }
+
+        // Calculate Current Income
+        function calculateCurrentIncome() {
+            const income = filteredTransactions.filter(tx => tx.type === 'Income');
+            return income.reduce((total, tx) => {
                 return total + (parseFloat(tx.amount) || 0);
             }, 0);
         }
@@ -881,92 +1174,171 @@
             }
         }
 
-        // Update Forecast
-        function updateForecast() {
-            if (transactions.length === 0) {
-                forecastedAmountEl.textContent = '$0.00';
-                nextMonthForecastEl.textContent = '$0.00';
-                yearlyProjectionEl.textContent = '$0.00';
+        // Update Savings Potential
+        function updateSavingsPotential() {
+            const currentSpending = calculateCurrentSpending();
+            const currentIncome = calculateCurrentIncome();
+            
+            if (currentIncome === 0) {
                 savingsPotentialEl.textContent = '$0.00';
+                savingsTip.textContent = 'No income data';
                 return;
             }
             
-            // Calculate average monthly spending (last 3 months)
-            const monthlyAverages = calculateMonthlyAverages();
-            const avgMonthlySpending = monthlyAverages.length > 0 
-                ? monthlyAverages.reduce((a, b) => a + b, 0) / monthlyAverages.length
-                : calculateCurrentSpending();
+            // Calculate potential savings (20% of income is a good savings goal)
+            const targetSavings = currentIncome * 0.2;
+            const currentSavings = currentIncome - currentSpending;
+            const savingsPotential = Math.max(0, targetSavings - currentSavings);
             
-            // Update forecast displays
-            forecastedAmountEl.textContent = formatCurrency(avgMonthlySpending);
-            nextMonthForecastEl.textContent = formatCurrency(avgMonthlySpending);
-            yearlyProjectionEl.textContent = formatCurrency(avgMonthlySpending * 12);
-            savingsPotentialEl.textContent = formatCurrency(avgMonthlySpending * 0.1);
+            savingsPotentialEl.textContent = formatCurrency(savingsPotential);
             
-            // Update chart
-            updateForecastChart(monthlyAverages);
+            // Update tip based on savings status
+            if (currentSavings >= targetSavings) {
+                savingsTip.textContent = 'Great savings!';
+                savingsPotentialEl.style.color = 'var(--success-color)';
+            } else if (currentSavings > 0) {
+                savingsTip.textContent = 'Could save more';
+                savingsPotentialEl.style.color = 'var(--warning-color)';
+            } else {
+                savingsTip.textContent = 'Spending exceeds income';
+                savingsPotentialEl.style.color = 'var(--danger-color)';
+            }
         }
 
-        // Calculate Monthly Averages
-        function calculateMonthlyAverages() {
-            const monthlyTotals = {};
-            const now = new Date();
-            const currentYear = now.getFullYear();
+        // Update Top Lists (Expenses and Income)
+        function updateTopLists() {
+            updateTopExpenses();
+            updateTopIncome();
+        }
+
+        // Update Top Expenses
+        function updateTopExpenses() {
+            const expenses = filteredTransactions
+                .filter(tx => tx.type === 'Expense')
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 5);
             
-            // Group transactions by month
-            transactions.forEach(tx => {
-                const txDate = new Date(tx.DATE);
-                const monthYear = `${txDate.getFullYear()}-${txDate.getMonth() + 1}`;
-                
-                if (!monthlyTotals[monthYear]) {
-                    monthlyTotals[monthYear] = 0;
-                }
-                monthlyTotals[monthYear] += parseFloat(tx.amount) || 0;
+            if (expenses.length === 0) {
+                topExpensesList.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-receipt fa-2x mb-3"></i>
+                        <p>No expenses this month</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            expenses.forEach((expense, index) => {
+                const date = expense.date.toLocaleDateString();
+                html += `
+                    <div class="top-item">
+                        <div>
+                            <strong>${index + 1}. ${expense.description}</strong>
+                            <div class="small text-muted">
+                                ${date} • ${expense.category} • ${expense.bank}
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold text-danger">${formatCurrency(expense.amount)}</div>
+                            <small class="text-muted">Expense</small>
+                        </div>
+                    </div>
+                `;
             });
             
-            // Get last 3 months
-            const monthlyAverages = [];
-            for (let i = 0; i < 3; i++) {
-                const date = new Date(currentYear, now.getMonth() - i, 1);
-                const monthYear = `${date.getFullYear()}-${date.getMonth() + 1}`;
-                
-                if (monthlyTotals[monthYear]) {
-                    monthlyAverages.push(monthlyTotals[monthYear]);
-                }
-            }
-            
-            return monthlyAverages;
+            topExpensesList.innerHTML = html;
         }
 
-        // Update Forecast Chart
-        function updateForecastChart(monthlyAverages) {
-            const ctx = document.getElementById('forecastChart').getContext('2d');
+        // Update Top Income
+        function updateTopIncome() {
+            const income = filteredTransactions
+                .filter(tx => tx.type === 'Income')
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 5);
             
-            // Destroy existing chart
-            if (forecastChart) {
-                forecastChart.destroy();
+            if (income.length === 0) {
+                topIncomeList.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-money-bill-wave fa-2x mb-3"></i>
+                        <p>No income this month</p>
+                    </div>
+                `;
+                return;
             }
             
-            // Prepare data
-            const labels = ['3 Months Ago', '2 Months Ago', 'Last Month', 'This Month', 'Next Month (Forecast)'];
-            const data = [...monthlyAverages, calculateCurrentSpending()];
+            let html = '';
+            income.forEach((inc, index) => {
+                const date = inc.date.toLocaleDateString();
+                html += `
+                    <div class="top-item">
+                        <div>
+                            <strong>${index + 1}. ${inc.description}</strong>
+                            <div class="small text-muted">
+                                ${date} • ${inc.category} • ${inc.bank}
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold text-success">${formatCurrency(inc.amount)}</div>
+                            <small class="text-muted">Income</small>
+                        </div>
+                    </div>
+                `;
+            });
             
-            // Add forecast for next month
-            const nextMonthForecast = data.length > 0 
-                ? data.reduce((a, b) => a + b, 0) / data.length
-                : 0;
-            data.push(nextMonthForecast);
+            topIncomeList.innerHTML = html;
+        }
+
+        // Update Spending Analysis
+        function updateSpendingAnalysis() {
+            updateSpendingChart();
+            updateSpendingMetrics();
+        }
+
+        // Update Spending Chart
+        function updateSpendingChart() {
+            const ctx = document.getElementById('spendingChart').getContext('2d');
+            
+            // Destroy existing chart
+            if (spendingChart) {
+                spendingChart.destroy();
+            }
+            
+            // Prepare data for last 30 days
+            const days = 30;
+            const dailyData = [];
+            const labels = [];
+            
+            for (let i = days - 1; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                labels.push(dateStr);
+                
+                // Calculate total spending for this day
+                const daySpending = filteredTransactions
+                    .filter(tx => {
+                        const txDate = tx.date;
+                        return txDate.getDate() === date.getDate() &&
+                               txDate.getMonth() === date.getMonth() &&
+                               txDate.getFullYear() === date.getFullYear() &&
+                               tx.type === 'Expense';
+                    })
+                    .reduce((sum, tx) => sum + tx.amount, 0);
+                
+                dailyData.push(daySpending);
+            }
             
             // Create chart
-            forecastChart = new Chart(ctx, {
+            spendingChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: labels.slice(-data.length),
+                    labels: labels,
                     datasets: [{
-                        label: 'Monthly Spending',
-                        data: data,
-                        borderColor: 'rgba(111, 66, 193, 1)',
-                        backgroundColor: 'rgba(111, 66, 193, 0.1)',
+                        label: 'Daily Spending',
+                        data: dailyData,
+                        borderColor: 'rgba(220, 53, 69, 1)',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
                         borderWidth: 2,
                         fill: true,
                         tension: 0.4
@@ -1008,9 +1380,382 @@
             });
         }
 
+        // Update Spending Metrics
+        function updateSpendingMetrics() {
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            if (expenses.length === 0) {
+                highestSpendingDayEl.textContent = '-';
+                avgDailySpendEl.textContent = '$0.00';
+                projectedMonthlyEl.textContent = '$0.00';
+                return;
+            }
+            
+            // Find highest spending day
+            const dailySpending = {};
+            expenses.forEach(tx => {
+                const dateStr = tx.date.toLocaleDateString();
+                if (!dailySpending[dateStr]) {
+                    dailySpending[dateStr] = 0;
+                }
+                dailySpending[dateStr] += tx.amount;
+            });
+            
+            let highestDay = '';
+            let highestAmount = 0;
+            Object.entries(dailySpending).forEach(([date, amount]) => {
+                if (amount > highestAmount) {
+                    highestAmount = amount;
+                    highestDay = date;
+                }
+            });
+            
+            highestSpendingDayEl.textContent = highestDay || '-';
+            
+            // Calculate average daily spending
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            const currentDay = new Date().getDate();
+            const daysSoFar = Math.min(currentDay, daysInMonth);
+            
+            const totalSpending = calculateCurrentSpending();
+            const avgDaily = totalSpending / daysSoFar;
+            avgDailySpendEl.textContent = formatCurrency(avgDaily);
+            
+            // Project monthly spending
+            const projectedMonthly = avgDaily * daysInMonth;
+            projectedMonthlyEl.textContent = formatCurrency(projectedMonthly);
+        }
+
+        // Update Category Analysis
+        function updateCategoryAnalysis() {
+            updateCategoryChart();
+            updateTopCategoriesList();
+        }
+
+        // Update Category Chart
+        function updateCategoryChart() {
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            
+            // Destroy existing chart
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+            
+            // Prepare category data
+            const categoryData = {};
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            expenses.forEach(tx => {
+                const category = tx.category || 'Uncategorized';
+                if (!categoryData[category]) {
+                    categoryData[category] = 0;
+                }
+                categoryData[category] += tx.amount;
+            });
+            
+            // Sort categories by amount
+            const sortedCategories = Object.entries(categoryData)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8); // Top 8 categories
+            
+            if (sortedCategories.length === 0) {
+                // Show empty state
+                document.getElementById('categoryChart').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('categoryChart').style.display = 'block';
+            
+            // Create chart
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: sortedCategories.map(([category]) => category),
+                    datasets: [{
+                        data: sortedCategories.map(([_, amount]) => amount),
+                        backgroundColor: [
+                            'rgba(220, 53, 69, 0.8)',
+                            'rgba(255, 193, 7, 0.8)',
+                            'rgba(13, 202, 240, 0.8)',
+                            'rgba(111, 66, 193, 0.8)',
+                            'rgba(25, 135, 84, 0.8)',
+                            'rgba(253, 126, 20, 0.8)',
+                            'rgba(108, 117, 125, 0.8)',
+                            'rgba(32, 201, 151, 0.8)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const value = context.parsed;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update Top Categories List
+        function updateTopCategoriesList() {
+            const categoryData = {};
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+            
+            expenses.forEach(tx => {
+                const category = tx.category || 'Uncategorized';
+                if (!categoryData[category]) {
+                    categoryData[category] = 0;
+                }
+                categoryData[category] += tx.amount;
+            });
+            
+            // Sort categories by amount
+            const sortedCategories = Object.entries(categoryData)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5); // Top 5 categories
+            
+            const container = document.getElementById('topCategoriesList');
+            
+            if (sortedCategories.length === 0) {
+                container.innerHTML = '<p class="text-muted">No spending categories yet</p>';
+                return;
+            }
+            
+            let html = '<div class="list-group">';
+            sortedCategories.forEach(([category, amount]) => {
+                const percentage = (amount / calculateCurrentSpending() * 100).toFixed(1);
+                html += `
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge expense-category me-2">${category}</span>
+                            <small class="text-muted">${percentage}% of total</small>
+                        </div>
+                        <span class="fw-bold">${formatCurrency(amount)}</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+        }
+
+        // Generate Financial Insights
+        function generateFinancialInsights() {
+            const currentSpending = calculateCurrentSpending();
+            const currentIncome = calculateCurrentIncome();
+            const savingsRate = currentIncome > 0 ? ((currentIncome - currentSpending) / currentIncome * 100) : 0;
+            
+            let insightsHTML = '';
+            
+            if (filteredTransactions.length === 0) {
+                insightsHTML = `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-info-circle me-2"></i>Welcome!</h6>
+                        <p>Start by adding transactions to get personalized financial insights.</p>
+                    </div>
+                `;
+            } else {
+                insightsHTML = `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-chart-line me-2"></i>Monthly Overview</h6>
+                        <p>You've spent <strong>${formatCurrency(currentSpending)}</strong> this month.</p>
+                        <p>Income: <strong>${formatCurrency(currentIncome)}</strong></p>
+                        <p>Savings Rate: <strong>${savingsRate.toFixed(1)}%</strong></p>
+                    </div>
+                `;
+                
+                // Add spending trend insight
+                const avgDaily = currentSpending / new Date().getDate();
+                if (avgDaily > (budgetSettings.monthlyLimit || 1000) / 30) {
+                    insightsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-exclamation-triangle me-2 text-warning"></i>Spending Alert</h6>
+                            <p>Your daily spending average (${formatCurrency(avgDaily)}) is above your daily budget target.</p>
+                        </div>
+                    `;
+                }
+                
+                // Add category insight
+                const categoryData = {};
+                const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+                expenses.forEach(tx => {
+                    const category = tx.category || 'Uncategorized';
+                    categoryData[category] = (categoryData[category] || 0) + tx.amount;
+                });
+                
+                const topCategory = Object.entries(categoryData).sort((a, b) => b[1] - a[1])[0];
+                if (topCategory) {
+                    insightsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-tags me-2"></i>Top Spending Category</h6>
+                            <p><strong>${topCategory[0]}</strong> is your largest expense at ${formatCurrency(topCategory[1])}.</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            aiInsights.innerHTML = insightsHTML;
+        }
+
+        // Generate Savings Tips
+        function generateSavingsTips() {
+            const currentSpending = calculateCurrentSpending();
+            const currentIncome = calculateCurrentIncome();
+            const savingsRate = currentIncome > 0 ? ((currentIncome - currentSpending) / currentIncome * 100) : 0;
+            
+            let tipsHTML = '';
+            
+            if (filteredTransactions.length === 0) {
+                tipsHTML = `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-lightbulb me-2"></i>Get Started</h6>
+                        <p>Add your transactions to receive personalized savings tips!</p>
+                    </div>
+                `;
+            } else {
+                // Tip 1: Based on savings rate
+                if (savingsRate < 20) {
+                    tipsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-piggy-bank me-2"></i>Increase Savings</h6>
+                            <p>Your savings rate is ${savingsRate.toFixed(1)}%. Aim for 20% by reducing discretionary spending.</p>
+                            <small class="text-muted">Try cutting back on dining out or subscription services.</small>
+                        </div>
+                    `;
+                } else {
+                    tipsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-trophy me-2"></i>Great Job!</h6>
+                            <p>You're saving ${savingsRate.toFixed(1)}% of your income. Keep it up!</p>
+                        </div>
+                    `;
+                }
+                
+                // Tip 2: Based on spending patterns
+                const categoryData = {};
+                const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
+                expenses.forEach(tx => {
+                    const category = tx.category || 'Uncategorized';
+                    categoryData[category] = (categoryData[category] || 0) + tx.amount;
+                });
+                
+                const discretionaryCategories = ['Dining', 'Entertainment', 'Shopping', 'Travel'];
+                let discretionarySpending = 0;
+                
+                discretionaryCategories.forEach(cat => {
+                    Object.entries(categoryData).forEach(([category, amount]) => {
+                        if (category.toLowerCase().includes(cat.toLowerCase())) {
+                            discretionarySpending += amount;
+                        }
+                    });
+                });
+                
+                if (discretionarySpending > currentSpending * 0.3) {
+                    tipsHTML += `
+                        <div class="insight-item">
+                            <h6><i class="fas fa-utensils me-2"></i>Reduce Discretionary Spending</h6>
+                            <p>${formatCurrency(discretionarySpending)} spent on discretionary categories. Consider setting limits.</p>
+                        </div>
+                    `;
+                }
+                
+                // Tip 3: Budget utilization
+                if (budgetSettings.monthlyLimit) {
+                    const utilization = (currentSpending / budgetSettings.monthlyLimit * 100);
+                    if (utilization > 90) {
+                        tipsHTML += `
+                            <div class="insight-item">
+                                <h6><i class="fas fa-exclamation-triangle me-2 text-danger"></i>Budget Close to Limit</h6>
+                                <p>You've used ${utilization.toFixed(1)}% of your monthly budget. Consider reviewing expenses.</p>
+                            </div>
+                        `;
+                    }
+                }
+                
+                // Tip 4: Regular savings
+                tipsHTML += `
+                    <div class="insight-item">
+                        <h6><i class="fas fa-calendar-check me-2"></i>Automate Savings</h6>
+                        <p>Set up automatic transfers to savings account on payday.</p>
+                        <small class="text-muted">"Pay yourself first" is a proven savings strategy.</small>
+                    </div>
+                `;
+            }
+            
+            savingsTips.innerHTML = tipsHTML;
+        }
+
+        // Update Recent Transactions
+        function updateRecentTransactions() {
+            recentTransactionsEl.innerHTML = '';
+            
+            if (filteredTransactions.length === 0) {
+                recentTransactionsEl.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            <i class="fas fa-receipt fa-2x mb-3"></i>
+                            <p>No transactions this month</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            // Show last 10 transactions
+            const recentTx = filteredTransactions.slice(0, 10);
+            
+            recentTx.forEach(tx => {
+                const row = document.createElement('tr');
+                const date = tx.date.toLocaleDateString();
+                const typeBadge = tx.type === 'Income' ? 
+                    '<span class="badge bg-success">Income</span>' : 
+                    '<span class="badge bg-danger">Expense</span>';
+                
+                // Determine status based on budget
+                let status = '<span class="badge bg-secondary">Normal</span>';
+                if (tx.type === 'Expense' && budgetSettings.monthlyLimit) {
+                    const utilization = (calculateCurrentSpending() / budgetSettings.monthlyLimit * 100);
+                    if (utilization > 90) {
+                        status = '<span class="badge bg-danger">High</span>';
+                    } else if (utilization > 70) {
+                        status = '<span class="badge bg-warning">Medium</span>';
+                    }
+                }
+                
+                row.innerHTML = `
+                    <td>${date}</td>
+                    <td>${tx.description}</td>
+                    <td><span class="category-badge ${tx.type === 'Income' ? 'income-category' : 'expense-category'}">${tx.category}</span></td>
+                    <td>${typeBadge}</td>
+                    <td class="fw-bold ${tx.type === 'Income' ? 'text-success' : 'text-danger'}">
+                        ${tx.type === 'Income' ? '+' : '-'}${formatCurrency(tx.amount)}
+                    </td>
+                    <td>${status}</td>
+                `;
+                
+                recentTransactionsEl.appendChild(row);
+            });
+        }
+
         // Check Budget Limits
         async function checkBudgetLimits() {
-            if (!budgetSettings.monthlyLimit || transactions.length === 0) return;
+            if (!budgetSettings.monthlyLimit || filteredTransactions.length === 0) return;
             
             const monthlyLimit = parseFloat(budgetSettings.monthlyLimit);
             const currentSpending = calculateCurrentSpending();
@@ -1028,18 +1773,12 @@
                     'danger'
                 );
                 
-                // Send email notification if enabled
-                if (budgetSettings.emailNotifications && budgetSettings.notificationEmail) {
-                    sendEmailNotification(
-                        budgetSettings.notificationEmail,
-                        'Budget Limit Exceeded',
-                        `Your monthly budget of ${formatCurrency(monthlyLimit)} has been exceeded by ${formatCurrency(exceededBy)}. Current spending: ${formatCurrency(currentSpending)}`
-                    );
-                }
+                // Show alert popup
+                showAlert(`Budget exceeded by ${formatCurrency(exceededBy)}!`, 'danger');
                 
                 // Show modal (only once per session)
                 if (!hasShownExceededModal) {
-                    showBudgetExceededModal(monthlyLimit, currentSpending, exceededBy);
+                    showBudgetExceededAlert(monthlyLimit, currentSpending, exceededBy);
                     hasShownExceededModal = true;
                 }
             }
@@ -1050,31 +1789,30 @@
                     `You've used ${percentage.toFixed(1)}% of your monthly budget. Only ${formatCurrency(monthlyLimit - currentSpending)} remaining.`,
                     'warning'
                 );
+                
+                showAlert(`Budget warning: ${percentage.toFixed(1)}% used`, 'warning');
             }
             
             // Check category limits
             if (budgetSettings.categoryLimits) {
                 checkCategoryLimits();
             }
-            
-            // Update alerts display
-            updateAlertsDisplay();
         }
 
         // Check Category Limits
-        function checkCategoryLimits() {
+        async function checkCategoryLimits() {
             if (!budgetSettings.categoryLimits || budgetSettings.categoryLimits.length === 0) return;
             
             // Group transactions by category
             const categorySpending = {};
-            transactions.forEach(tx => {
-                const category = tx.ACCOUNT_HEADER || 'Uncategorized';
-                const amount = parseFloat(tx.amount) || 0;
-                
-                if (!categorySpending[category]) {
-                    categorySpending[category] = 0;
+            filteredTransactions.forEach(tx => {
+                if (tx.type === 'Expense') {
+                    const category = tx.category || 'Uncategorized';
+                    if (!categorySpending[category]) {
+                        categorySpending[category] = 0;
+                    }
+                    categorySpending[category] += tx.amount;
                 }
-                categorySpending[category] += amount;
             });
             
             // Check each category limit
@@ -1088,12 +1826,41 @@
                         `${limit.category} spending (${formatCurrency(spent)}) exceeds limit (${formatCurrency(limitAmount)})`,
                         'danger'
                     );
+                    
+                    showAlert(`${limit.category} limit exceeded!`, 'danger');
                 } else if (spent > limitAmount * 0.8) {
                     createNotification(
                         'Category Limit Warning',
                         `${limit.category} spending (${formatCurrency(spent)}) is approaching limit (${formatCurrency(limitAmount)})`,
                         'warning'
                     );
+                }
+            });
+        }
+
+        // Show Budget Exceeded Alert
+        function showBudgetExceededAlert(limit, spending, exceededBy) {
+            Swal.fire({
+                title: '⚠️ Budget Limit Exceeded!',
+                html: `
+                    <div class="text-start">
+                        <p>Your monthly budget has been exceeded.</p>
+                        <ul class="mb-3">
+                            <li><strong>Budget Limit:</strong> ${formatCurrency(limit)}</li>
+                            <li><strong>Current Spending:</strong> ${formatCurrency(spending)}</li>
+                            <li><strong>Exceeded By:</strong> ${formatCurrency(exceededBy)}</li>
+                        </ul>
+                        <p class="text-danger">Consider reviewing your recent expenses.</p>
+                    </div>
+                `,
+                icon: 'warning',
+                confirmButtonText: 'Review Expenses',
+                showCancelButton: true,
+                cancelButtonText: 'Dismiss'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // Scroll to recent transactions
+                    document.getElementById('recentTransactions').scrollIntoView({ behavior: 'smooth' });
                 }
             });
         }
@@ -1123,164 +1890,10 @@
                 
                 // Update UI
                 updateNotificationBadge();
-                updateNotificationsList();
-                updateAlertsDisplay();
                 
             } catch (error) {
                 console.error('Error creating notification:', error);
             }
-        }
-
-        // Send Email Notification (Simulated - in real app, use email service)
-        async function sendEmailNotification(to, subject, body) {
-            console.log('Email Notification:');
-            console.log(`To: ${to}`);
-            console.log(`Subject: ${subject}`);
-            console.log(`Body: ${body}`);
-            
-            // In a real application, you would integrate with an email service like:
-            // - SendGrid
-            // - AWS SES
-            // - Nodemailer (for Node.js backend)
-            
-            // For demo purposes, we'll just show a success message
-            Swal.fire({
-                title: 'Email Sent!',
-                text: 'Budget alert email has been sent successfully.',
-                icon: 'success',
-                timer: 3000,
-                showConfirmButton: false
-            });
-        }
-
-        // Show Budget Exceeded Modal
-        function showBudgetExceededModal(limit, spending, exceededBy) {
-            document.getElementById('modalBudgetLimit').textContent = formatCurrency(limit);
-            document.getElementById('modalCurrentSpending').textContent = formatCurrency(spending);
-            document.getElementById('modalExceededAmount').textContent = formatCurrency(exceededBy);
-            document.getElementById('exceededMessage').textContent = 
-                `Your monthly budget of ${formatCurrency(limit)} has been exceeded by ${formatCurrency(exceededBy)}.`;
-            
-            budgetExceededModal.show();
-        }
-
-        // Update Recent Transactions
-        function updateRecentTransactions() {
-            recentTransactionsEl.innerHTML = '';
-            
-            if (transactions.length === 0) {
-                recentTransactionsEl.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center text-muted py-4">
-                            <i class="fas fa-receipt fa-2x mb-3"></i>
-                            <p>No transactions this month</p>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            // Show last 10 transactions
-            const recentTx = transactions.slice(0, 10);
-            
-            recentTx.forEach(tx => {
-                const row = document.createElement('tr');
-                const date = new Date(tx.DATE).toLocaleDateString();
-                const category = tx.ACCOUNT_HEADER || 'Uncategorized';
-                const amount = parseFloat(tx.amount) || 0;
-                
-                // Determine status based on category limits
-                let status = 'Normal';
-                let statusClass = 'success';
-                
-                if (budgetSettings.categoryLimits) {
-                    const categoryLimit = budgetSettings.categoryLimits.find(
-                        limit => limit.category === category
-                    );
-                    
-                    if (categoryLimit) {
-                        const limitAmount = parseFloat(categoryLimit.limit);
-                        if (amount > limitAmount) {
-                            status = 'Exceeded';
-                            statusClass = 'danger';
-                        } else if (amount > limitAmount * 0.8) {
-                            status = 'Warning';
-                            statusClass = 'warning';
-                        }
-                    }
-                }
-                
-                row.innerHTML = `
-                    <td>${date}</td>
-                    <td>${tx.DESCRIPTION || 'No description'}</td>
-                    <td>${category}</td>
-                    <td class="fw-bold">${formatCurrency(amount)}</td>
-                    <td><span class="badge bg-${statusClass}">${status}</span></td>
-                `;
-                
-                recentTransactionsEl.appendChild(row);
-            });
-        }
-
-        // Update Alerts Display
-        function updateAlertsDisplay() {
-            alertsContainer.innerHTML = '';
-            
-            // Get unread notifications
-            const unreadNotifications = notifications.filter(n => !n.read);
-            
-            if (unreadNotifications.length === 0) {
-                alertsContainer.innerHTML = `
-                    <div class="text-center text-muted py-4">
-                        <i class="fas fa-check-circle fa-2x mb-3"></i>
-                        <p>No active alerts. Your budget is on track!</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Show alerts (last 5)
-            const alertsToShow = unreadNotifications.slice(0, 5);
-            
-            alertsToShow.forEach(notification => {
-                const alertCard = document.createElement('div');
-                alertCard.className = `card mb-3 ${notification.type === 'danger' ? 'alert-card' : 
-                                       notification.type === 'warning' ? 'warning-card' : ''}`;
-                
-                const timeAgo = getTimeAgo(notification.createdAt?.toDate() || new Date());
-                
-                alertCard.innerHTML = `
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <h6 class="mb-1">
-                                    <i class="fas fa-${notification.type === 'danger' ? 'exclamation-triangle' : 
-                                                     notification.type === 'warning' ? 'exclamation-circle' : 
-                                                     'info-circle'} 
-                                        me-2 text-${notification.type}"></i>
-                                    ${notification.title}
-                                </h6>
-                                <p class="mb-0">${notification.message}</p>
-                                <small class="text-muted">${timeAgo}</small>
-                            </div>
-                            <button class="btn btn-sm btn-outline-secondary mark-read-btn" 
-                                    data-id="${notification.id}">
-                                Mark Read
-                            </button>
-                        </div>
-                    </div>
-                `;
-                
-                alertsContainer.appendChild(alertCard);
-            });
-            
-            // Add event listeners to mark as read buttons
-            document.querySelectorAll('.mark-read-btn').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    const notificationId = e.target.dataset.id;
-                    await markNotificationAsRead(notificationId);
-                });
-            });
         }
 
         // Update Notification Badge
@@ -1290,184 +1903,92 @@
             notificationCount.style.display = unreadCount > 0 ? 'flex' : 'none';
         }
 
-        // Update Notifications List
-        function updateNotificationsList() {
-            const notificationsList = document.getElementById('notificationsList');
-            notificationsList.innerHTML = '';
+        // Set Budget Limit
+        async function setBudgetLimit() {
+            const limit = parseFloat(monthlyLimitInput.value);
             
-            if (notifications.length === 0) {
-                notificationsList.innerHTML = `
-                    <div class="text-center text-muted py-4">
-                        <i class="fas fa-bell-slash fa-2x mb-3"></i>
-                        <p>No notifications yet</p>
-                    </div>
-                `;
+            if (!limit || limit <= 0) {
+                showAlert('Please enter a valid budget limit', 'error');
                 return;
             }
             
-            notifications.forEach(notification => {
-                const item = document.createElement('div');
-                item.className = `card mb-3 ${!notification.read ? 'border-primary' : ''}`;
-                
-                const timeAgo = getTimeAgo(notification.createdAt?.toDate() || new Date());
-                
-                item.innerHTML = `
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <h6 class="mb-1 ${!notification.read ? 'text-primary' : ''}">
-                                    ${notification.title}
-                                </h6>
-                                <p class="mb-1">${notification.message}</p>
-                                <small class="text-muted">${timeAgo}</small>
-                            </div>
-                            ${!notification.read ? 
-                                `<button class="btn btn-sm btn-outline-primary mark-read-list-btn" 
-                                        data-id="${notification.id}">
-                                    Mark Read
-                                </button>` : 
-                                `<span class="badge bg-secondary">Read</span>`
-                            }
-                        </div>
-                    </div>
-                `;
-                
-                notificationsList.appendChild(item);
-            });
-            
-            // Add event listeners
-            document.querySelectorAll('.mark-read-list-btn').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    const notificationId = e.target.dataset.id;
-                    await markNotificationAsRead(notificationId);
-                });
-            });
-        }
-
-        // Mark Notification as Read
-        async function markNotificationAsRead(notificationId) {
-            if (!currentUser) return;
-            
             try {
-                // Update in Firestore
-                await updateDoc(doc(db, 'users', currentUser.uid, 'budgetNotifications', notificationId), {
-                    read: true
-                });
+                // Update budget settings
+                budgetSettings.monthlyLimit = limit;
+                budgetSettings.updatedAt = new Date();
                 
-                // Update local array
-                const index = notifications.findIndex(n => n.id === notificationId);
-                if (index !== -1) {
-                    notifications[index].read = true;
-                }
+                // Save to Firestore
+                await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings, { merge: true });
                 
                 // Update UI
-                updateNotificationBadge();
-                updateNotificationsList();
-                updateAlertsDisplay();
+                updateBudgetDisplay();
+                
+                showAlert(`Budget limit set to ${formatCurrency(limit)}`, 'success');
+                
+                // Check limits with new budget
+                checkBudgetLimits();
                 
             } catch (error) {
-                console.error('Error marking notification as read:', error);
+                console.error('Error setting budget limit:', error);
+                showAlert('Failed to set budget limit', 'error');
             }
         }
 
-        // Add Category Limit Row
-        function addCategoryLimitRow(category = '', limit = '', index = null) {
-            const row = document.createElement('div');
-            row.className = 'row mb-2 align-items-end';
-            row.dataset.index = index !== null ? index : categoryLimitsContainer.children.length;
+        // Show Category Limits Modal
+        function showCategoryLimitsModal() {
+            const modalContent = document.getElementById('categoryLimitsModalContent');
+            let html = '<p class="text-muted mb-3">Set spending limits for specific categories:</p>';
             
-            row.innerHTML = `
-                <div class="col-md-6">
-                    <label class="form-label">Category</label>
-                    <select class="form-select category-select">
-                        <option value="">Select Category</option>
-                        ${getUniqueCategories().map(cat => 
-                            `<option value="${cat}" ${cat === category ? 'selected' : ''}>${cat}</option>`
-                        ).join('')}
-                        <option value="custom" ${!getUniqueCategories().includes(category) && category ? 'selected' : ''}>
-                            Custom...
-                        </option>
-                    </select>
-                    <input type="text" class="form-control mt-2 custom-category-input" 
-                           placeholder="Enter custom category" 
-                           style="display: ${!getUniqueCategories().includes(category) && category ? 'block' : 'none'}"
-                           value="${!getUniqueCategories().includes(category) && category ? category : ''}">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Limit</label>
-                    <div class="input-group">
-                        <span class="input-group-text">$</span>
-                        <input type="number" class="form-control limit-input" step="0.01" min="0" 
-                               placeholder="Limit amount" value="${limit}">
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <button type="button" class="btn btn-danger remove-category-btn">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            `;
+            // Get all unique categories
+            const uniqueCategories = Array.from(categories).sort();
             
-            categoryLimitsContainer.appendChild(row);
+            if (uniqueCategories.length === 0) {
+                html += '<p class="text-center text-muted py-4">No categories found. Add some transactions first.</p>';
+            } else {
+                html += '<div class="row g-3">';
+                
+                uniqueCategories.forEach(category => {
+                    const existingLimit = budgetSettings.categoryLimits?.find(l => l.category === category);
+                    const currentSpending = filteredTransactions
+                        .filter(tx => tx.type === 'Expense' && tx.category === category)
+                        .reduce((sum, tx) => sum + tx.amount, 0);
+                    
+                    html += `
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6>${category}</h6>
+                                    <p class="small text-muted">Current: ${formatCurrency(currentSpending)}</p>
+                                    <div class="input-group">
+                                        <span class="input-group-text">$</span>
+                                        <input type="number" class="form-control category-limit-input" 
+                                               data-category="${category}"
+                                               placeholder="Set limit"
+                                               value="${existingLimit?.limit || ''}"
+                                               step="0.01" min="0">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
             
-            // Add event listeners
-            const categorySelect = row.querySelector('.category-select');
-            const customInput = row.querySelector('.custom-category-input');
-            const removeBtn = row.querySelector('.remove-category-btn');
-            
-            categorySelect.addEventListener('change', (e) => {
-                customInput.style.display = e.target.value === 'custom' ? 'block' : 'none';
-            });
-            
-            removeBtn.addEventListener('click', () => {
-                row.remove();
-            });
+            modalContent.innerHTML = html;
+            categoryLimitsModal.show();
         }
 
-        // Get Unique Categories from Transactions
-        function getUniqueCategories() {
-            const categories = new Set();
-            transactions.forEach(tx => {
-                if (tx.ACCOUNT_HEADER) {
-                    categories.add(tx.ACCOUNT_HEADER);
-                }
-            });
-            return Array.from(categories).sort();
-        }
-
-        // Save Budget Settings
-        async function saveBudgetSettings() {
-            if (!currentUser) return;
-            
+        // Save Category Limits
+        async function saveCategoryLimits() {
             try {
-                // Validate inputs
-                const monthlyLimit = parseFloat(monthlyLimitInput.value);
-                if (!monthlyLimit || monthlyLimit <= 0) {
-                    showError('Please enter a valid monthly budget limit');
-                    return;
-                }
-                
-                const warningThreshold = parseInt(warningThresholdInput.value);
-                if (warningThreshold < 1 || warningThreshold > 100) {
-                    showError('Warning threshold must be between 1 and 100');
-                    return;
-                }
-                
-                // Collect category limits
+                const limitInputs = document.querySelectorAll('.category-limit-input');
                 const categoryLimits = [];
-                const categoryRows = categoryLimitsContainer.querySelectorAll('.row');
                 
-                categoryRows.forEach(row => {
-                    const categorySelect = row.querySelector('.category-select');
-                    const customInput = row.querySelector('.custom-category-input');
-                    const limitInput = row.querySelector('.limit-input');
-                    
-                    let category = categorySelect.value;
-                    if (category === 'custom') {
-                        category = customInput.value.trim();
-                    }
-                    
-                    const limit = parseFloat(limitInput.value);
+                limitInputs.forEach(input => {
+                    const category = input.dataset.category;
+                    const limit = parseFloat(input.value);
                     
                     if (category && limit && limit > 0) {
                         categoryLimits.push({
@@ -1477,93 +1998,91 @@
                     }
                 });
                 
-                // Prepare settings object
-                const settings = {
-                    monthlyLimit,
-                    warningThreshold,
-                    emailNotifications: enableEmailNotifications.checked,
-                    notificationEmail: notificationEmail.value.trim(),
-                    categoryLimits,
-                    updatedAt: new Date()
-                };
+                // Update budget settings
+                budgetSettings.categoryLimits = categoryLimits;
+                budgetSettings.updatedAt = new Date();
                 
                 // Save to Firestore
-                await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), settings, { merge: true });
+                await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings, { merge: true });
                 
-                // Update local settings
-                budgetSettings = { ...budgetSettings, ...settings };
+                // Close modal
+                categoryLimitsModal.hide();
                 
-                // Show success message
-                Swal.fire({
-                    title: 'Success!',
-                    text: 'Budget settings saved successfully',
-                    icon: 'success',
-                    timer: 2000,
-                    showConfirmButton: false
-                });
+                showAlert('Category limits saved successfully', 'success');
                 
-                // Update display
-                updateBudgetDisplay();
-                checkBudgetLimits();
+                // Check limits with new category limits
+                checkCategoryLimits();
                 
             } catch (error) {
-                console.error('Error saving budget settings:', error);
-                showError('Failed to save budget settings');
+                console.error('Error saving category limits:', error);
+                showAlert('Failed to save category limits', 'error');
             }
         }
 
-        // Clear All Notifications
-        async function clearAllNotifications() {
-            if (!currentUser || notifications.length === 0) return;
+        // Analyze Spending Patterns
+        function analyzeSpendingPatterns() {
+            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
             
-            try {
-                // Show confirmation
-                const result = await Swal.fire({
-                    title: 'Clear all notifications?',
-                    text: 'This action cannot be undone',
-                    icon: 'warning',
-                    showCancelButton: true,
-                    confirmButtonText: 'Yes, clear all',
-                    cancelButtonText: 'Cancel'
-                });
-                
-                if (result.isConfirmed) {
-                    // Delete all notifications from Firestore
-                    const batch = [];
-                    notifications.forEach(notification => {
-                        if (notification.id !== 'temp') {
-                            batch.push(
-                                deleteDoc(doc(db, 'users', currentUser.uid, 'budgetNotifications', notification.id))
-                            );
-                        }
-                    });
-                    
-                    await Promise.all(batch);
-                    
-                    // Clear local array
-                    notifications = [];
-                    
-                    // Update UI
-                    updateNotificationBadge();
-                    updateNotificationsList();
-                    updateAlertsDisplay();
-                    
-                    // Close modal
-                    notificationModal.hide();
-                    
-                    Swal.fire({
-                        title: 'Cleared!',
-                        text: 'All notifications have been cleared',
-                        icon: 'success',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
-                }
-                
-            } catch (error) {
-                console.error('Error clearing notifications:', error);
-                showError('Failed to clear notifications');
+            if (expenses.length === 0) {
+                showAlert('No expenses to analyze', 'info');
+                return;
             }
+            
+            // Calculate insights
+            const totalSpending = calculateCurrentSpending();
+            const avgTransaction = totalSpending / expenses.length;
+            const categoryData = {};
+            
+            expenses.forEach(tx => {
+                const category = tx.category || 'Uncategorized';
+                categoryData[category] = (categoryData[category] || 0) + tx.amount;
+            });
+            
+            const topCategory = Object.entries(categoryData).sort((a, b) => b[1] - a[1])[0];
+            
+            // Show analysis results
+            Swal.fire({
+                title: '📊 Spending Analysis',
+                html: `
+                    <div class="text-start">
+                        <p><strong>Total Spending:</strong> ${formatCurrency(totalSpending)}</p>
+                        <p><strong>Number of Transactions:</strong> ${expenses.length}</p>
+                        <p><strong>Average Transaction:</strong> ${formatCurrency(avgTransaction)}</p>
+                        ${topCategory ? `
+                            <p><strong>Top Category:</strong> ${topCategory[0]} (${formatCurrency(topCategory[1])})</p>
+                            <p><strong>Percentage of Total:</strong> ${((topCategory[1] / totalSpending) * 100).toFixed(1)}%</p>
+                        ` : ''}
+                        <hr>
+                        <p class="small text-muted">Based on ${expenses.length} expense transactions this month.</p>
+                    </div>
+                `,
+                icon: 'info',
+                confirmButtonText: 'OK'
+            });
+        }
+
+        // Export Report
+        function exportReport() {
+            const data = {
+                budgetSettings,
+                currentSpending: calculateCurrentSpending(),
+                currentIncome: calculateCurrentIncome(),
+                transactions: filteredTransactions.slice(0, 50),
+                generatedAt: new Date().toISOString()
+            };
+            
+            // Create downloadable JSON file
+            const dataStr = JSON.stringify(data, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const exportFileDefaultName = `budget-report-${new Date().toISOString().split('T')[0]}.json`;
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            showAlert('Report exported successfully', 'success');
         }
 
         // Theme Management
@@ -1591,32 +2110,90 @@
 
         // Setup Event Listeners
         function setupEventListeners() {
-            // Save budget settings
-            saveBudgetSettingsBtn.addEventListener('click', saveBudgetSettings);
+            // Set budget limit
+            setLimitBtn.addEventListener('click', setBudgetLimit);
+            monthlyLimitInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') setBudgetLimit();
+            });
             
-            // Add category limit
-            addCategoryLimitBtn.addEventListener('click', () => addCategoryLimitRow());
+            // Warning threshold slider
+            warningThresholdInput.addEventListener('input', (e) => {
+                thresholdValue.textContent = `${e.target.value}%`;
+                budgetSettings.warningThreshold = parseInt(e.target.value);
+            });
             
-            // Notifications
-            notificationBtn.addEventListener('click', () => notificationModal.show());
+            // Category limits
+            setCategoryLimitsBtn.addEventListener('click', showCategoryLimitsModal);
+            saveCategoryLimitsBtn.addEventListener('click', saveCategoryLimits);
+            addCategoryLimitBtn.addEventListener('click', () => {
+                // This would add a new category limit row
+                showCategoryLimitsModal();
+            });
             
-            // Clear notifications
-            clearNotificationsBtn.addEventListener('click', clearAllNotifications);
+            // Analyze spending
+            analyzeSpendingBtn.addEventListener('click', analyzeSpendingPatterns);
+            
+            // Generate tips
+            generateTipsBtn.addEventListener('click', () => {
+                generateSavingsTips();
+                showAlert('New savings tips generated!', 'success');
+            });
+            
+            refreshTipsBtn.addEventListener('click', () => {
+                generateSavingsTips();
+                showAlert('Tips refreshed!', 'success');
+            });
+            
+            // Export report
+            exportReportBtn.addEventListener('click', exportReport);
+            
+            // Load more transactions
+            loadMoreTransactionsBtn.addEventListener('click', () => {
+                // For now, just reload all transactions
+                loadAllTransactions().then(() => {
+                    showAlert('Transactions reloaded', 'success');
+                });
+            });
+            
+            // Month selector
+            monthSelect.addEventListener('change', (e) => {
+                if (e.target.value === 'current') {
+                    filterTransactionsForCurrentMonth();
+                    updateAllDisplays();
+                } else if (e.target.value === 'last') {
+                    // Filter for last month
+                    const now = new Date();
+                    const lastMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+                    const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+                    
+                    filteredTransactions = allTransactions.filter(tx => {
+                        const txDate = tx.date;
+                        return txDate.getMonth() === lastMonth && 
+                               txDate.getFullYear() === year;
+                    });
+                    
+                    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                                      'July', 'August', 'September', 'October', 'November', 'December'];
+                    currentMonthLabel.textContent = `${monthNames[lastMonth]} ${year}`;
+                    
+                    updateAllDisplays();
+                }
+            });
             
             // Theme toggle
             themeToggle.addEventListener('click', toggleTheme);
             themeToggleFloat.addEventListener('click', toggleTheme);
-            
-            // Budget exceeded modal
-            adjustBudgetBtn.addEventListener('click', () => {
-                budgetExceededModal.hide();
-                monthlyLimitInput.focus();
-            });
-            
-            // Close budget exceeded modal
-            document.getElementById('budgetExceededModal').addEventListener('hidden.bs.modal', () => {
-                hasShownExceededModal = true;
-            });
+        }
+
+        // Update All Displays
+        function updateAllDisplays() {
+            updateBudgetDisplay();
+            updateTopLists();
+            updateSpendingAnalysis();
+            updateCategoryAnalysis();
+            generateFinancialInsights();
+            generateSavingsTips();
+            updateRecentTransactions();
         }
 
         // Utility Functions
@@ -1627,36 +2204,26 @@
             }).format(amount);
         }
 
-        function getTimeAgo(date) {
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
+        function showAlert(message, type = 'info') {
+            // Create alert element
+            const alertEl = document.createElement('div');
+            alertEl.className = `alert alert-${type} alert-dismissible fade show alert-popup`;
+            alertEl.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
             
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
+            // Add to container
+            const container = document.getElementById('alertContainer');
+            container.appendChild(alertEl);
             
-            return date.toLocaleDateString();
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                if (alertEl.parentNode) {
+                    alertEl.remove();
+                }
+            }, 5000);
         }
-
-        function showError(message) {
-            Swal.fire({
-                title: 'Error',
-                text: message,
-                icon: 'error',
-                confirmButtonText: 'OK'
-            });
-        }
-
-        // Initialize with a sample category limit row
-        setTimeout(() => {
-            if (categoryLimitsContainer.children.length === 0) {
-                addCategoryLimitRow();
-            }
-        }, 1000);
     </script>
 </body>
 </html>
