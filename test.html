@@ -672,8 +672,10 @@
                     <div class="card-body">
                         <div id="topExpensesList">
                             <div class="text-center text-muted py-4">
-                                <i class="fas fa-receipt fa-2x mb-3"></i>
-                                <p>Loading expenses...</p>
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading real expenses from Firebase...</p>
                             </div>
                         </div>
                     </div>
@@ -688,8 +690,10 @@
                     <div class="card-body">
                         <div id="topIncomeList">
                             <div class="text-center text-muted py-4">
-                                <i class="fas fa-money-bill-wave fa-2x mb-3"></i>
-                                <p>Loading income...</p>
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading real income from Firebase...</p>
                             </div>
                         </div>
                     </div>
@@ -749,25 +753,11 @@
                     <div class="card-body">
                         <div id="aiInsights">
                             <div class="text-center text-muted py-4">
-                                <i class="fas fa-chart-pie fa-2x mb-3"></i>
-                                <p>Analyzing your finances...</p>
+                                <div class="spinner-border text-primary mb-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Analyzing your real financial data...</p>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Category Analysis -->
-        <div class="row mt-4">
-            <div class="col-lg-12">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fas fa-tags me-2"></i>Category Analysis
-                    </div>
-                    <div class="card-body">
-                        <div class="chart-container">
-                            <canvas id="categoryChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -777,7 +767,7 @@
         <!-- Recent Transactions -->
         <div class="card mt-4">
             <div class="card-header">
-                <i class="fas fa-history me-2"></i>Recent Transactions
+                <i class="fas fa-history me-2"></i>Recent Real Transactions from Firebase
             </div>
             <div class="card-body">
                 <div class="table-responsive">
@@ -789,14 +779,16 @@
                                 <th>Category</th>
                                 <th>Type</th>
                                 <th>Amount</th>
-                                <th>Period</th>
+                                <th>Bank</th>
                             </tr>
                         </thead>
                         <tbody id="recentTransactions">
                             <tr>
                                 <td colspan="6" class="text-center text-muted py-4">
-                                    <i class="fas fa-spinner fa-spin me-2"></i>
-                                    Loading transactions...
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="mt-2">Loading real transactions from Firebase...</p>
                                 </td>
                             </tr>
                         </tbody>
@@ -865,14 +857,38 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Initialize variables
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { 
+            getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, 
+            query, orderBy, setDoc, getDoc, where, limit, onSnapshot 
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+        // Firebase Configuration (using your provided config)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+            authDomain: "budget-app-1365f.firebaseapp.com",
+            projectId: "budget-app-1365f",
+            storageBucket: "budget-app-1365f.appspot.com",
+            messagingSenderId: "1036194450411",
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+            measurementId: "G-YFFJL2H54X"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Global Variables
         let currentUser = null;
         let budgetSettings = {
-            weeklyLimit: 1000,
-            monthlyLimit: 4000,
-            quarterlyLimit: 12000,
-            yearlyLimit: 48000,
+            weeklyLimit: 0,
+            monthlyLimit: 0,
+            quarterlyLimit: 0,
+            yearlyLimit: 0,
             rolloverEnabled: false,
             rolloverBalance: 0,
             customStartDate: null,
@@ -892,43 +908,143 @@
         document.addEventListener('DOMContentLoaded', async () => {
             console.log('Initializing application...');
             
-            // Check if user is logged in (simulating authentication)
-            try {
-                // Simulate user authentication
-                currentUser = {
-                    uid: 'demo-user-123',
-                    email: 'demo@example.com'
-                };
+            // Initialize UI
+            showLoadingState();
+            
+            // Setup event listeners first
+            setupEventListeners();
+            
+            // Load theme preference
+            loadThemePreference();
+            
+            // Initialize UI components
+            initializePeriodTabs();
+            updateLimitForms();
+            
+            // Check authentication
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUser = user;
+                    console.log('User authenticated:', user.email);
+                    
+                    // Load real data from Firebase
+                    await loadBudgetSettings();
+                    await loadAllTransactions();
+                    
+                    // Update all displays with real data
+                    updateAllDisplays();
+                    
+                    // Setup real-time listeners
+                    setupRealtimeListeners();
+                    
+                    showAlert('Connected to Firebase successfully!', 'success');
+                    
+                } else {
+                    console.log('No user signed in');
+                    // Try to auto-login or show login prompt
+                    await tryAutoLogin();
+                }
                 
-                console.log('User authenticated (demo mode)');
-                
-                // Load theme preference
-                loadThemePreference();
-                
-                // Initialize UI components
-                initializePeriodTabs();
-                updateLimitForms();
-                
-                // Load sample data for demo
-                await loadSampleData();
-                
-                // Update all displays
-                updateAllDisplays();
-                
-                // Set up event listeners
-                setupEventListeners();
-                
-                console.log('Application initialized successfully');
-                
-            } catch (error) {
-                console.error('Initialization error:', error);
-                showAlert('Failed to initialize application', 'error');
-            }
+                hideLoadingState();
+            });
         });
 
-        // Load Sample Data for Demo
+        // Try Auto Login
+        async function tryAutoLogin() {
+            // Check if there's a stored user
+            const storedUser = localStorage.getItem('budgetAppUser');
+            if (storedUser) {
+                try {
+                    const userData = JSON.parse(storedUser);
+                    // You might want to implement a proper login flow here
+                    showAlert('Please sign in to access your budget data', 'info');
+                } catch (error) {
+                    console.error('Auto-login failed:', error);
+                }
+            }
+            
+            // Show demo mode with option to connect
+            Swal.fire({
+                title: 'Connect to Your Data',
+                html: `
+                    <div class="text-start">
+                        <p>Connect to your Firebase account to see real transaction data:</p>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" id="loginEmail" class="form-control" placeholder="your@email.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" id="loginPassword" class="form-control" placeholder="Password">
+                        </div>
+                        <p class="text-muted small">Or click "Use Demo Data" to see sample data</p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Connect to Firebase',
+                cancelButtonText: 'Use Demo Data',
+                showDenyButton: true,
+                denyButtonText: 'Try Auto-Connect'
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    // Manual login
+                    const email = document.getElementById('loginEmail').value;
+                    const password = document.getElementById('loginPassword').value;
+                    await manualLogin(email, password);
+                } else if (result.isDenied) {
+                    // Try auto-connect with common credentials
+                    await autoConnect();
+                } else {
+                    // Use demo data
+                    useDemoData();
+                }
+            });
+        }
+
+        // Manual Login
+        async function manualLogin(email, password) {
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                currentUser = userCredential.user;
+                localStorage.setItem('budgetAppUser', JSON.stringify({
+                    email: userCredential.user.email,
+                    uid: userCredential.user.uid
+                }));
+                
+                // Load real data
+                await loadBudgetSettings();
+                await loadAllTransactions();
+                updateAllDisplays();
+                showAlert('Logged in successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Login error:', error);
+                showAlert('Login failed: ' + error.message, 'error');
+                useDemoData();
+            }
+        }
+
+        // Auto Connect
+        async function autoConnect() {
+            // This is a demo auto-connect. In production, you'd use proper auth
+            showAlert('Auto-connect not available. Using demo data.', 'info');
+            useDemoData();
+        }
+
+        // Use Demo Data
+        async function useDemoData() {
+            showAlert('Using demo data. Sign in to see your real transactions.', 'info');
+            
+            // Load sample data
+            await loadSampleData();
+            
+            // Update displays
+            updateAllDisplays();
+        }
+
+        // Load Sample Data
         async function loadSampleData() {
-            console.log('Loading sample data...');
+            console.log('Loading sample data for demo...');
             
             // Generate sample transactions
             const sampleTransactions = generateSampleTransactions();
@@ -938,14 +1054,19 @@
             filterTransactionsForCurrentPeriod();
             
             console.log(`Loaded ${allTransactions.length} sample transactions`);
+            
+            // Update UI to show it's demo data
+            document.querySelector('.card-header i.fa-history').parentElement.innerHTML = 
+                '<i class="fas fa-history me-2"></i>Recent Demo Transactions';
         }
 
-        // Generate Sample Transactions
+        // Generate Sample Transactions (for demo)
         function generateSampleTransactions() {
             const transactions = [];
             const now = new Date();
             const categories = ['Groceries', 'Dining', 'Entertainment', 'Transport', 'Shopping', 'Utilities', 'Healthcare', 'Education'];
             const incomeSources = ['Salary', 'Freelance', 'Investment', 'Bonus', 'Gift'];
+            const banks = ['Chase', 'Bank of America', 'Wells Fargo', 'Citibank', 'Capital One'];
             
             // Generate expenses for last 60 days
             for (let i = 0; i < 60; i++) {
@@ -957,6 +1078,7 @@
                 for (let j = 0; j < numExpenses; j++) {
                     const amount = Math.floor(Math.random() * 200) + 10;
                     const category = categories[Math.floor(Math.random() * categories.length)];
+                    const bank = banks[Math.floor(Math.random() * banks.length)];
                     
                     transactions.push({
                         id: `expense-${i}-${j}`,
@@ -965,7 +1087,14 @@
                         category: category,
                         description: `${category} purchase`,
                         date: new Date(date),
-                        bank: 'Checking Account'
+                        bank: bank,
+                        DATE: date,
+                        TYPE: 'Expense',
+                        ACCOUNT_HEADER: category,
+                        DESCRIPTION: `${category} purchase`,
+                        BANK_NAME: bank,
+                        EXPENSE: amount,
+                        INCOME: null
                     });
                 }
                 
@@ -973,6 +1102,7 @@
                 if (Math.random() > 0.7) {
                     const amount = Math.floor(Math.random() * 1000) + 500;
                     const source = incomeSources[Math.floor(Math.random() * incomeSources.length)];
+                    const bank = banks[Math.floor(Math.random() * banks.length)];
                     
                     transactions.push({
                         id: `income-${i}`,
@@ -981,12 +1111,139 @@
                         category: source,
                         description: `${source} payment`,
                         date: new Date(date),
-                        bank: 'Savings Account'
+                        bank: bank,
+                        DATE: date,
+                        TYPE: 'Income',
+                        ACCOUNT_HEADER: source,
+                        DESCRIPTION: `${source} payment`,
+                        BANK_NAME: bank,
+                        EXPENSE: null,
+                        INCOME: amount
                     });
                 }
             }
             
             return transactions;
+        }
+
+        // Load Budget Settings from Firebase
+        async function loadBudgetSettings() {
+            if (!currentUser) return;
+            
+            try {
+                const settingsDoc = await getDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'));
+                
+                if (settingsDoc.exists()) {
+                    budgetSettings = { ...budgetSettings, ...settingsDoc.data() };
+                    console.log('Loaded budget settings from Firebase:', budgetSettings);
+                    
+                    // Update UI elements
+                    document.getElementById('rolloverToggle').checked = budgetSettings.rolloverEnabled || false;
+                    
+                } else {
+                    // Initialize default settings
+                    budgetSettings = {
+                        weeklyLimit: 1000,
+                        monthlyLimit: 4000,
+                        quarterlyLimit: 12000,
+                        yearlyLimit: 48000,
+                        rolloverEnabled: false,
+                        rolloverBalance: 0,
+                        warningThreshold: 80,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    };
+                    
+                    // Save default settings to Firebase
+                    await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings);
+                    console.log('Created default budget settings in Firebase');
+                }
+            } catch (error) {
+                console.error('Error loading budget settings from Firebase:', error);
+                showAlert('Failed to load budget settings', 'error');
+            }
+        }
+
+        // Save Budget Settings to Firebase
+        async function saveBudgetSettings() {
+            if (!currentUser) return;
+            
+            try {
+                budgetSettings.updatedAt = new Date();
+                await setDoc(doc(db, 'users', currentUser.uid, 'budget', 'settings'), budgetSettings, { merge: true });
+                console.log('Budget settings saved to Firebase');
+            } catch (error) {
+                console.error('Error saving budget settings to Firebase:', error);
+                showAlert('Failed to save settings', 'error');
+            }
+        }
+
+        // Load All Transactions from Firebase
+        async function loadAllTransactions() {
+            if (!currentUser) return;
+            
+            try {
+                console.log('Loading real transactions from Firebase for user:', currentUser.uid);
+                
+                const transactionsRef = collection(db, 'users', currentUser.uid, 'transactions');
+                const q = query(transactionsRef, orderBy('DATE', 'desc'));
+                
+                const snapshot = await getDocs(q);
+                allTransactions = [];
+                
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    console.log('Firebase transaction data:', data);
+                    
+                    // Determine type based on available fields
+                    let type = 'Expense';
+                    let amount = 0;
+                    
+                    if (data.INCOME && data.INCOME > 0) {
+                        type = 'Income';
+                        amount = parseFloat(data.INCOME);
+                    } else if (data.EXPENSE && data.EXPENSE > 0) {
+                        type = 'Expense';
+                        amount = parseFloat(data.EXPENSE);
+                    }
+                    
+                    // Parse date
+                    let transactionDate;
+                    if (data.DATE && data.DATE.toDate) {
+                        transactionDate = data.DATE.toDate();
+                    } else if (data.DATE) {
+                        transactionDate = new Date(data.DATE);
+                    } else {
+                        transactionDate = new Date();
+                    }
+                    
+                    const transaction = {
+                        id: docSnap.id,
+                        ...data,
+                        amount: amount,
+                        type: type,
+                        category: data.ACCOUNT_HEADER || 'Uncategorized',
+                        bank: data.BANK_NAME || data.MODE || 'Unknown',
+                        description: data.DESCRIPTION || data.NOTES || 'No description',
+                        date: transactionDate
+                    };
+                    
+                    allTransactions.push(transaction);
+                });
+                
+                console.log(`Loaded ${allTransactions.length} real transactions from Firebase`);
+                
+                // Filter for current period
+                filterTransactionsForCurrentPeriod();
+                
+            } catch (error) {
+                console.error('Error loading transactions from Firebase:', error);
+                console.error('Error details:', error.message);
+                showAlert('Failed to load transactions from Firebase. Check console for details.', 'error');
+                
+                // Fallback to sample data
+                await loadSampleData();
+            }
         }
 
         // Filter Transactions for Current Period
@@ -1053,7 +1310,7 @@
                         endDate.setHours(23, 59, 59, 999);
                         currentPeriodLabel.textContent = `Custom Range (${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()})`;
                     } else {
-                        // Default to current month if no custom dates
+                        // Default to current month
                         startDate = new Date(now.getFullYear(), now.getMonth(), 1);
                         endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
                         currentPeriodLabel.textContent = `This Month (${now.toLocaleDateString('default', { month: 'long' })} ${now.getFullYear()})`;
@@ -1141,6 +1398,7 @@
                     const value = e.target.value;
                     thresholdValueSpan.textContent = `${value}%`;
                     budgetSettings.warningThreshold = parseInt(value);
+                    saveBudgetSettings();
                 });
             }
         }
@@ -1157,18 +1415,7 @@
             }
             
             budgetSettings[`${period}Limit`] = limit;
-            
-            // If rollover is enabled, update rollover balance
-            if (budgetSettings.rolloverEnabled) {
-                const currentSpending = calculateCurrentSpending();
-                const previousLimit = budgetSettings[`${period}Limit`] || 0;
-                if (previousLimit > 0) {
-                    const previousRemaining = Math.max(0, previousLimit - currentSpending);
-                    budgetSettings.rolloverBalance = previousRemaining;
-                    updateRolloverBalance();
-                }
-            }
-            
+            await saveBudgetSettings();
             updateAllDisplays();
             showAlert(`${period.charAt(0).toUpperCase() + period.slice(1)} limit set to ${formatCurrency(limit)}`, 'success');
         }
@@ -1328,6 +1575,7 @@
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-receipt fa-2x mb-3"></i>
                         <p>No expenses this period</p>
+                        ${currentUser ? '<small class="text-muted">Add expenses in the main app</small>' : ''}
                     </div>
                 `;
                 return;
@@ -1369,6 +1617,7 @@
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-money-bill-wave fa-2x mb-3"></i>
                         <p>No income this period</p>
+                        ${currentUser ? '<small class="text-muted">Add income in the main app</small>' : ''}
                     </div>
                 `;
                 return;
@@ -1488,86 +1737,6 @@
             });
         }
 
-        // Update Category Chart
-        function updateCategoryChart() {
-            const ctx = document.getElementById('categoryChart');
-            if (!ctx) return;
-            
-            // Destroy existing chart
-            if (categoryChart) {
-                categoryChart.destroy();
-            }
-            
-            // Prepare category data
-            const categoryData = {};
-            const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
-            
-            expenses.forEach(tx => {
-                const category = tx.category || 'Uncategorized';
-                if (!categoryData[category]) {
-                    categoryData[category] = 0;
-                }
-                categoryData[category] += tx.amount;
-            });
-            
-            // Sort categories by amount
-            const sortedCategories = Object.entries(categoryData)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 8);
-            
-            if (sortedCategories.length === 0) {
-                ctx.style.display = 'none';
-                return;
-            }
-            
-            ctx.style.display = 'block';
-            
-            // Create chart
-            categoryChart = new Chart(ctx.getContext('2d'), {
-                type: 'doughnut',
-                data: {
-                    labels: sortedCategories.map(([category]) => category),
-                    datasets: [{
-                        data: sortedCategories.map(([_, amount]) => amount),
-                        backgroundColor: [
-                            'rgba(220, 53, 69, 0.8)',
-                            'rgba(255, 193, 7, 0.8)',
-                            'rgba(13, 202, 240, 0.8)',
-                            'rgba(111, 66, 193, 0.8)',
-                            'rgba(25, 135, 84, 0.8)',
-                            'rgba(253, 126, 20, 0.8)',
-                            'rgba(108, 117, 125, 0.8)',
-                            'rgba(32, 201, 151, 0.8)'
-                        ],
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                boxWidth: 12,
-                                padding: 15
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: (context) => {
-                                    const value = context.parsed;
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((value / total) * 100).toFixed(1);
-                                    return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
         // Update Spending Metrics
         function updateSpendingMetrics() {
             const expenses = filteredTransactions.filter(tx => tx.type === 'Expense');
@@ -1651,7 +1820,7 @@
                 insightsHTML = `
                     <div class="insight-item">
                         <h6><i class="fas fa-info-circle me-2"></i>Welcome!</h6>
-                        <p>Start by adding transactions to get personalized financial insights.</p>
+                        <p>${currentUser ? 'Add transactions in the main app to see insights' : 'Connect to Firebase to see your real data'}</p>
                     </div>
                 `;
             } else {
@@ -1661,6 +1830,7 @@
                         <p>Spending: <strong>${formatCurrency(currentSpending)}</strong></p>
                         <p>Income: <strong>${formatCurrency(currentIncome)}</strong></p>
                         <p>Savings Rate: <strong>${savingsRate.toFixed(1)}%</strong></p>
+                        <small class="text-muted">Based on ${filteredTransactions.length} transactions</small>
                     </div>
                 `;
                 
@@ -1710,6 +1880,7 @@
                         <td colspan="6" class="text-center text-muted py-4">
                             <i class="fas fa-receipt fa-2x mb-3"></i>
                             <p>No transactions this period</p>
+                            ${currentUser ? '<small class="text-muted">Add transactions in the main app</small>' : '<small class="text-muted">Connect to Firebase to see your real data</small>'}
                         </td>
                     </tr>
                 `;
@@ -1735,7 +1906,7 @@
                         <td class="fw-bold ${tx.type === 'Income' ? 'text-success' : 'text-danger'}">
                             ${tx.type === 'Income' ? '+' : '-'}${formatCurrency(tx.amount)}
                         </td>
-                        <td>${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}</td>
+                        <td>${tx.bank}</td>
                     </tr>
                 `;
             });
@@ -1756,7 +1927,6 @@
             updateTopExpenses();
             updateTopIncome();
             updateSpendingAnalysis();
-            updateCategoryChart();
             generateFinancialInsights();
             updateRecentTransactions();
         }
@@ -1804,8 +1974,9 @@
             });
             
             // Roll-over toggle
-            document.getElementById('rolloverToggle').addEventListener('change', () => {
+            document.getElementById('rolloverToggle').addEventListener('change', async () => {
                 budgetSettings.rolloverEnabled = document.getElementById('rolloverToggle').checked;
+                await saveBudgetSettings();
                 updateBudgetDisplay();
                 updateRolloverBalance();
                 
@@ -1854,6 +2025,27 @@
             budgetSettings.customEndDate = today;
         }
 
+        // Setup Realtime Listeners
+        function setupRealtimeListeners() {
+            if (!currentUser) return;
+            
+            // Listen for new transactions
+            const transactionsRef = collection(db, 'users', currentUser.uid, 'transactions');
+            const transactionsQuery = query(transactionsRef, orderBy('DATE', 'desc'), limit(10));
+            
+            onSnapshot(transactionsQuery, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === 'added') {
+                        console.log('New transaction added:', change.doc.data());
+                        // Reload transactions
+                        loadAllTransactions().then(() => {
+                            updateAllDisplays();
+                        });
+                    }
+                });
+            });
+        }
+
         // Show All Limits Modal
         function showAllLimitsModal() {
             document.getElementById('weeklyLimitInput').value = budgetSettings.weeklyLimit;
@@ -1866,12 +2058,13 @@
         }
 
         // Save All Limits
-        function saveAllLimits() {
+        async function saveAllLimits() {
             budgetSettings.weeklyLimit = parseFloat(document.getElementById('weeklyLimitInput').value) || 0;
             budgetSettings.monthlyLimit = parseFloat(document.getElementById('monthlyLimitInput').value) || 0;
             budgetSettings.quarterlyLimit = parseFloat(document.getElementById('quarterlyLimitInput').value) || 0;
             budgetSettings.yearlyLimit = parseFloat(document.getElementById('yearlyLimitInput').value) || 0;
             
+            await saveBudgetSettings();
             updateAllDisplays();
             
             const modal = bootstrap.Modal.getInstance(document.getElementById('allLimitsModal'));
@@ -1905,6 +2098,7 @@
                 title: '📊 Spending Analysis',
                 html: `
                     <div class="text-start">
+                        <p><strong>Data Source:</strong> ${currentUser ? 'Firebase Real Data' : 'Demo Data'}</p>
                         <p><strong>Total Spending:</strong> ${formatCurrency(totalSpending)}</p>
                         <p><strong>Number of Transactions:</strong> ${expenses.length}</p>
                         <p><strong>Average Transaction:</strong> ${formatCurrency(avgTransaction)}</p>
@@ -1953,6 +2147,7 @@
                 title: '💡 Savings Tips',
                 html: `
                     <div class="text-start">
+                        <p><strong>Data Source:</strong> ${currentUser ? 'Your Real Firebase Data' : 'Demo Data'}</p>
                         <p><strong>Current Savings Rate:</strong> ${savingsRate.toFixed(1)}%</p>
                         <hr>
                         ${tips.map(tip => `<p>• ${tip}</p>`).join('')}
@@ -1974,8 +2169,9 @@
             doc.setFontSize(12);
             doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 30);
             doc.text(`Period: ${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}`, 20, 37);
+            doc.text(`Data Source: ${currentUser ? 'Firebase Real Data' : 'Demo Data'}`, 20, 44);
             
-            let yPosition = 50;
+            let yPosition = 60;
             
             // Add summary statistics
             doc.setFontSize(16);
@@ -1995,6 +2191,10 @@
                 doc.text(`${label}: ${value}`, 20, yPosition);
                 yPosition += 10;
             });
+            
+            // Add transaction count
+            doc.text(`Transactions Analyzed: ${filteredTransactions.length}`, 20, yPosition);
+            yPosition += 15;
             
             // Save the PDF
             doc.save(`budget-report-${currentPeriod}-${new Date().toISOString().split('T')[0]}.pdf`);
@@ -2048,6 +2248,22 @@
                     alertEl.remove();
                 }
             }, 5000);
+        }
+
+        function showLoadingState() {
+            // Show loading indicators
+            document.getElementById('topExpensesList').innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading data...</p>
+                </div>
+            `;
+        }
+
+        function hideLoadingState() {
+            // Loading is hidden when data is loaded
         }
 
         // Make functions available globally
