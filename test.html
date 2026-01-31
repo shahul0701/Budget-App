@@ -61,7 +61,7 @@
       box-shadow: var(--card-shadow);
       position: sticky;
       top: 0;
-      z-index: 100;
+      z-index: 1000;
     }
 
     .nav-links {
@@ -676,7 +676,7 @@
       align-items: center;
       justify-content: space-between;
       min-width: 300px;
-      z-index: 1000;
+      z-index: 2000;
       animation: slideIn 0.3s ease;
       border-left: 4px solid var(--primary-color);
     }
@@ -761,6 +761,109 @@
       box-shadow: var(--card-shadow);
     }
 
+    /* Modal Styles */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: var(--card-shadow-hover);
+      animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+      from {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .modal-header {
+      margin-bottom: 20px;
+    }
+
+    .modal-header h3 {
+      color: var(--dark-color);
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-body {
+      margin-bottom: 25px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Budget Rollover Options */
+    .rollover-options {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .rollover-option {
+      padding: 15px;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .rollover-option:hover {
+      border-color: var(--primary-color);
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    .rollover-option.selected {
+      border-color: var(--primary-color);
+      background: rgba(99, 102, 241, 0.1);
+    }
+
+    .rollover-option h4 {
+      margin-bottom: 5px;
+      font-size: 16px;
+      color: var(--dark-color);
+    }
+
+    .rollover-option p {
+      font-size: 14px;
+      color: var(--gray-color);
+    }
+
+    /* Date Filter Fix */
+    .daterangepicker {
+      z-index: 9999 !important;
+    }
+
     /* Currency Toggle */
     .currency-toggle {
       display: flex;
@@ -790,51 +893,6 @@
       color: var(--primary-color);
     }
 
-    /* View Toggle */
-    .view-toggle-container {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-
-    .view-toggle-btn {
-      padding: 10px 20px;
-      background: white;
-      border: 2px solid var(--border-color);
-      border-radius: 8px;
-      cursor: pointer;
-      font-weight: 600;
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .view-toggle-btn.active {
-      background: var(--primary-color);
-      color: white;
-      border-color: var(--primary-color);
-    }
-
-    .view-toggle-btn:hover:not(.active) {
-      border-color: var(--primary-color);
-      color: var(--primary-color);
-    }
-
-    /* Budget Limit Warning */
-    .budget-limit-warning {
-      background: #fef2f2;
-      border-left: 4px solid var(--danger-color);
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-top: 10px;
-      display: none;
-    }
-
-    .budget-limit-warning.show {
-      display: block;
-    }
-
     @media (max-width: 768px) {
       .top-bar {
         flex-direction: column;
@@ -845,6 +903,7 @@
       .nav-links {
         width: 100%;
         justify-content: space-between;
+        flex-wrap: wrap;
       }
       
       .dashboard-header {
@@ -889,6 +948,11 @@
         left: 20px;
         right: 20px;
       }
+      
+      .modal-content {
+        width: 95%;
+        padding: 20px;
+      }
     }
 
     /* Custom scrollbar */
@@ -914,7 +978,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
     // Firebase configuration
@@ -939,9 +1003,10 @@
     let allAccounts = [];
     let forecasts = {};
     let userUID = null;
-    let currentCurrency = 'INR'; // Default to INR
+    let currentCurrency = 'INR';
     let currentViewMode = 'monthly';
     let budgetLimits = {};
+    let budgetRolloverSettings = {};
     
     // Chart instances
     let budgetVsActualChart = null;
@@ -955,28 +1020,9 @@
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', async () => {
-      // Initialize date range picker with fixed ranges
-      $('#dateRange').daterangepicker({
-        opens: 'left',
-        startDate: moment().startOf('month'),
-        endDate: moment().endOf('month'),
-        ranges: {
-          'Today': [moment(), moment()],
-          'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-          'Last 7 Days': [moment().subtract(6, 'days'), moment()],
-          'Last 30 Days': [moment().subtract(29, 'days'), moment()],
-          'This Month': [moment().startOf('month'), moment().endOf('month')],
-          'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
-          'This Quarter': [moment().startOf('quarter'), moment().endOf('quarter')],
-          'This Year': [moment().startOf('year'), moment().endOf('year')],
-          'Last Year': [moment().subtract(1, 'year').startOf('year'), moment().subtract(1, 'year').endOf('year')]
-        }
-      }).on('apply.daterangepicker', function(ev, picker) {
-        updateDashboard();
-        updateForecastChart();
-        updateVarianceAnalysis();
-      });
-
+      // Initialize date range picker - FIXED VERSION
+      initDateRangePicker();
+      
       // Set default budget period to current month
       const currentMonth = moment().format('YYYY-MM');
       document.getElementById('budgetPeriod').value = currentMonth;
@@ -987,31 +1033,61 @@
       // Initialize view mode toggle
       initializeViewModeToggle();
       
-      // Generate forecast for next 12 months by default
-      generateForecast();
+      // Load initial data
+      await loadInitialData();
       
-      // Load budget limits
-      await loadBudgetLimits();
+      // Generate forecast
+      generateForecast();
     });
+
+    // Initialize date range picker - FIXED
+    function initDateRangePicker() {
+      $('#dateRange').daterangepicker({
+        opens: 'center',
+        startDate: moment().startOf('month'),
+        endDate: moment().endOf('month'),
+        ranges: {
+          'Today': [moment(), moment()],
+          'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+          'Last 7 Days': [moment().subtract(6, 'days'), moment()],
+          'Last 30 Days': [moment().subtract(29, 'days'), moment()],
+          'This Month': [moment().startOf('month'), moment().endOf('month')],
+          'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+        },
+        alwaysShowCalendars: true,
+        showDropdowns: true,
+        autoApply: true
+      }, function(start, end, label) {
+        console.log('Date range selected:', start.format('MM/DD/YYYY'), 'to', end.format('MM/DD/YYYY'));
+        updateDashboard();
+      });
+
+      // Also trigger update on manual input
+      $('#dateRange').on('change', function() {
+        updateDashboard();
+      });
+    }
 
     // Initialize currency toggle
     function initializeCurrencyToggle() {
       const usdBtn = document.getElementById('currencyUSD');
       const inrBtn = document.getElementById('currencyINR');
       
-      usdBtn.addEventListener('click', () => {
-        setCurrency('USD');
-      });
-      
-      inrBtn.addEventListener('click', () => {
+      if (usdBtn && inrBtn) {
+        usdBtn.addEventListener('click', () => {
+          setCurrency('USD');
+        });
+        
+        inrBtn.addEventListener('click', () => {
+          setCurrency('INR');
+        });
+        
+        // Set initial active state
         setCurrency('INR');
-      });
-      
-      // Set initial active state
-      setCurrency('INR');
+      }
     }
 
-    // Set currency and update all displays
+    // Set currency
     function setCurrency(currency) {
       currentCurrency = currency;
       
@@ -1023,26 +1099,7 @@
       // Update all currency displays
       updateAllCurrencyDisplays();
       
-      // Show notification
       showNotification(`Currency changed to ${currency}`, 'info');
-    }
-
-    // Update all currency displays
-    function updateAllCurrencyDisplays() {
-      // Update dashboard stats
-      updateDashboardStats(calculateFinancialSummary(allTransactions));
-      
-      // Update budget table
-      renderBudgetTable();
-      
-      // Update variance analysis
-      updateVarianceAnalysis();
-      
-      // Update investment summary
-      updateInvestmentSummary();
-      
-      // Update budget progress
-      updateBudgetProgress();
     }
 
     // Initialize view mode toggle
@@ -1051,26 +1108,32 @@
       const weeklyBtn = document.getElementById('viewWeeklyBtn');
       const generalBtn = document.getElementById('viewGeneralBtn');
       
-      monthlyBtn.addEventListener('click', () => {
-        setViewMode('monthly');
-        $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('month'));
-        $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('month'));
-        $('#dateRange').trigger('apply.daterangepicker');
-      });
+      if (monthlyBtn) {
+        monthlyBtn.addEventListener('click', () => {
+          setViewMode('monthly');
+          $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('month'));
+          $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('month'));
+          $('#dateRange').trigger('change');
+        });
+      }
       
-      weeklyBtn.addEventListener('click', () => {
-        setViewMode('weekly');
-        $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('week'));
-        $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('week'));
-        $('#dateRange').trigger('apply.daterangepicker');
-      });
+      if (weeklyBtn) {
+        weeklyBtn.addEventListener('click', () => {
+          setViewMode('weekly');
+          $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('week'));
+          $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('week'));
+          $('#dateRange').trigger('change');
+        });
+      }
       
-      generalBtn.addEventListener('click', () => {
-        setViewMode('general');
-        $('#dateRange').data('daterangepicker').setStartDate(moment().subtract(29, 'days'));
-        $('#dateRange').data('daterangepicker').setEndDate(moment());
-        $('#dateRange').trigger('apply.daterangepicker');
-      });
+      if (generalBtn) {
+        generalBtn.addEventListener('click', () => {
+          setViewMode('general');
+          $('#dateRange').data('daterangepicker').setStartDate(moment().subtract(29, 'days'));
+          $('#dateRange').data('daterangepicker').setEndDate(moment());
+          $('#dateRange').trigger('change');
+        });
+      }
       
       // Set initial active state
       setViewMode('monthly');
@@ -1081,10 +1144,16 @@
       currentViewMode = mode;
       
       // Update toggle buttons
-      document.getElementById('viewMonthlyBtn').classList.remove('active');
-      document.getElementById('viewWeeklyBtn').classList.remove('active');
-      document.getElementById('viewGeneralBtn').classList.remove('active');
-      document.getElementById(`view${mode.charAt(0).toUpperCase() + mode.slice(1)}Btn`).classList.add('active');
+      const monthlyBtn = document.getElementById('viewMonthlyBtn');
+      const weeklyBtn = document.getElementById('viewWeeklyBtn');
+      const generalBtn = document.getElementById('viewGeneralBtn');
+      
+      if (monthlyBtn) monthlyBtn.classList.remove('active');
+      if (weeklyBtn) weeklyBtn.classList.remove('active');
+      if (generalBtn) generalBtn.classList.remove('active');
+      
+      const activeBtn = document.getElementById(`view${mode.charAt(0).toUpperCase() + mode.slice(1)}Btn`);
+      if (activeBtn) activeBtn.classList.add('active');
     }
 
     // Authentication
@@ -1093,100 +1162,59 @@
       window.location.href = "login.html";
     });
 
-    // Main initialization
-    onAuthStateChanged(auth, async user => {
-      if (!user) {
-        window.location.href = "login.html";
-        return;
-      }
-      
-      userUID = user.uid;
-      userDisplay.textContent = user.displayName || user.email || "User";
-      loadingStatus.textContent = "Loading Budget Data...";
+    // Load initial data
+    async function loadInitialData() {
+      onAuthStateChanged(auth, async user => {
+        if (!user) {
+          window.location.href = "login.html";
+          return;
+        }
+        
+        userUID = user.uid;
+        userDisplay.textContent = user.displayName || user.email || "User";
+        loadingStatus.textContent = "Loading Budget Data...";
 
-      try {
-        // Load all transactions
-        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-        allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Load budgets
-        await loadBudgets(user.uid);
-        
-        // Extract unique accounts
-        allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
-        
-        // Initialize dashboard
-        initializeDashboard();
-        
-        loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
-      } catch (error) {
-        loadingStatus.textContent = `Error loading data: ${error.message}`;
-        console.error("Error:", error);
-      }
-    });
+        try {
+          // Load all transactions
+          const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
+          allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          
+          // Load budgets
+          await loadBudgets(user.uid);
+          
+          // Load budget limits
+          await loadBudgetLimits();
+          
+          // Load rollover settings
+          await loadRolloverSettings();
+          
+          // Extract unique accounts
+          allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
+          
+          // Initialize dashboard
+          initializeDashboard();
+          
+          loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
+          
+          // Check for budget rollover
+          await checkBudgetRollover();
+          
+        } catch (error) {
+          loadingStatus.textContent = `Error loading data: ${error.message}`;
+          console.error("Error:", error);
+        }
+      });
+    }
 
-    // Load budgets from Firestore - FIXED to handle recurring budgets
+    // Load budgets from Firestore
     async function loadBudgets(uid) {
       try {
         const budgetsSnap = await getDocs(collection(db, "users", uid, "budgets"));
         allBudgets = budgetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         console.log(`Loaded ${allBudgets.length} budgets`);
-        
-        // Generate recurring budgets for current and future months
-        await generateRecurringBudgets();
       } catch (error) {
         console.error("Error loading budgets:", error);
         allBudgets = [];
-      }
-    }
-
-    // Generate recurring budgets for current and future months
-    async function generateRecurringBudgets() {
-      const today = moment();
-      const currentYearMonth = today.format('YYYY-MM');
-      const nextMonth = today.add(1, 'month').format('YYYY-MM');
-      
-      // Find all recurring budgets (not one-time)
-      const recurringBudgets = allBudgets.filter(budget => 
-        budget.frequency !== 'One-time' && !budget.isGenerated
-      );
-      
-      for (const budget of recurringBudgets) {
-        // Check if budget exists for current month
-        const existsCurrentMonth = allBudgets.some(b => 
-          b.account === budget.account && 
-          b.type === budget.type && 
-          b.period === currentYearMonth &&
-          b.frequency === budget.frequency
-        );
-        
-        if (!existsCurrentMonth && budget.frequency === 'Monthly') {
-          // Create budget for current month
-          const newBudget = {
-            ...budget,
-            id: `budget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            period: currentYearMonth,
-            isGenerated: true,
-            originalBudgetId: budget.id,
-            created: new Date().toISOString()
-          };
-          
-          // Remove the id field to avoid Firestore conflicts
-          delete newBudget.id;
-          
-          const budgetId = `budget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
-          
-          try {
-            await setDoc(budgetRef, { 
-              ...newBudget, 
-              id: budgetId
-            });
-            allBudgets.push({ ...newBudget, id: budgetId });
-          } catch (error) {
-            console.error("Error creating recurring budget:", error);
-          }
-        }
       }
     }
 
@@ -1205,22 +1233,138 @@
       }
     }
 
-    // Save budget limit
-    async function saveBudgetLimit(category, limit) {
+    // Load rollover settings
+    async function loadRolloverSettings() {
       try {
-        const limitRef = doc(db, "users", userUID, "budgetLimits", category);
-        await setDoc(limitRef, { 
-          category: category,
-          limit: limit,
-          userId: userUID,
-          lastUpdated: new Date().toISOString() 
+        const rolloverSnap = await getDocs(collection(db, "users", userUID, "rolloverSettings"));
+        budgetRolloverSettings = {};
+        rolloverSnap.docs.forEach(doc => {
+          const data = doc.data();
+          budgetRolloverSettings[data.category] = data;
         });
-        
-        budgetLimits[category] = limit;
-        return true;
       } catch (error) {
-        console.error("Error saving budget limit:", error);
-        return false;
+        console.error("Error loading rollover settings:", error);
+        budgetRolloverSettings = {};
+      }
+    }
+
+    // Check for budget rollover
+    async function checkBudgetRollover() {
+      const today = moment();
+      const currentMonth = today.format('YYYY-MM');
+      const lastMonth = today.subtract(1, 'month').format('YYYY-MM');
+      
+      // Check if we have budgets from last month that need rollover
+      const lastMonthBudgets = allBudgets.filter(b => b.period === lastMonth && b.frequency === 'Monthly');
+      
+      if (lastMonthBudgets.length > 0) {
+        // Check if we have budgets for current month
+        const currentMonthBudgets = allBudgets.filter(b => b.period === currentMonth);
+        
+        if (currentMonthBudgets.length === 0) {
+          // Ask user about rollover
+          showRolloverModal(lastMonthBudgets, lastMonth, currentMonth);
+        }
+      }
+    }
+
+    // Show rollover modal
+    function showRolloverModal(lastMonthBudgets, lastMonth, currentMonth) {
+      const modal = document.getElementById('rolloverModal');
+      const budgetList = document.getElementById('rolloverBudgetList');
+      const rolloverAllBtn = document.getElementById('rolloverAllBtn');
+      const rolloverSelectedBtn = document.getElementById('rolloverSelectedBtn');
+      const skipRolloverBtn = document.getElementById('skipRolloverBtn');
+      
+      // Clear previous selections
+      budgetList.innerHTML = '';
+      
+      // Populate budget list
+      lastMonthBudgets.forEach(budget => {
+        const div = document.createElement('div');
+        div.className = 'rollover-option';
+        div.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <input type="checkbox" class="budget-checkbox" data-id="${budget.id}" checked style="width: 18px; height: 18px;">
+            <div>
+              <h4>${budget.account} - ${budget.type}</h4>
+              <p>Amount: ${formatCurrency(budget.amount)} | Frequency: ${budget.frequency}</p>
+            </div>
+          </div>
+        `;
+        budgetList.appendChild(div);
+        
+        // Add click handler
+        div.addEventListener('click', (e) => {
+          if (e.target.type !== 'checkbox') {
+            const checkbox = div.querySelector('.budget-checkbox');
+            checkbox.checked = !checkbox.checked;
+            div.classList.toggle('selected', checkbox.checked);
+          }
+        });
+      });
+      
+      // Set modal title
+      document.getElementById('rolloverModalTitle').innerHTML = `
+        <i class="fas fa-sync-alt"></i> Rollover Budgets from ${lastMonth} to ${currentMonth}
+      `;
+      
+      // Button handlers
+      rolloverAllBtn.onclick = () => handleRollover('all', lastMonthBudgets, currentMonth);
+      rolloverSelectedBtn.onclick = () => handleRollover('selected', lastMonthBudgets, currentMonth);
+      skipRolloverBtn.onclick = () => {
+        modal.classList.remove('active');
+        showNotification('Skipped budget rollover', 'info');
+      };
+      
+      // Show modal
+      modal.classList.add('active');
+    }
+
+    // Handle budget rollover
+    async function handleRollover(type, lastMonthBudgets, currentMonth) {
+      const modal = document.getElementById('rolloverModal');
+      let budgetsToRollover = [];
+      
+      if (type === 'all') {
+        budgetsToRollover = lastMonthBudgets;
+      } else {
+        const checkboxes = document.querySelectorAll('.budget-checkbox:checked');
+        budgetsToRollover = lastMonthBudgets.filter(budget => 
+          Array.from(checkboxes).some(cb => cb.getAttribute('data-id') === budget.id)
+        );
+      }
+      
+      let rolledOverCount = 0;
+      
+      for (const budget of budgetsToRollover) {
+        // Create new budget for current month
+        const newBudget = {
+          account: budget.account,
+          type: budget.type,
+          amount: budget.amount,
+          frequency: budget.frequency,
+          period: currentMonth,
+          created: new Date().toISOString(),
+          rolledOverFrom: budget.period,
+          lastRollover: new Date().toISOString()
+        };
+        
+        const success = await saveBudget(newBudget);
+        if (success) rolledOverCount++;
+      }
+      
+      modal.classList.remove('active');
+      
+      if (rolledOverCount > 0) {
+        // Reload budgets
+        await loadBudgets(userUID);
+        renderBudgetTable();
+        updateDashboard();
+        
+        showNotification(`Successfully rolled over ${rolledOverCount} budgets to ${currentMonth}`, 'success');
+      } else {
+        showNotification('No budgets were rolled over', 'warning');
       }
     }
 
@@ -1230,34 +1374,6 @@
         const budgetId = budgetData.id || `budget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
         
-        // Check if monthly budget already exists for this period
-        if (budgetData.frequency === 'Monthly') {
-          const existingBudget = allBudgets.find(b => 
-            b.account === budgetData.account && 
-            b.type === budgetData.type && 
-            b.period === budgetData.period &&
-            b.frequency === 'Monthly'
-          );
-          
-          if (existingBudget && existingBudget.id !== budgetData.id) {
-            // Update existing budget instead of creating new one
-            await setDoc(doc(db, "users", userUID, "budgets", existingBudget.id), { 
-              ...budgetData, 
-              id: existingBudget.id,
-              userId: userUID,
-              lastUpdated: new Date().toISOString() 
-            });
-            
-            // Update local copy
-            const index = allBudgets.findIndex(b => b.id === existingBudget.id);
-            if (index !== -1) {
-              allBudgets[index] = { ...budgetData, id: existingBudget.id };
-            }
-            
-            return true;
-          }
-        }
-        
         await setDoc(budgetRef, { 
           ...budgetData, 
           id: budgetId, 
@@ -1266,7 +1382,15 @@
         });
         
         // Add to local copy
-        allBudgets.push({ ...budgetData, id: budgetId });
+        if (!budgetData.id) {
+          allBudgets.push({ ...budgetData, id: budgetId });
+        } else {
+          // Update existing
+          const index = allBudgets.findIndex(b => b.id === budgetData.id);
+          if (index !== -1) {
+            allBudgets[index] = { ...budgetData, id: budgetId };
+          }
+        }
         
         return true;
       } catch (error) {
@@ -1291,6 +1415,44 @@
       }
     }
 
+    // Save budget limit
+    async function saveBudgetLimit(category, limit) {
+      try {
+        const limitRef = doc(db, "users", userUID, "budgetLimits", category);
+        await setDoc(limitRef, { 
+          category: category,
+          limit: limit,
+          userId: userUID,
+          lastUpdated: new Date().toISOString() 
+        });
+        
+        budgetLimits[category] = limit;
+        return true;
+      } catch (error) {
+        console.error("Error saving budget limit:", error);
+        return false;
+      }
+    }
+
+    // Save rollover setting
+    async function saveRolloverSetting(category, setting) {
+      try {
+        const rolloverRef = doc(db, "users", userUID, "rolloverSettings", category);
+        await setDoc(rolloverRef, { 
+          category: category,
+          ...setting,
+          userId: userUID,
+          lastUpdated: new Date().toISOString() 
+        });
+        
+        budgetRolloverSettings[category] = setting;
+        return true;
+      } catch (error) {
+        console.error("Error saving rollover setting:", error);
+        return false;
+      }
+    }
+
     // Initialize dashboard
     function initializeDashboard() {
       updateDashboard();
@@ -1306,7 +1468,17 @@
     function updateDashboard() {
       // Get current date range
       const dateRange = document.getElementById('dateRange').value;
-      const [startDate, endDate] = dateRange.split(' - ').map(d => moment(d, 'MM/DD/YYYY'));
+      let startDate, endDate;
+      
+      try {
+        const [startStr, endStr] = dateRange.split(' - ');
+        startDate = moment(startStr, 'MM/DD/YYYY');
+        endDate = moment(endStr, 'MM/DD/YYYY');
+      } catch (error) {
+        console.error('Error parsing date range:', error);
+        startDate = moment().startOf('month');
+        endDate = moment().endOf('month');
+      }
       
       // Filter transactions for date range
       const filteredTx = allTransactions.filter(tx => {
@@ -1366,16 +1538,22 @@
 
     // Update dashboard statistics
     function updateDashboardStats(summary) {
-      document.getElementById('totalIncome').textContent = formatCurrency(summary.income);
-      document.getElementById('totalExpense').textContent = formatCurrency(summary.expense);
-      document.getElementById('netBalance').textContent = formatCurrency(summary.net);
+      const totalIncomeElem = document.getElementById('totalIncome');
+      const totalExpenseElem = document.getElementById('totalExpense');
+      const netBalanceElem = document.getElementById('netBalance');
+      const savingsRateElem = document.getElementById('savingsRate');
+      
+      if (totalIncomeElem) totalIncomeElem.textContent = formatCurrency(summary.income);
+      if (totalExpenseElem) totalExpenseElem.textContent = formatCurrency(summary.expense);
+      if (netBalanceElem) netBalanceElem.textContent = formatCurrency(summary.net);
       
       const savingsRate = summary.income > 0 ? ((summary.net / summary.income) * 100).toFixed(1) : 0;
-      document.getElementById('savingsRate').textContent = savingsRate + '%';
+      if (savingsRateElem) savingsRateElem.textContent = savingsRate + '%';
       
       // Update color for net balance
-      const netElem = document.getElementById('netBalance');
-      netElem.className = 'stat-value ' + (summary.net >= 0 ? 'income' : 'expense');
+      if (netBalanceElem) {
+        netBalanceElem.className = 'stat-value ' + (summary.net >= 0 ? 'income' : 'expense');
+      }
     }
 
     // Update Budget vs Actual chart
@@ -1497,14 +1675,14 @@
       
       // Generate colors
       const colors = [
-        'rgba(239, 68, 68, 0.8)',    // Red
-        'rgba(245, 158, 11, 0.8)',   // Amber
-        'rgba(16, 185, 129, 0.8)',   // Emerald
-        'rgba(59, 130, 246, 0.8)',   // Blue
-        'rgba(139, 92, 246, 0.8)',   // Violet
-        'rgba(236, 72, 153, 0.8)',   // Pink
-        'rgba(249, 115, 22, 0.8)',   // Orange
-        'rgba(6, 182, 212, 0.8)'     // Cyan
+        'rgba(239, 68, 68, 0.8)',
+        'rgba(245, 158, 11, 0.8)',
+        'rgba(16, 185, 129, 0.8)',
+        'rgba(59, 130, 246, 0.8)',
+        'rgba(139, 92, 246, 0.8)',
+        'rgba(236, 72, 153, 0.8)',
+        'rgba(249, 115, 22, 0.8)',
+        'rgba(6, 182, 212, 0.8)'
       ];
       
       // Destroy existing chart if it exists
@@ -1579,11 +1757,38 @@
       });
     }
 
+    // Update all currency displays
+    function updateAllCurrencyDisplays() {
+      const dateRange = document.getElementById('dateRange').value;
+      const [startStr, endStr] = dateRange.split(' - ');
+      const startDate = moment(startStr, 'MM/DD/YYYY');
+      const endDate = moment(endStr, 'MM/DD/YYYY');
+      
+      const filteredTx = allTransactions.filter(tx => {
+        if (!tx.DATE) return false;
+        const txDate = moment(tx.DATE);
+        return txDate.isBetween(startDate, endDate, null, '[]');
+      });
+      
+      const summary = calculateFinancialSummary(filteredTx);
+      updateDashboardStats(summary);
+      renderBudgetTable();
+      updateVarianceAnalysis();
+      updateInvestmentSummary();
+      updateBudgetProgress();
+      
+      // Update charts
+      updateBudgetVsActualChart(summary);
+      updateSpendingByCategoryChart(filteredTx);
+    }
+
     // Render budget table
     function renderBudgetTable() {
       const budgetPeriod = document.getElementById('budgetPeriod').value;
       const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
       const tbody = document.getElementById('budgetTableBody');
+      
+      if (!tbody) return;
       
       if (periodBudgets.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="text-center no-data">No budgets set for ${budgetPeriod}</td></tr>`;
@@ -1616,6 +1821,12 @@
                          budget.type === 'Expense' ? 'type-expense' :
                          budget.type === 'Investment' ? 'type-investment' : 'type-savings';
         
+        // Check if rolled over
+        const rolledOverBadge = budget.rolledOverFrom ? 
+          `<span class="frequency-badge" style="background: #e0f2fe; color: #0369a1; margin-left: 5px;">
+            <i class="fas fa-sync-alt"></i> Rolled
+          </span>` : '';
+        
         html += `
           <tr>
             <td class="text-center">${index + 1}</td>
@@ -1624,7 +1835,7 @@
                 <span class="account-icon ${typeClass}">
                   <i class="fas ${getBudgetTypeIcon(budget.type)}"></i>
                 </span>
-                ${budget.account}
+                ${budget.account} ${rolledOverBadge}
               </div>
             </td>
             <td><span class="budget-type ${typeClass}">${budget.type}</span></td>
@@ -1641,6 +1852,9 @@
               <button class="btn-icon delete-budget" data-id="${budget.id}" title="Delete Budget">
                 <i class="fas fa-trash"></i>
               </button>
+              <button class="btn-icon rollover-budget" data-id="${budget.id}" title="Rollover to Next Month">
+                <i class="fas fa-forward"></i>
+              </button>
             </td>
           </tr>
         `;
@@ -1648,7 +1862,7 @@
       
       tbody.innerHTML = html;
       
-      // Add event listeners for edit/delete buttons
+      // Add event listeners
       document.querySelectorAll('.edit-budget').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const budgetId = e.currentTarget.getAttribute('data-id');
@@ -1663,6 +1877,16 @@
             await deleteBudget(budgetId);
             renderBudgetTable();
             updateDashboard();
+          }
+        });
+      });
+      
+      document.querySelectorAll('.rollover-budget').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const budgetId = e.currentTarget.getAttribute('data-id');
+          const budget = allBudgets.find(b => b.id === budgetId);
+          if (budget) {
+            await showSingleBudgetRollover(budget);
           }
         });
       });
@@ -1764,9 +1988,9 @@
       });
       
       if (warnings.length > 0) {
-        let warningHTML = '<strong>Budget Limit Exceeded!</strong><br>';
+        let warningHTML = '<strong><i class="fas fa-exclamation-triangle"></i> Budget Limit Exceeded!</strong><br>';
         warnings.forEach(warning => {
-          warningHTML += `${warning.account}: Limit ${warning.limit}, Actual ${warning.actual} (Overspent: ${warning.overspend})<br>`;
+          warningHTML += `<div style="margin-top: 5px;">${warning.account}: Limit ${warning.limit}, Actual ${warning.actual} (Overspent: ${warning.overspend})</div>`;
         });
         warningContainer.innerHTML = warningHTML;
         warningContainer.classList.add('show');
@@ -1775,16 +1999,235 @@
       }
     }
 
+    // Show single budget rollover dialog
+    async function showSingleBudgetRollover(budget) {
+      const nextMonth = moment(budget.period + '-01').add(1, 'month').format('YYYY-MM');
+      
+      const response = await showConfirmDialog(
+        'Rollover Budget',
+        `Do you want to rollover "${budget.account}" budget to ${nextMonth}?<br>
+        <small>Current amount: ${formatCurrency(budget.amount)}</small>`,
+        ['Keep Same Amount', 'Change Amount', 'Skip']
+      );
+      
+      if (response === 'Keep Same Amount') {
+        await rolloverBudgetToMonth(budget, nextMonth, budget.amount);
+      } else if (response === 'Change Amount') {
+        const newAmount = prompt(`Enter new amount for ${nextMonth}:`, budget.amount);
+        if (newAmount && !isNaN(newAmount)) {
+          await rolloverBudgetToMonth(budget, nextMonth, parseFloat(newAmount));
+        }
+      }
+    }
+
+    // Rollover budget to specific month
+    async function rolloverBudgetToMonth(budget, targetMonth, amount) {
+      const newBudget = {
+        account: budget.account,
+        type: budget.type,
+        amount: amount,
+        frequency: budget.frequency,
+        period: targetMonth,
+        created: new Date().toISOString(),
+        rolledOverFrom: budget.period,
+        lastRollover: new Date().toISOString()
+      };
+      
+      const success = await saveBudget(newBudget);
+      if (success) {
+        showNotification(`Budget rolled over to ${targetMonth}`, 'success');
+        renderBudgetTable();
+        updateDashboard();
+      }
+    }
+
+    // Show confirm dialog
+    function showConfirmDialog(title, message, buttons) {
+      return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active';
+        modal.innerHTML = `
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3><i class="fas fa-question-circle"></i> ${title}</h3>
+            </div>
+            <div class="modal-body">
+              ${message}
+            </div>
+            <div class="modal-footer">
+              ${buttons.map((btn, i) => 
+                `<button class="btn ${i === 0 ? 'btn-primary' : i === buttons.length - 1 ? 'btn-outline' : 'btn-warning'}" 
+                        data-action="${btn}">${btn}</button>`
+              ).join('')}
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const action = e.target.getAttribute('data-action');
+            document.body.removeChild(modal);
+            resolve(action);
+          });
+        });
+        
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) {
+            document.body.removeChild(modal);
+            resolve(null);
+          }
+        });
+      });
+    }
+
+    // Edit budget
+    function editBudget(budgetId) {
+      const budget = allBudgets.find(b => b.id === budgetId);
+      if (!budget) return;
+      
+      // Populate edit form
+      document.getElementById('newBudgetAccount').value = budget.account;
+      document.getElementById('newBudgetType').value = budget.type;
+      document.getElementById('newBudgetAmount').value = budget.amount;
+      document.getElementById('newBudgetFrequency').value = budget.frequency;
+      
+      // Scroll to form
+      document.getElementById('budgetForm').scrollIntoView({ behavior: 'smooth' });
+      
+      // Change button text
+      const addBtn = document.getElementById('addBudgetBtn');
+      addBtn.innerHTML = '<i class="fas fa-save"></i> Update Budget';
+      addBtn.onclick = async () => {
+        await updateExistingBudget(budgetId);
+      };
+      
+      showNotification('Editing budget for ' + budget.account, 'info');
+    }
+
+    // Update existing budget
+    async function updateExistingBudget(budgetId) {
+      const account = document.getElementById('newBudgetAccount').value;
+      const type = document.getElementById('newBudgetType').value;
+      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const frequency = document.getElementById('newBudgetFrequency').value;
+      const period = document.getElementById('budgetPeriod').value;
+      
+      if (!account || !amount || isNaN(amount)) {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const budgetData = {
+        id: budgetId,
+        account,
+        type,
+        amount,
+        frequency,
+        period,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const success = await saveBudget(budgetData);
+      if (success) {
+        // Reset form
+        document.getElementById('newBudgetAmount').value = '';
+        document.getElementById('addBudgetBtn').innerHTML = '<i class="fas fa-plus"></i> Add Budget';
+        document.getElementById('addBudgetBtn').onclick = addNewBudget;
+        
+        // Update UI
+        renderBudgetTable();
+        updateDashboard();
+        updateVarianceAnalysis();
+        updateInvestmentSummary();
+        
+        showNotification('Budget updated successfully!', 'success');
+      } else {
+        showNotification('Error updating budget. Please try again.', 'error');
+      }
+    }
+
+    // Add new budget
+    async function addNewBudget() {
+      const account = document.getElementById('newBudgetAccount').value;
+      const type = document.getElementById('newBudgetType').value;
+      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const frequency = document.getElementById('newBudgetFrequency').value;
+      const period = document.getElementById('budgetPeriod').value;
+      
+      if (!account || !amount || isNaN(amount)) {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const budgetData = {
+        account,
+        type,
+        amount,
+        frequency,
+        period,
+        created: new Date().toISOString()
+      };
+      
+      const success = await saveBudget(budgetData);
+      if (success) {
+        // Clear form
+        document.getElementById('newBudgetAmount').value = '';
+        
+        // Ask about rollover setting
+        if (frequency === 'Monthly') {
+          const setRollover = confirm('Do you want to automatically rollover this budget to next month?');
+          if (setRollover) {
+            await saveRolloverSetting(account, {
+              autoRollover: true,
+              frequency: 'Monthly',
+              lastUpdated: new Date().toISOString()
+            });
+            showNotification('Auto-rollover enabled for this budget', 'success');
+          }
+        }
+        
+        // Update UI
+        renderBudgetTable();
+        updateDashboard();
+        updateVarianceAnalysis();
+        updateInvestmentSummary();
+        
+        showNotification('Budget added successfully!', 'success');
+      } else {
+        showNotification('Error saving budget. Please try again.', 'error');
+      }
+    }
+
+    // Set budget limit
+    async function setBudgetLimit() {
+      const category = document.getElementById('budgetLimitCategory').value;
+      const limit = parseFloat(document.getElementById('budgetLimitAmount').value);
+      
+      if (!category || !limit || isNaN(limit)) {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const success = await saveBudgetLimit(category, limit);
+      if (success) {
+        document.getElementById('budgetLimitAmount').value = '';
+        updateBudgetLimitWarnings();
+        showNotification(`Budget limit set for ${category}: ${formatCurrency(limit)}`, 'success');
+      } else {
+        showNotification('Error setting budget limit', 'error');
+      }
+    }
+
     // Generate forecast
     function generateForecast() {
-      const forecastType = document.getElementById('forecastType').value;
-      const forecastPeriods = parseInt(document.getElementById('forecastPeriods').value);
-      const forecastMethod = document.getElementById('forecastMethod').value;
+      const forecastType = document.getElementById('forecastType')?.value || 'monthly';
+      const forecastPeriods = parseInt(document.getElementById('forecastPeriods')?.value || 12);
+      const forecastMethod = document.getElementById('forecastMethod')?.value || 'average';
       
-      // Calculate forecast based on historical data
       forecasts = calculateForecast(forecastType, forecastPeriods, forecastMethod);
-      
-      // Update forecast chart
       updateForecastChart();
     }
 
@@ -1795,11 +2238,9 @@
         data: []
       };
       
-      // Get historical data based on type
       const historicalData = getHistoricalData(type);
-      
-      // Generate forecast labels
       const startDate = moment();
+      
       for (let i = 0; i < periods; i++) {
         let label;
         if (type === 'monthly') {
@@ -1814,16 +2255,14 @@
         forecastData.labels.push(label);
       }
       
-      // Simple forecasting methods
       if (method === 'average') {
         const avg = historicalData.length > 0 ? 
           historicalData.reduce((a, b) => a + b, 0) / historicalData.length : 0;
         forecastData.data = Array(periods).fill(avg);
       } else if (method === 'trend') {
-        // Simple linear trend
         if (historicalData.length > 1) {
           const lastValue = historicalData[historicalData.length - 1];
-          const growthRate = 0.03; // 3% growth assumption
+          const growthRate = 0.03;
           forecastData.data = Array(periods).fill(0).map((_, i) => 
             lastValue * Math.pow(1 + growthRate/12, i + 1)
           );
@@ -1843,7 +2282,6 @@
       const data = [];
       const now = moment();
       
-      // Get last 12 periods of data
       for (let i = 11; i >= 0; i--) {
         let periodStart, periodEnd;
         
@@ -1861,7 +2299,6 @@
           periodEnd = now.clone().subtract(i, 'years').endOf('year');
         }
         
-        // Calculate total for period
         const periodTotal = allTransactions
           .filter(tx => {
             if (!tx.DATE) return false;
@@ -1881,7 +2318,6 @@
       const ctx = document.getElementById('forecastChart')?.getContext('2d');
       if (!ctx) return;
       
-      // Destroy existing chart if it exists
       if (forecastChart) {
         try {
           forecastChart.destroy();
@@ -1970,18 +2406,21 @@
         totalVariance += variance;
       });
       
-      document.getElementById('varianceTotal').textContent = formatCurrency(totalVariance);
-      document.getElementById('overBudgetCount').textContent = overBudgetCount;
-      document.getElementById('underBudgetCount').textContent = underBudgetCount;
-      document.getElementById('onBudgetCount').textContent = periodBudgets.length - overBudgetCount - underBudgetCount;
+      const varianceTotalElem = document.getElementById('varianceTotal');
+      const overBudgetCountElem = document.getElementById('overBudgetCount');
+      const underBudgetCountElem = document.getElementById('underBudgetCount');
+      const onBudgetCountElem = document.getElementById('onBudgetCount');
       
-      // Update color for total variance
-      const varianceElem = document.getElementById('varianceTotal');
-      if (varianceElem) {
+      if (varianceTotalElem) varianceTotalElem.textContent = formatCurrency(totalVariance);
+      if (overBudgetCountElem) overBudgetCountElem.textContent = overBudgetCount;
+      if (underBudgetCountElem) underBudgetCountElem.textContent = underBudgetCount;
+      if (onBudgetCountElem) onBudgetCountElem.textContent = periodBudgets.length - overBudgetCount - underBudgetCount;
+      
+      if (varianceTotalElem) {
         if (totalVariance >= 0) {
-          varianceElem.className = 'variance-value positive';
+          varianceTotalElem.className = 'variance-value positive';
         } else {
-          varianceElem.className = 'variance-value negative';
+          varianceTotalElem.className = 'variance-value negative';
         }
       }
     }
@@ -1990,14 +2429,12 @@
     function updateInvestmentSummary() {
       const budgetPeriod = document.getElementById('budgetPeriod').value;
       
-      // Calculate investment budgets
       const investmentBudgets = allBudgets.filter(b => 
         b.type === 'Investment' && b.period === budgetPeriod
       );
       
       const totalInvestmentBudget = investmentBudgets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
       
-      // Calculate actual investments
       const [year, month] = budgetPeriod.split('-').map(Number);
       const investmentTransactions = allTransactions.filter(tx => {
         if (!tx.DATE) return false;
@@ -2008,140 +2445,18 @@
       });
       
       const actualInvestment = investmentTransactions.reduce((sum, tx) => sum + Number(tx.EXPENSE || 0), 0);
+      const growthRate = 0.07;
+      const futureValue = actualInvestment * Math.pow(1 + growthRate/12, 60);
       
-      // Calculate growth (simplified)
-      const growthRate = 0.07; // 7% annual return
-      const futureValue = actualInvestment * Math.pow(1 + growthRate/12, 60); // 5 years
+      const totalInvestmentsElem = document.getElementById('totalInvestments');
+      const monthlyInvestmentElem = document.getElementById('monthlyInvestment');
+      const investmentGrowthElem = document.getElementById('investmentGrowth');
+      const futureValueElem = document.getElementById('futureValue');
       
-      document.getElementById('totalInvestments').textContent = formatCurrency(actualInvestment * 12); // Annualized
-      document.getElementById('monthlyInvestment').textContent = formatCurrency(totalInvestmentBudget);
-      document.getElementById('investmentGrowth').textContent = (growthRate * 100).toFixed(1) + '%';
-      document.getElementById('futureValue').textContent = formatCurrency(futureValue);
-    }
-
-    // Add new budget
-    async function addNewBudget() {
-      const account = document.getElementById('newBudgetAccount').value;
-      const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
-      const frequency = document.getElementById('newBudgetFrequency').value;
-      const period = document.getElementById('budgetPeriod').value;
-      
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      const budgetData = {
-        account,
-        type,
-        amount,
-        frequency,
-        period,
-        created: new Date().toISOString()
-      };
-      
-      const success = await saveBudget(budgetData);
-      if (success) {
-        // Clear form
-        document.getElementById('newBudgetAmount').value = '';
-        
-        // Update UI
-        renderBudgetTable();
-        updateDashboard();
-        updateVarianceAnalysis();
-        updateInvestmentSummary();
-        
-        showNotification('Budget added successfully!', 'success');
-      } else {
-        showNotification('Error saving budget. Please try again.', 'error');
-      }
-    }
-
-    // Edit budget
-    function editBudget(budgetId) {
-      const budget = allBudgets.find(b => b.id === budgetId);
-      if (!budget) return;
-      
-      // Populate edit form
-      document.getElementById('newBudgetAccount').value = budget.account;
-      document.getElementById('newBudgetType').value = budget.type;
-      document.getElementById('newBudgetAmount').value = budget.amount;
-      document.getElementById('newBudgetFrequency').value = budget.frequency;
-      
-      // Scroll to form
-      document.getElementById('budgetForm').scrollIntoView({ behavior: 'smooth' });
-      
-      // Change button text
-      const addBtn = document.getElementById('addBudgetBtn');
-      addBtn.innerHTML = '<i class="fas fa-save"></i> Update Budget';
-      addBtn.onclick = async () => {
-        await updateExistingBudget(budgetId);
-      };
-      
-      showNotification('Editing budget for ' + budget.account, 'info');
-    }
-
-    // Update existing budget
-    async function updateExistingBudget(budgetId) {
-      const account = document.getElementById('newBudgetAccount').value;
-      const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
-      const frequency = document.getElementById('newBudgetFrequency').value;
-      const period = document.getElementById('budgetPeriod').value;
-      
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      const budgetData = {
-        id: budgetId,
-        account,
-        type,
-        amount,
-        frequency,
-        period,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      const success = await saveBudget(budgetData);
-      if (success) {
-        // Reset form
-        document.getElementById('newBudgetAmount').value = '';
-        document.getElementById('addBudgetBtn').innerHTML = '<i class="fas fa-plus"></i> Add Budget';
-        document.getElementById('addBudgetBtn').onclick = addNewBudget;
-        
-        // Update UI
-        renderBudgetTable();
-        updateDashboard();
-        updateVarianceAnalysis();
-        updateInvestmentSummary();
-        
-        showNotification('Budget updated successfully!', 'success');
-      } else {
-        showNotification('Error updating budget. Please try again.', 'error');
-      }
-    }
-
-    // Set budget limit
-    async function setBudgetLimit() {
-      const category = document.getElementById('budgetLimitCategory').value;
-      const limit = parseFloat(document.getElementById('budgetLimitAmount').value);
-      
-      if (!category || !limit || isNaN(limit)) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      const success = await saveBudgetLimit(category, limit);
-      if (success) {
-        document.getElementById('budgetLimitAmount').value = '';
-        updateBudgetLimitWarnings();
-        showNotification(`Budget limit set for ${category}: ${formatCurrency(limit)}`, 'success');
-      } else {
-        showNotification('Error setting budget limit', 'error');
-      }
+      if (totalInvestmentsElem) totalInvestmentsElem.textContent = formatCurrency(actualInvestment * 12);
+      if (monthlyInvestmentElem) monthlyInvestmentElem.textContent = formatCurrency(totalInvestmentBudget);
+      if (investmentGrowthElem) investmentGrowthElem.textContent = (growthRate * 100).toFixed(1) + '%';
+      if (futureValueElem) futureValueElem.textContent = formatCurrency(futureValue);
     }
 
     // Export budgets to CSV
@@ -2154,13 +2469,11 @@
         return;
       }
       
-      // Create CSV content
       let csv = 'Account,Type,Frequency,Amount,Period\n';
       periodBudgets.forEach(budget => {
         csv += `"${budget.account}",${budget.type},${budget.frequency},${budget.amount},${budget.period}\n`;
       });
       
-      // Create download link
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -2200,10 +2513,8 @@
               budgetData[header.toLowerCase()] = values[index];
             });
             
-            // Convert amount to number
             budgetData.amount = parseFloat(budgetData.amount) || 0;
             
-            // Add current period if not specified
             if (!budgetData.period) {
               budgetData.period = document.getElementById('budgetPeriod').value;
             }
@@ -2212,7 +2523,6 @@
             importedCount++;
           }
           
-          // Reload budgets
           await loadBudgets(userUID);
           renderBudgetTable();
           updateDashboard();
@@ -2229,13 +2539,11 @@
 
     // Show notification
     function showNotification(message, type) {
-      // Remove existing notification
       const existingNotification = document.querySelector('.notification');
       if (existingNotification) {
         existingNotification.remove();
       }
       
-      // Create new notification
       const notification = document.createElement('div');
       notification.className = `notification ${type}`;
       notification.innerHTML = `
@@ -2248,12 +2556,10 @@
       
       document.body.appendChild(notification);
       
-      // Add close event
       notification.querySelector('.notification-close').addEventListener('click', () => {
         notification.remove();
       });
       
-      // Auto remove after 5 seconds
       setTimeout(() => {
         if (notification.parentNode) {
           notification.remove();
@@ -2261,13 +2567,12 @@
       }, 5000);
     }
 
-    // Utility function to format currency with USD to INR conversion
+    // Format currency with USD to INR conversion
     function formatCurrency(amount) {
       let convertedAmount = amount;
       
-      // Convert from USD to INR if needed
       if (currentCurrency === 'INR') {
-        convertedAmount = amount * 83.5; // Example conversion rate
+        convertedAmount = amount * 83.5;
       }
       
       return new Intl.NumberFormat('en-IN', {
@@ -2279,23 +2584,74 @@
     }
 
     // Event Listeners
-    document.getElementById('addBudgetBtn').addEventListener('click', addNewBudget);
-    document.getElementById('exportBudgetsBtn').addEventListener('click', exportBudgets);
-    document.getElementById('importBudgetsBtn').addEventListener('click', importBudgets);
-    document.getElementById('generateForecastBtn').addEventListener('click', generateForecast);
-    document.getElementById('setBudgetLimitBtn').addEventListener('click', setBudgetLimit);
-    
-    document.getElementById('budgetPeriod').addEventListener('change', () => {
-      renderBudgetTable();
-      updateBudgetProgress();
-      updateVarianceAnalysis();
-      updateInvestmentSummary();
-      updateDashboard();
+    document.addEventListener('DOMContentLoaded', function() {
+      // Initialize event listeners after DOM is loaded
+      setTimeout(() => {
+        const addBudgetBtn = document.getElementById('addBudgetBtn');
+        const exportBudgetsBtn = document.getElementById('exportBudgetsBtn');
+        const importBudgetsBtn = document.getElementById('importBudgetsBtn');
+        const generateForecastBtn = document.getElementById('generateForecastBtn');
+        const setBudgetLimitBtn = document.getElementById('setBudgetLimitBtn');
+        const budgetPeriodSelect = document.getElementById('budgetPeriod');
+        
+        if (addBudgetBtn) addBudgetBtn.addEventListener('click', addNewBudget);
+        if (exportBudgetsBtn) exportBudgetsBtn.addEventListener('click', exportBudgets);
+        if (importBudgetsBtn) importBudgetsBtn.addEventListener('click', importBudgets);
+        if (generateForecastBtn) generateForecastBtn.addEventListener('click', generateForecast);
+        if (setBudgetLimitBtn) setBudgetLimitBtn.addEventListener('click', setBudgetLimit);
+        
+        if (budgetPeriodSelect) {
+          budgetPeriodSelect.addEventListener('change', () => {
+            renderBudgetTable();
+            updateBudgetProgress();
+            updateVarianceAnalysis();
+            updateInvestmentSummary();
+            updateDashboard();
+          });
+        }
+        
+        // Populate category dropdowns
+        setTimeout(() => {
+          const categories = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
+          const categorySelects = document.querySelectorAll('#budgetLimitCategory, #newBudgetAccount');
+          
+          categorySelects.forEach(select => {
+            while (select.options.length > 1) {
+              select.remove(1);
+            }
+            
+            categories.forEach(category => {
+              const option = document.createElement('option');
+              option.value = category;
+              option.textContent = category;
+              select.appendChild(option);
+            });
+          });
+        }, 1000);
+      }, 500);
     });
 
   </script>
 </head>
 <body>
+  <!-- Rollover Modal -->
+  <div id="rolloverModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="rolloverModalTitle"><i class="fas fa-sync-alt"></i> Rollover Budgets</h3>
+      </div>
+      <div class="modal-body">
+        <p>You have monthly budgets from previous month that can be rolled over to current month:</p>
+        <div id="rolloverBudgetList" class="rollover-options"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="rolloverAllBtn" class="btn btn-primary">Rollover All</button>
+        <button id="rolloverSelectedBtn" class="btn btn-warning">Rollover Selected</button>
+        <button id="skipRolloverBtn" class="btn btn-outline">Skip</button>
+      </div>
+    </div>
+  </div>
+
   <div class="top-bar">
     <div class="nav-links">
       <a href="home.html">
@@ -2621,31 +2977,5 @@
       <span id="dataStatus">Budget Dashboard Ready</span>
     </div>
   </div>
-
-  <script>
-    // Populate category dropdowns after DOM loads
-    document.addEventListener('DOMContentLoaded', function() {
-      // This will be populated after data loads
-      setTimeout(() => {
-        const categories = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
-        const categorySelects = document.querySelectorAll('#budgetLimitCategory, #newBudgetAccount');
-        
-        categorySelects.forEach(select => {
-          // Clear existing options except the first
-          while (select.options.length > 1) {
-            select.remove(1);
-          }
-          
-          // Add category options
-          categories.forEach(category => {
-            const option = document.createElement('option');
-            option.value = category;
-            option.textContent = category;
-            select.appendChild(option);
-          });
-        });
-      }, 1000);
-    });
-  </script>
 </body>
 </html>
