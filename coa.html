@@ -67,6 +67,7 @@
       background-color: #fff;
       padding: 30px;
       border-radius: 8px;
+      position: relative;
     }
 
     h2 {
@@ -105,6 +106,11 @@
 
     button:hover {
       background-color: #218838;
+    }
+
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
     }
 
     table {
@@ -167,6 +173,7 @@
       font-size: 14px;
       min-width: 150px;
       border-radius: 4px;
+      z-index: 1000;
     }
     .popup-menu a {
       text-decoration: none;
@@ -175,9 +182,88 @@
     .popup-menu a:hover {
       text-decoration: underline;
     }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      display: none;
+    }
+
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Toast notification */
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 15px 20px;
+      background-color: #28a745;
+      color: white;
+      border-radius: 5px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 1000;
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast.error {
+      background-color: #dc3545;
+    }
+
+    .toast.warning {
+      background-color: #ffc107;
+      color: #212529;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Validation error styling */
+    .error-message {
+      color: #dc3545;
+      font-size: 12px;
+      margin-top: 5px;
+      display: none;
+    }
+
+    .has-error {
+      border-color: #dc3545 !important;
+    }
+
+    /* Form button group */
+    .form-buttons {
+      display: flex;
+      gap: 10px;
+    }
   </style>
 </head>
 <body>
+
+<!-- Toast Notification -->
+<div id="toast" class="toast"></div>
 
 <!-- Top Header -->
 <div class="header">
@@ -196,6 +282,11 @@
 
 <!-- Main Content -->
 <div class="container">
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+  </div>
+
   <h2>Chart of Accounts</h2>
   <button type="button" id="starterAccountsBtn" style="margin-bottom:20px;">
     💡 Add Common Starter Accounts
@@ -217,6 +308,7 @@
         <option value="OtherIncome">Other Income</option>
         <option value="OtherExpense">Other Expense</option>
       </select>
+      <div id="typeError" class="error-message"></div>
       <small id="typeHint" style="color: gray; display: block; margin-top: 4px;"></small>
     </div>
 
@@ -226,18 +318,22 @@
         <option value="">Select Category</option>
         <option value="add-new">➕ Add new category...</option>
       </select>
+      <div id="categoryError" class="error-message"></div>
       <small id="categoryHint" style="color: gray; display: block; margin-top: 4px;"></small>
     </div>
 
     <div class="form-group">
       <label for="accountName">Account Name</label>
       <input type="text" id="accountName" placeholder="e.g. Bank Account" required />
+      <div id="nameError" class="error-message"></div>
     </div>
 
     <div class="form-group">
       <label></label>
-      <button type="submit" id="submitBtn">Add Account</button>
-      <button type="button" id="cancelEditBtn" style="display:none;">Cancel Edit</button>
+      <div class="form-buttons">
+        <button type="submit" id="submitBtn">Add Account</button>
+        <button type="button" id="cancelEditBtn" style="display:none;">Cancel Edit</button>
+      </div>
     </div>
   </form>
 
@@ -251,7 +347,14 @@
         <th>Actions</th>
       </tr>
     </thead>
-    <tbody id="accountsTable"></tbody>
+    <tbody id="accountsTable">
+      <tr id="loadingRow">
+        <td colspan="4" style="text-align: center; padding: 40px;">
+          <div class="spinner" style="margin: 0 auto;"></div>
+          <p>Loading accounts...</p>
+        </td>
+      </tr>
+    </tbody>
   </table>
 </div>
 
@@ -290,6 +393,7 @@
   const db = getFirestore(app);
   const auth = getAuth(app);
 
+  // DOM Elements
   const accountTypeSelect = document.getElementById("accountType");
   const categorySelect = document.getElementById("category");
   const accountForm = document.getElementById("accountForm");
@@ -303,9 +407,38 @@
   const logoutBtn = document.getElementById("logoutBtn");
   const datetimeElem = document.getElementById("datetime");
   const starterAccountsBtn = document.getElementById("starterAccountsBtn");
+  const loadingOverlay = document.getElementById("loadingOverlay");
+  const toast = document.getElementById("toast");
+  const loadingRow = document.getElementById("loadingRow");
+
+  // Error message elements
+  const typeError = document.getElementById("typeError");
+  const categoryError = document.getElementById("categoryError");
+  const nameError = document.getElementById("nameError");
 
   let currentUser = null;
   let categories = {};
+  let existingAccounts = new Set(); // Store existing account names for duplicate checking
+
+  // Toast notification function
+  function showToast(message, type = "success") {
+    toast.textContent = message;
+    toast.className = `toast ${type}`;
+    toast.style.display = "block";
+    
+    setTimeout(() => {
+      toast.style.display = "none";
+    }, 3000);
+  }
+
+  // Show/hide loading overlay
+  function showLoading() {
+    loadingOverlay.style.display = "flex";
+  }
+
+  function hideLoading() {
+    loadingOverlay.style.display = "none";
+  }
 
   // Real-time clock
   function updateTime() {
@@ -337,7 +470,6 @@
 
       await init(); // Load categories + accounts
     } else {
-      // Wait a moment before redirecting to allow Firebase to finish initializing
       setTimeout(() => {
         if (!auth.currentUser) {
           alert("You must be logged in.");
@@ -357,7 +489,6 @@
     categories = {};
     categorySelect.innerHTML = '<option value="">Select Category</option><option value="add-new">➕ Add new category...</option>';
 
-    // Fixed path to match security rules
     const catSnapshot = await getDocs(
       query(
         collection(db, "users", currentUser.uid, "categories"), 
@@ -388,32 +519,45 @@
 
   starterAccountsBtn.addEventListener("click", async () => {
     if (!currentUser) {
-      alert("You must be logged in!");
+      showToast("You must be logged in!", "error");
       return;
     }
 
     if (!confirm("Do you want to add common starter accounts?")) return;
 
+    showLoading();
     try {
       for (const acc of starterAccounts) {
-        // Fixed path to match security rules
-        await addDoc(collection(db, "users", currentUser.uid, "chartOfAccounts"), {
-          userId: currentUser.uid,
-          type: acc.type,
-          category: acc.category,
-          name: acc.name,
-          createdAt: serverTimestamp(),
-        });
+        // Check if account already exists
+        const duplicateCheck = await getDocs(
+          query(
+            collection(db, "users", currentUser.uid, "chartOfAccounts"),
+            where("userId", "==", currentUser.uid),
+            where("type", "==", acc.type),
+            where("name", "==", acc.name)
+          )
+        );
+
+        if (duplicateCheck.empty) {
+          await addDoc(collection(db, "users", currentUser.uid, "chartOfAccounts"), {
+            userId: currentUser.uid,
+            type: acc.type,
+            category: acc.category,
+            name: acc.name,
+            createdAt: serverTimestamp(),
+          });
+        }
       }
-      await loadAccounts(); // reload the list after adding
-      alert("Starter accounts added successfully!");
+      await loadAccounts();
+      showToast("Starter accounts added successfully!");
     } catch (error) {
-      alert("Error adding starter accounts: " + error.message);
+      showToast("Error adding starter accounts: " + error.message, "error");
+    } finally {
+      hideLoading();
     }
   });
 
   function updateCategoryOptions(type) {
-    // Default categories for each account type
     const defaultCategories = {
       Asset: ["Cash", "Bank", "Accounts Receivable", "Inventory"],
       Liability: ["Accounts Payable", "Loans Payable", "Credit Card"],
@@ -436,10 +580,7 @@
       OtherExpense: "Other costs. e.g., Fines, Loss on Sale."
     };
 
-    // Reset category dropdown
     categorySelect.innerHTML = '<option value="">Select Category</option>';
-
-    // Combine predefined with user-defined categories
     const userCats = categories[type] || [];
     const combined = [...new Set([...defaultCategories[type] || [], ...userCats])];
 
@@ -450,13 +591,11 @@
       categorySelect.appendChild(opt);
     });
 
-    // Always add "Add new" last
     const addNewOption = document.createElement("option");
     addNewOption.value = "add-new";
     addNewOption.textContent = "➕ Add new category...";
     categorySelect.appendChild(addNewOption);
 
-    // Update hints if element exists
     if(document.getElementById("typeHint")){
       document.getElementById("typeHint").textContent = typeHints[type] || "";
     }
@@ -470,26 +609,27 @@
     const type = accountTypeSelect.value;
     updateCategoryOptions(type);
     categorySelect.value = "";
+    clearErrors();
   });
 
   categorySelect.addEventListener("change", async () => {
+    clearErrors();
     if (categorySelect.value === "add-new") {
       if (!accountTypeSelect.value) {
-        alert("Please select Account Type first.");
+        showToast("Please select Account Type first.", "warning");
         categorySelect.value = "";
         return;
       }
       const newCat = prompt(`Enter new category name for "${accountTypeSelect.value}":`);
       if (newCat && newCat.trim()) {
         const trimmedCat = newCat.trim();
-        // Check if it already exists
         if (categories[accountTypeSelect.value]?.some(c => c.toLowerCase() === trimmedCat.toLowerCase())) {
-          alert("Category already exists.");
+          showToast("Category already exists.", "warning");
           categorySelect.value = "";
           return;
         }
+        showLoading();
         try {
-          // Fixed path to match security rules
           await addDoc(collection(db, "users", currentUser.uid, "categories"), {
             userId: currentUser.uid,
             accountType: accountTypeSelect.value,
@@ -499,9 +639,12 @@
           await loadCategories();
           updateCategoryOptions(accountTypeSelect.value);
           categorySelect.value = trimmedCat;
+          showToast("Category added successfully!");
         } catch (error) {
-          alert("Failed to add category: " + error.message);
+          showToast("Failed to add category: " + error.message, "error");
           categorySelect.value = "";
+        } finally {
+          hideLoading();
         }
       } else {
         categorySelect.value = "";
@@ -509,18 +652,91 @@
     }
   });
 
+  // Clear all error messages
+  function clearErrors() {
+    typeError.style.display = "none";
+    categoryError.style.display = "none";
+    nameError.style.display = "none";
+    
+    accountTypeSelect.classList.remove("has-error");
+    categorySelect.classList.remove("has-error");
+    accountNameInput.classList.remove("has-error");
+  }
+
+  // Check for duplicate account name
+  async function checkDuplicateAccount(type, name) {
+    try {
+      const q = query(
+        collection(db, "users", currentUser.uid, "chartOfAccounts"),
+        where("userId", "==", currentUser.uid),
+        where("type", "==", type),
+        where("name", "==", name)
+      );
+      const snapshot = await getDocs(q);
+      return !snapshot.empty;
+    } catch (error) {
+      console.error("Error checking duplicate:", error);
+      return false;
+    }
+  }
+
   async function loadAccounts() {
+    showLoading();
     accountsTable.innerHTML = "";
-    // Fixed path to match security rules
-    const q = query(
-      collection(db, "users", currentUser.uid, "chartOfAccounts"), 
-      where("userId", "==", currentUser.uid)
-    );
-    const snapshot = await getDocs(q);
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      addAccountRow(docSnap.id, data.type, data.category, data.name);
-    });
+    
+    // Add loading row
+    const loadingRow = document.createElement("tr");
+    loadingRow.id = "loadingRow";
+    loadingRow.innerHTML = `
+      <td colspan="4" style="text-align: center; padding: 40px;">
+        <div class="spinner" style="margin: 0 auto;"></div>
+        <p>Loading accounts...</p>
+      </td>
+    `;
+    accountsTable.appendChild(loadingRow);
+
+    try {
+      const q = query(
+        collection(db, "users", currentUser.uid, "chartOfAccounts"), 
+        where("userId", "==", currentUser.uid)
+      );
+      const snapshot = await getDocs(q);
+      
+      // Clear existing accounts set
+      existingAccounts.clear();
+      
+      // Remove loading row
+      loadingRow.remove();
+      
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        // Add to existing accounts set for duplicate checking
+        const key = `${data.type.toLowerCase()}_${data.name.toLowerCase()}`;
+        existingAccounts.add(key);
+        addAccountRow(docSnap.id, data.type, data.category, data.name);
+      });
+      
+      if (snapshot.empty) {
+        accountsTable.innerHTML = `
+          <tr>
+            <td colspan="4" style="text-align: center; padding: 40px; color: #666;">
+              No accounts found. Click "Add Common Starter Accounts" to get started.
+            </td>
+          </tr>
+        `;
+      }
+    } catch (error) {
+      loadingRow.remove();
+      accountsTable.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align: center; padding: 40px; color: #dc3545;">
+            Error loading accounts: ${error.message}
+          </td>
+        </tr>
+      `;
+    } finally {
+      hideLoading();
+    }
   }
 
   function addAccountRow(id, type, category, name) {
@@ -534,8 +750,8 @@
         <button class="action-btn edit-btn">Edit</button>
         <button class="action-btn delete-btn">Delete</button>
         <button class="action-btn settings-btn">⚙️</button>
-        <div class="popup-menu" style="display:none; position:absolute; background:white; border:1px solid #ccc; padding:10px; box-shadow:0 2px 5px rgba(0,0,0,0.2); z-index:10;">
-          <div><a href="#" class="view-link">👁️ View</a></div>
+        <div class="popup-menu">
+          <div><a href="#" class="view-link" target="_blank">👁️ View</a></div>
           <div class="balance-line">💰 Balance: <span class="balance-amount">Loading...</span></div>
         </div>
       </td>
@@ -548,14 +764,21 @@
 
     tr.querySelector(".delete-btn").addEventListener("click", async () => {
       if (confirm("Are you sure you want to delete this account?")) {
+        showLoading();
         try {
-          // Fixed path to match security rules
           await deleteDoc(doc(db, "users", currentUser.uid, "chartOfAccounts", id));
           tr.remove();
           resetForm();
+          
+          // Remove from existing accounts set
+          const key = `${type.toLowerCase()}_${name.toLowerCase()}`;
+          existingAccounts.delete(key);
+          
+          showToast("Account deleted successfully!");
         } catch (err) {
-          alert("Delete failed: " + err.message);
-          console.error(err);
+          showToast("Delete failed: " + err.message, "error");
+        } finally {
+          hideLoading();
         }
       }
     });
@@ -566,35 +789,41 @@
     const balanceAmountSpan = tr.querySelector(".balance-amount");
 
     settingsBtn.addEventListener("click", async (e) => {
-      // Position popup
-      popupMenu.style.display = popupMenu.style.display === "block" ? "none" : "block";
-      const rect = settingsBtn.getBoundingClientRect();
-      popupMenu.style.top = `${rect.bottom + window.scrollY}px`;
-      popupMenu.style.left = `${rect.left + window.scrollX}px`;
+      // Toggle popup
+      const isVisible = popupMenu.style.display === "block";
+      document.querySelectorAll('.popup-menu').forEach(menu => {
+        menu.style.display = 'none';
+      });
+      
+      if (!isVisible) {
+        popupMenu.style.display = "block";
+        const rect = settingsBtn.getBoundingClientRect();
+        popupMenu.style.top = `${rect.bottom + window.scrollY}px`;
+        popupMenu.style.left = `${rect.left + window.scrollX - 100}px`;
 
-      // Load balance from 'transactions'
-      try {
-        // Fixed path to match security rules
-        const q = query(
-          collection(db, "users", currentUser.uid, "transactions"), 
-          where("accountId", "==", id)
-        );
-        const snap = await getDocs(q);
-        let balance = 0;
-        snap.forEach(docSnap => {
-          const t = docSnap.data();
-          balance += Number(t.amount || 0);
-        });
-        balanceAmountSpan.textContent = balance.toFixed(2);
-      } catch (error) {
-        balanceAmountSpan.textContent = "Error";
+        // Load balance
+        try {
+          const q = query(
+            collection(db, "users", currentUser.uid, "transactions"), 
+            where("accountId", "==", id)
+          );
+          const snap = await getDocs(q);
+          let balance = 0;
+          snap.forEach(docSnap => {
+            const t = docSnap.data();
+            balance += Number(t.amount || 0);
+          });
+          balanceAmountSpan.textContent = balance.toFixed(2);
+        } catch (error) {
+          balanceAmountSpan.textContent = "Error";
+        }
+
+        // Setup link
+        viewLink.href = `trialbalance.html?accountId=${id}&accountName=${encodeURIComponent(name)}`;
       }
-
-      // Setup link to trail balance page
-      viewLink.href = `trialbalance.html?accountId=${id}`;
     });
 
-    // Optional: Hide popup on outside click
+    // Close popup when clicking outside
     document.addEventListener("click", (e) => {
       if (!tr.contains(e.target)) {
         popupMenu.style.display = "none";
@@ -612,6 +841,7 @@
     accountNameInput.value = name;
     submitBtn.textContent = "Update Account";
     cancelEditBtn.style.display = "inline-block";
+    clearErrors();
   }
 
   function resetForm() {
@@ -620,27 +850,74 @@
     submitBtn.textContent = "Add Account";
     cancelEditBtn.style.display = "none";
     categorySelect.innerHTML = '<option value="">Select Category</option><option value="add-new">➕ Add new category...</option>';
+    clearErrors();
   }
 
   cancelEditBtn.addEventListener("click", resetForm);
 
   accountForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    
     const id = accountIdInput.value.trim();
     const type = accountTypeSelect.value.trim();
     const category = categorySelect.value.trim();
     const name = accountNameInput.value.trim();
 
-    if (!type || !category || !name) {
-      alert("Please fill all fields.");
-      return;
+    // Clear previous errors
+    clearErrors();
+
+    // Validation
+    let isValid = true;
+
+    if (!type) {
+      typeError.textContent = "Account type is required";
+      typeError.style.display = "block";
+      accountTypeSelect.classList.add("has-error");
+      isValid = false;
     }
+
+    if (!category) {
+      categoryError.textContent = "Category is required";
+      categoryError.style.display = "block";
+      categorySelect.classList.add("has-error");
+      isValid = false;
+    }
+
+    if (!name) {
+      nameError.textContent = "Account name is required";
+      nameError.style.display = "block";
+      accountNameInput.classList.add("has-error");
+      isValid = false;
+    }
+
+    if (!isValid) return;
+
+    // Check for duplicates (only for new accounts, not when editing)
+    if (!id) {
+      const isDuplicate = existingAccounts.has(`${type.toLowerCase()}_${name.toLowerCase()}`);
+      if (isDuplicate) {
+        nameError.textContent = "An account with this name already exists in this type";
+        nameError.style.display = "block";
+        accountNameInput.classList.add("has-error");
+        showToast("Account name already exists!", "warning");
+        return;
+      }
+    }
+
+    // Disable submit button and show loading
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = "Saving...";
+    submitBtn.disabled = true;
+    showLoading();
 
     try {
       if (id) {
-        // Fixed path to match security rules
+        // Update existing account
         const docRef = doc(db, "users", currentUser.uid, "chartOfAccounts", id);
         await updateDoc(docRef, { type, category, name });
+        
+        // Update in table
         const tr = accountsTable.querySelector(`tr[data-id="${id}"]`);
         if (tr) {
           tr.children[0].textContent = type;
@@ -648,29 +925,67 @@
           tr.children[1].textContent = category;
           tr.children[2].textContent = name;
         }
-        alert("Account updated.");
+        showToast("Account updated successfully!");
       } else {
-        // Fixed path to match security rules
-        await addDoc(collection(db, "users", currentUser.uid, "chartOfAccounts"), {
+        // Add new account
+        const docRef = await addDoc(collection(db, "users", currentUser.uid, "chartOfAccounts"), {
           userId: currentUser.uid,
           type,
           category,
           name,
           createdAt: serverTimestamp(),
         });
-        await loadAccounts();
-        alert("Account added.");
+        
+        // Add to existing accounts set
+        existingAccounts.add(`${type.toLowerCase()}_${name.toLowerCase()}`);
+        
+        // Add to table
+        addAccountRow(docRef.id, type, category, name);
+        showToast("Account added successfully!");
       }
+      
       resetForm();
+      
+      // Scroll to show the new/updated account
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      
     } catch (err) {
-      alert("Operation failed: " + err.message);
+      showToast("Operation failed: " + err.message, "error");
+      console.error(err);
+    } finally {
+      // Restore button state
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+      hideLoading();
     }
   });
 
   async function init() {
-    await loadCategories();
-    await loadAccounts();
+    showLoading();
+    try {
+      await loadCategories();
+      await loadAccounts();
+    } catch (error) {
+      showToast("Error initializing: " + error.message, "error");
+    } finally {
+      hideLoading();
+    }
   }
+
+  // Validate account name input in real-time
+  accountNameInput.addEventListener("input", function() {
+    if (this.value.trim()) {
+      nameError.style.display = "none";
+      this.classList.remove("has-error");
+    }
+  });
+
+  // Prevent form submission on Enter key in input fields
+  accountForm.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && e.target.tagName === "INPUT") {
+      e.preventDefault();
+    }
+  });
 </script>
 </body>
 </html>
