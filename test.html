@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Budget & Forecasting Dashboard</title>
+  <title>Budget & Forecasting Dashboard (INR Only)</title>
   
   <!-- Chart.js for visualizations -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1047,10 +1047,14 @@
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', async () => {
-      console.log('Initializing dashboard...');
+      console.log('Initializing dashboard (INR Only)...');
       
       try {
-        // Initialize date range picker - FIXED
+        // Set currency to INR only
+        currentCurrency = 'INR';
+        document.title = 'Budget Dashboard (INR Only)';
+        
+        // Initialize date range picker
         initDateRangePicker();
         
         // Set default budget period to current month
@@ -1059,6 +1063,9 @@
         
         // Remove currency toggle since we only need INR
         removeCurrencyToggle();
+        
+        // Force all currency displays to show INR
+        forceINRDisplay();
         
         // Initialize view mode toggle
         initializeViewModeToggle();
@@ -1069,14 +1076,55 @@
         // Generate forecast
         generateForecast();
         
-        console.log('Dashboard initialized successfully');
+        // Add INR indicator to dashboard
+        addINRIndicator();
+        
+        console.log('Dashboard initialized successfully (INR Only)');
+        showNotification('Dashboard loaded successfully (All amounts in INR)', 'success');
       } catch (error) {
         console.error('Error initializing dashboard:', error);
         showNotification('Error initializing dashboard: ' + error.message, 'error');
       }
     });
 
-    // Initialize date range picker - FIXED
+    // Add INR indicator to dashboard
+    function addINRIndicator() {
+      const dashboardTitle = document.querySelector('.dashboard-title');
+      if (dashboardTitle && !document.querySelector('.currency-indicator')) {
+        const currencyIndicator = document.createElement('span');
+        currencyIndicator.className = 'currency-indicator';
+        currencyIndicator.style.cssText = 'font-size: 14px; color: var(--secondary-color); margin-left: 10px; padding: 4px 12px; background: rgba(16, 185, 129, 0.1); border-radius: 20px;';
+        currencyIndicator.innerHTML = '<i class="fas fa-rupee-sign"></i> INR Only';
+        dashboardTitle.appendChild(currencyIndicator);
+      }
+    }
+
+    // Force INR display throughout the UI
+    function forceINRDisplay() {
+      // Update all chart titles and labels
+      document.querySelectorAll('.chart-title').forEach(title => {
+        if (!title.textContent.includes('INR')) {
+          title.innerHTML = title.innerHTML + ' <span style="font-size: 12px; color: var(--gray-color);">(INR)</span>';
+        }
+      });
+      
+      // Update all section headers
+      const headers = document.querySelectorAll('.section-header, .dashboard-title');
+      headers.forEach(header => {
+        if (!header.innerHTML.includes('INR')) {
+          header.innerHTML = header.innerHTML + ' <small style="font-size: 12px; color: var(--gray-color);">(INR)</small>';
+        }
+      });
+      
+      // Update all input placeholders
+      document.querySelectorAll('input[type="number"]').forEach(input => {
+        if (!input.placeholder.includes('₹')) {
+          input.placeholder = '₹' + (input.placeholder || '0');
+        }
+      });
+    }
+
+    // Initialize date range picker
     function initDateRangePicker() {
       console.log('Initializing date range picker...');
       
@@ -1128,6 +1176,14 @@
       if (currencyToggle) {
         currencyToggle.remove();
       }
+      
+      // Also remove any currency switcher buttons or dropdowns
+      const currencySwitchers = document.querySelectorAll('[class*="currency"], [id*="Currency"], [class*="usd"], [class*="inr"]');
+      currencySwitchers.forEach(element => {
+        if (element && element.parentNode && element !== loadingStatus && element !== userDisplay) {
+          element.parentNode.removeChild(element);
+        }
+      });
     }
 
     // Initialize view mode toggle
@@ -1190,7 +1246,7 @@
       window.location.href = "login.html";
     });
 
-    // Load initial data
+    // Load initial data - FIXED: All amounts treated as INR
     async function loadInitialData() {
       onAuthStateChanged(auth, async user => {
         if (!user) {
@@ -1200,15 +1256,22 @@
         
         userUID = user.uid;
         userDisplay.textContent = user.displayName || user.email || "User";
-        loadingStatus.textContent = "Loading Budget Data...";
+        loadingStatus.textContent = "Loading Budget Data (INR)...";
 
         try {
-          // Load all transactions
+          // Load all transactions - TREAT ALL AMOUNTS AS INR
           const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-          allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          console.log(`Loaded ${allTransactions.length} transactions`);
+          allTransactions = txSnap.docs.map(doc => {
+            const data = doc.data();
+            // Validate and ensure amounts are numbers (treat as INR)
+            return validateTransactionData({
+              id: doc.id,
+              ...data
+            });
+          });
+          console.log(`Loaded ${allTransactions.length} transactions as INR`);
           
-          // Load budgets
+          // Load budgets - ensure amounts are numbers
           await loadBudgets(user.uid);
           
           // Load budget limits
@@ -1220,10 +1283,13 @@
           // Extract unique accounts
           allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
           
+          // Populate dropdowns
+          populateAccountDropdowns();
+          
           // Initialize dashboard
           initializeDashboard();
           
-          loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
+          loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets (INR Only)`;
           
           // Check for budget rollover
           await checkBudgetRollover();
@@ -1236,12 +1302,44 @@
       });
     }
 
-    // Load budgets from Firestore
+    // Validate transaction data - ensure INR amounts
+    function validateTransactionData(tx) {
+      return {
+        ...tx,
+        DATE: tx.DATE || new Date().toISOString(),
+        INCOME: Math.abs(Number(tx.INCOME) || 0), // Ensure number
+        EXPENSE: Math.abs(Number(tx.EXPENSE) || 0), // Ensure number
+        ACCOUNT_HEADER: tx.ACCOUNT_HEADER || 'Uncategorized',
+        DESCRIPTION: tx.DESCRIPTION || 'No description'
+      };
+    }
+
+    // Validate INR amount input
+    function validateINRAmount(amount) {
+      // Remove any currency symbols and commas
+      const cleanAmount = String(amount).replace(/[₹$,]/g, '');
+      const numAmount = parseFloat(cleanAmount);
+      
+      if (isNaN(numAmount)) {
+        return 0;
+      }
+      
+      return numAmount;
+    }
+
+    // Load budgets from Firestore - ensure amounts are numbers
     async function loadBudgets(uid) {
       try {
         const budgetsSnap = await getDocs(collection(db, "users", uid, "budgets"));
-        allBudgets = budgetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`Loaded ${allBudgets.length} budgets`);
+        allBudgets = budgetsSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            amount: Number(data.amount) || 0 // Ensure amount is a number (INR)
+          };
+        });
+        console.log(`Loaded ${allBudgets.length} budgets as INR amounts`);
       } catch (error) {
         console.error("Error loading budgets:", error);
         allBudgets = [];
@@ -1255,7 +1353,7 @@
         budgetLimits = {};
         limitsSnap.docs.forEach(doc => {
           const data = doc.data();
-          budgetLimits[data.category] = data.limit;
+          budgetLimits[data.category] = Number(data.limit) || 0;
         });
         console.log(`Loaded ${Object.keys(budgetLimits).length} budget limits`);
       } catch (error) {
@@ -1487,10 +1585,15 @@
 
     // Initialize dashboard
     function initializeDashboard() {
-      console.log('Initializing dashboard UI...');
+      console.log('Initializing dashboard UI (INR Only)...');
+      
+      // Update dashboard with current data
       updateDashboard();
-      populateAccountDropdowns();
+      
+      // Render budget table
       renderBudgetTable();
+      
+      // Update charts and analysis
       updateForecastChart();
       updateVarianceAnalysis();
       updateInvestmentSummary();
@@ -1498,6 +1601,11 @@
       
       // Initialize event listeners
       initializeEventListeners();
+      
+      // Show success message
+      setTimeout(() => {
+        showNotification('Dashboard ready! All amounts displayed in INR.', 'success');
+      }, 1000);
     }
 
     // Initialize event listeners
@@ -1530,7 +1638,7 @@
 
     // Update dashboard with current data
     function updateDashboard() {
-      console.log('Updating dashboard...');
+      console.log('Updating dashboard (INR)...');
       
       // Get current date range
       const dateRange = document.getElementById('dateRange').value;
@@ -1657,7 +1765,7 @@
           labels: ['Income', 'Expenses'],
           datasets: [
             {
-              label: 'Budgeted',
+              label: 'Budgeted (INR)',
               data: [totalBudgetedIncome, totalBudgetedExpense],
               backgroundColor: 'rgba(99, 102, 241, 0.7)',
               borderColor: 'rgba(99, 102, 241, 1)',
@@ -1665,7 +1773,7 @@
               borderRadius: 6
             },
             {
-              label: 'Actual',
+              label: 'Actual (INR)',
               data: [summary.income, summary.expense],
               backgroundColor: 'rgba(16, 185, 129, 0.7)',
               borderColor: 'rgba(16, 185, 129, 1)',
@@ -1685,7 +1793,7 @@
               },
               title: {
                 display: true,
-                text: `Amount (${currentCurrency})`
+                text: 'Amount (INR)'
               }
             },
             x: {
@@ -1824,32 +1932,6 @@
           select.appendChild(option);
         });
       });
-    }
-
-    // Update all currency displays
-    function updateAllCurrencyDisplays() {
-      // Since we only use INR, just update all displays
-      const dateRange = document.getElementById('dateRange').value;
-      const [startStr, endStr] = dateRange.split(' - ');
-      const startDate = moment(startStr, 'DD/MM/YYYY');
-      const endDate = moment(endStr, 'DD/MM/YYYY');
-      
-      const filteredTx = allTransactions.filter(tx => {
-        if (!tx.DATE) return false;
-        const txDate = moment(tx.DATE);
-        return txDate.isBetween(startDate, endDate, null, '[]');
-      });
-      
-      const summary = calculateFinancialSummary(filteredTx);
-      updateDashboardStats(summary);
-      renderBudgetTable();
-      updateVarianceAnalysis();
-      updateInvestmentSummary();
-      updateBudgetProgress();
-      
-      // Update charts
-      updateBudgetVsActualChart(summary);
-      updateSpendingByCategoryChart(filteredTx);
     }
 
     // Render budget table
@@ -2181,12 +2263,15 @@
     async function updateExistingBudget(budgetId) {
       const account = document.getElementById('newBudgetAccount').value;
       const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const rawAmount = document.getElementById('newBudgetAmount').value;
       const frequency = document.getElementById('newBudgetFrequency').value;
       const period = document.getElementById('budgetPeriod').value;
       
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
+      // Validate and convert amount to number (INR)
+      const amount = validateINRAmount(rawAmount);
+      
+      if (!account || !amount || amount <= 0) {
+        alert('Please enter a valid INR amount');
         return;
       }
       
@@ -2223,12 +2308,15 @@
     async function addNewBudget() {
       const account = document.getElementById('newBudgetAccount').value;
       const type = document.getElementById('newBudgetType').value;
-      const amount = parseFloat(document.getElementById('newBudgetAmount').value);
+      const rawAmount = document.getElementById('newBudgetAmount').value;
       const frequency = document.getElementById('newBudgetFrequency').value;
       const period = document.getElementById('budgetPeriod').value;
       
-      if (!account || !amount || isNaN(amount)) {
-        alert('Please fill in all required fields');
+      // Validate and convert amount to number (INR)
+      const amount = validateINRAmount(rawAmount);
+      
+      if (!account || !amount || amount <= 0) {
+        alert('Please enter a valid INR amount');
         return;
       }
       
@@ -2274,10 +2362,13 @@
     // Set budget limit
     async function setBudgetLimit() {
       const category = document.getElementById('budgetLimitCategory').value;
-      const limit = parseFloat(document.getElementById('budgetLimitAmount').value);
+      const rawAmount = document.getElementById('budgetLimitAmount').value;
       
-      if (!category || !limit || isNaN(limit)) {
-        alert('Please fill in all required fields');
+      // Validate and convert amount to number (INR)
+      const limit = validateINRAmount(rawAmount);
+      
+      if (!category || !limit || limit <= 0) {
+        alert('Please enter a valid INR amount');
         return;
       }
       
@@ -2401,7 +2492,7 @@
         data: {
           labels: forecasts.labels || [],
           datasets: [{
-            label: 'Forecasted Net Balance',
+            label: 'Forecasted Net Balance (INR)',
             data: forecasts.data || [],
             borderColor: 'rgba(139, 92, 246, 1)',
             backgroundColor: 'rgba(139, 92, 246, 0.1)',
@@ -2441,7 +2532,7 @@
               },
               title: {
                 display: true,
-                text: `Amount (${currentCurrency})`
+                text: 'Amount (INR)'
               }
             },
             x: {
@@ -2583,7 +2674,7 @@
               budgetData[header.toLowerCase()] = values[index];
             });
             
-            budgetData.amount = parseFloat(budgetData.amount) || 0;
+            budgetData.amount = validateINRAmount(budgetData.amount);
             
             if (!budgetData.period) {
               budgetData.period = document.getElementById('budgetPeriod').value;
@@ -2605,6 +2696,20 @@
       };
       
       fileInput.click();
+    }
+
+    // Format currency - ONLY INR (No USD conversion)
+    function formatCurrency(amount) {
+      // Ensure amount is a number
+      const numAmount = Number(amount) || 0;
+      
+      // Format as INR currency without USD conversion
+      return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+      }).format(numAmount);
     }
 
     // Show notification
@@ -2635,17 +2740,6 @@
           notification.remove();
         }
       }, 5000);
-    }
-
-    // Format currency - ONLY INR (No USD conversion)
-    function formatCurrency(amount) {
-      // Format as INR currency
-      return new Intl.NumberFormat('en-IN', {
-        style: 'currency',
-        currency: 'INR',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0
-      }).format(amount);
     }
 
   </script>
@@ -2679,7 +2773,7 @@
       </a>
     </div>
     
-    <div id="loadingStatus">Loading Budget Dashboard...</div>
+    <div id="loadingStatus">Loading Budget Dashboard (INR)...</div>
     
     <div class="user-info">
       <div class="user-avatar" id="userAvatar">U</div>
@@ -2764,7 +2858,7 @@
         </div>
         <div class="form-group">
           <label>Limit Amount (₹):</label>
-          <input type="number" id="budgetLimitAmount" class="form-control" placeholder="0" step="1" min="0" />
+          <input type="number" id="budgetLimitAmount" class="form-control" placeholder="₹0" step="1" min="0" />
         </div>
         <div class="form-group">
           <button id="setBudgetLimitBtn" class="btn btn-warning" style="height: 46px;">
@@ -2841,7 +2935,7 @@
         </div>
         <div class="form-group">
           <label>Amount (₹):</label>
-          <input type="number" id="newBudgetAmount" class="form-control" placeholder="0" step="1" min="0" />
+          <input type="number" id="newBudgetAmount" class="form-control" placeholder="₹0" step="1" min="0" />
         </div>
         <div class="form-group">
           <label>Frequency:</label>
@@ -2987,7 +3081,7 @@
     </div>
 
     <div class="status-bar">
-      <span id="dataStatus">Budget Dashboard Ready</span>
+      <span id="dataStatus">Budget Dashboard Ready (INR Only)</span>
     </div>
   </div>
 
