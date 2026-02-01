@@ -382,6 +382,57 @@
       box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
     }
 
+    /* Custom date range selector */
+    .date-range-selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+      padding: 15px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .date-range-btn {
+      padding: 10px 15px;
+      border: 2px solid var(--border-color);
+      background: white;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      transition: all 0.2s;
+      font-size: 14px;
+    }
+
+    .date-range-btn:hover {
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+
+    .date-range-btn.active {
+      background: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+
+    .date-range-custom {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 15px;
+    }
+
+    .date-range-custom input {
+      padding: 8px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      width: 120px;
+    }
+
     .table-container {
       background: white;
       border-radius: 12px;
@@ -916,6 +967,31 @@
       display: block;
     }
 
+    /* Loading Spinner */
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Date Display */
+    .date-display {
+      font-size: 14px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 5px 12px;
+      border-radius: 20px;
+      margin-left: 10px;
+    }
+
     @media (max-width: 768px) {
       .top-bar {
         flex-direction: column;
@@ -980,6 +1056,21 @@
       .view-toggle-container {
         flex-direction: column;
       }
+      
+      .date-range-selector {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      
+      .date-range-custom {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      
+      .date-range-custom input {
+        width: 100%;
+      }
     }
 
     /* Custom scrollbar */
@@ -1005,7 +1096,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
     // Firebase configuration
@@ -1034,6 +1125,7 @@
     let currentViewMode = 'monthly';
     let budgetLimits = {};
     let budgetRolloverSettings = {};
+    let currentDateRange = 'monthly';
     
     // Chart instances
     let budgetVsActualChart = null;
@@ -1054,9 +1146,6 @@
         currentCurrency = 'INR';
         document.title = 'Budget Dashboard (INR Only)';
         
-        // Initialize date range picker
-        initDateRangePicker();
-        
         // Set default budget period to current month
         const currentMonth = moment().format('YYYY-MM');
         document.getElementById('budgetPeriod').value = currentMonth;
@@ -1067,8 +1156,17 @@
         // Force all currency displays to show INR
         forceINRDisplay();
         
+        // Initialize date range selector (simple version)
+        initDateRangeSelector();
+        
         // Initialize view mode toggle
         initializeViewModeToggle();
+        
+        // Add INR indicator to dashboard
+        addINRIndicator();
+        
+        console.log('UI initialized successfully');
+        showNotification('Dashboard loading...', 'info');
         
         // Load initial data
         await loadInitialData();
@@ -1076,11 +1174,8 @@
         // Generate forecast
         generateForecast();
         
-        // Add INR indicator to dashboard
-        addINRIndicator();
-        
         console.log('Dashboard initialized successfully (INR Only)');
-        showNotification('Dashboard loaded successfully (All amounts in INR)', 'success');
+        showNotification('Dashboard loaded successfully!', 'success');
       } catch (error) {
         console.error('Error initializing dashboard:', error);
         showNotification('Error initializing dashboard: ' + error.message, 'error');
@@ -1124,50 +1219,197 @@
       });
     }
 
-    // Initialize date range picker
-    function initDateRangePicker() {
-      console.log('Initializing date range picker...');
+    // Initialize simple date range selector
+    function initDateRangeSelector() {
+      console.log('Initializing date range selector...');
       
-      try {
-        $('#dateRange').daterangepicker({
-          opens: 'center',
-          startDate: moment().startOf('month'),
-          endDate: moment().endOf('month'),
-          ranges: {
-            'Today': [moment(), moment()],
-            'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-            'Last 7 Days': [moment().subtract(6, 'days'), moment()],
-            'Last 30 Days': [moment().subtract(29, 'days'), moment()],
-            'This Month': [moment().startOf('month'), moment().endOf('month')],
-            'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
-          },
-          alwaysShowCalendars: true,
-          showDropdowns: true,
-          autoApply: true,
-          locale: {
-            format: 'DD/MM/YYYY',
-            separator: ' - ',
-            applyLabel: 'Apply',
-            cancelLabel: 'Cancel',
-            customRangeLabel: 'Custom Range'
+      const dateRangeButtons = document.querySelectorAll('.date-range-btn');
+      const customStartDate = document.getElementById('customStartDate');
+      const customEndDate = document.getElementById('customEndDate');
+      const applyCustomBtn = document.getElementById('applyCustomDate');
+      
+      // Set default dates for custom range
+      const today = moment();
+      const oneMonthAgo = moment().subtract(1, 'month');
+      
+      if (customStartDate) customStartDate.value = oneMonthAgo.format('YYYY-MM-DD');
+      if (customEndDate) customEndDate.value = today.format('YYYY-MM-DD');
+      
+      // Set active button to "Monthly"
+      setActiveDateRangeButton('monthly');
+      
+      // Add event listeners to date range buttons
+      dateRangeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+          const range = button.getAttribute('data-range');
+          setActiveDateRangeButton(range);
+          applyDateRange(range);
+        });
+      });
+      
+      // Add event listener to apply custom date button
+      if (applyCustomBtn) {
+        applyCustomBtn.addEventListener('click', () => {
+          const startDate = customStartDate.value;
+          const endDate = customEndDate.value;
+          
+          if (!startDate || !endDate) {
+            showNotification('Please select both start and end dates', 'warning');
+            return;
           }
-        }, function(start, end, label) {
-          console.log('Date range selected:', start.format('DD/MM/YYYY'), 'to', end.format('DD/MM/YYYY'));
-          updateDashboard();
+          
+          if (moment(startDate).isAfter(moment(endDate))) {
+            showNotification('Start date cannot be after end date', 'error');
+            return;
+          }
+          
+          setActiveDateRangeButton('custom');
+          applyCustomDateRange(startDate, endDate);
         });
-
-        // Also trigger update on change
-        $('#dateRange').on('change', function() {
-          console.log('Date range changed manually');
-          updateDashboard();
-        });
-
-        console.log('Date range picker initialized successfully');
-      } catch (error) {
-        console.error('Error initializing date range picker:', error);
-        // Fallback to simple input
-        $('#dateRange').val(moment().startOf('month').format('DD/MM/YYYY') + ' - ' + moment().endOf('month').format('DD/MM/YYYY'));
       }
+      
+      // Set initial date range
+      applyDateRange('monthly');
+      
+      console.log('Date range selector initialized successfully');
+    }
+
+    // Set active date range button
+    function setActiveDateRangeButton(range) {
+      currentDateRange = range;
+      
+      // Remove active class from all buttons
+      document.querySelectorAll('.date-range-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      
+      // Add active class to selected button
+      const activeBtn = document.querySelector(`.date-range-btn[data-range="${range}"]`);
+      if (activeBtn) {
+        activeBtn.classList.add('active');
+      }
+      
+      // Update date display in top bar
+      updateDateDisplay();
+    }
+
+    // Apply date range
+    function applyDateRange(range) {
+      let startDate, endDate;
+      const today = moment();
+      
+      switch(range) {
+        case 'today':
+          startDate = today.clone();
+          endDate = today.clone();
+          break;
+        case 'yesterday':
+          startDate = today.clone().subtract(1, 'day');
+          endDate = today.clone().subtract(1, 'day');
+          break;
+        case 'weekly':
+          startDate = today.clone().startOf('week');
+          endDate = today.clone().endOf('week');
+          break;
+        case 'biweekly':
+          startDate = today.clone().subtract(2, 'weeks');
+          endDate = today.clone();
+          break;
+        case 'monthly':
+          startDate = today.clone().startOf('month');
+          endDate = today.clone().endOf('month');
+          break;
+        case 'quarterly':
+          startDate = today.clone().startOf('quarter');
+          endDate = today.clone().endOf('quarter');
+          break;
+        case 'yearly':
+          startDate = today.clone().startOf('year');
+          endDate = today.clone().endOf('year');
+          break;
+        default:
+          startDate = today.clone().startOf('month');
+          endDate = today.clone().endOf('month');
+      }
+      
+      // Update dashboard with new date range
+      updateDashboardWithDates(startDate, endDate);
+    }
+
+    // Apply custom date range
+    function applyCustomDateRange(startDateStr, endDateStr) {
+      const startDate = moment(startDateStr);
+      const endDate = moment(endDateStr);
+      
+      updateDashboardWithDates(startDate, endDate);
+    }
+
+    // Update dashboard with specific dates
+    function updateDashboardWithDates(startDate, endDate) {
+      // Store dates globally for reference
+      window.currentStartDate = startDate;
+      window.currentEndDate = endDate;
+      
+      // Update dashboard
+      updateDashboard();
+      
+      // Show notification
+      const format = 'DD/MM/YYYY';
+      showNotification(`Date range set to: ${startDate.format(format)} - ${endDate.format(format)}`, 'info');
+    }
+
+    // Update date display in top bar
+    function updateDateDisplay() {
+      const dateDisplay = document.querySelector('.date-display') || createDateDisplay();
+      
+      if (currentDateRange === 'custom' && window.currentStartDate && window.currentEndDate) {
+        dateDisplay.textContent = `${window.currentStartDate.format('DD/MM')} - ${window.currentEndDate.format('DD/MM')}`;
+      } else {
+        const today = moment();
+        let displayText = '';
+        
+        switch(currentDateRange) {
+          case 'today':
+            displayText = 'Today';
+            break;
+          case 'yesterday':
+            displayText = 'Yesterday';
+            break;
+          case 'weekly':
+            displayText = 'This Week';
+            break;
+          case 'biweekly':
+            displayText = 'Last 2 Weeks';
+            break;
+          case 'monthly':
+            displayText = 'This Month';
+            break;
+          case 'quarterly':
+            displayText = 'This Quarter';
+            break;
+          case 'yearly':
+            displayText = 'This Year';
+            break;
+          default:
+            displayText = 'This Month';
+        }
+        
+        dateDisplay.textContent = displayText;
+      }
+    }
+
+    // Create date display element
+    function createDateDisplay() {
+      const dateDisplay = document.createElement('div');
+      dateDisplay.className = 'date-display';
+      dateDisplay.innerHTML = '<i class="fas fa-calendar-alt"></i> This Month';
+      
+      const loadingStatus = document.getElementById('loadingStatus');
+      if (loadingStatus && loadingStatus.parentNode) {
+        loadingStatus.parentNode.insertBefore(dateDisplay, loadingStatus);
+      }
+      
+      return dateDisplay;
     }
 
     // Remove currency toggle since we only use INR
@@ -1195,27 +1437,21 @@
       if (monthlyBtn) {
         monthlyBtn.addEventListener('click', () => {
           setViewMode('monthly');
-          $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('month'));
-          $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('month'));
-          $('#dateRange').trigger('change');
+          applyDateRange('monthly');
         });
       }
       
       if (weeklyBtn) {
         weeklyBtn.addEventListener('click', () => {
           setViewMode('weekly');
-          $('#dateRange').data('daterangepicker').setStartDate(moment().startOf('week'));
-          $('#dateRange').data('daterangepicker').setEndDate(moment().endOf('week'));
-          $('#dateRange').trigger('change');
+          applyDateRange('weekly');
         });
       }
       
       if (generalBtn) {
         generalBtn.addEventListener('click', () => {
           setViewMode('general');
-          $('#dateRange').data('daterangepicker').setStartDate(moment().subtract(29, 'days'));
-          $('#dateRange').data('daterangepicker').setEndDate(moment());
-          $('#dateRange').trigger('change');
+          applyDateRange('monthly');
         });
       }
       
@@ -1246,60 +1482,75 @@
       window.location.href = "login.html";
     });
 
-    // Load initial data - FIXED: All amounts treated as INR
+    // Load initial data - OPTIMIZED for faster loading
     async function loadInitialData() {
-      onAuthStateChanged(auth, async user => {
-        if (!user) {
-          window.location.href = "login.html";
-          return;
-        }
-        
-        userUID = user.uid;
-        userDisplay.textContent = user.displayName || user.email || "User";
-        loadingStatus.textContent = "Loading Budget Data (INR)...";
+      return new Promise((resolve, reject) => {
+        onAuthStateChanged(auth, async user => {
+          if (!user) {
+            window.location.href = "login.html";
+            return;
+          }
+          
+          userUID = user.uid;
+          userDisplay.textContent = user.displayName || user.email || "User";
+          loadingStatus.innerHTML = '<span class="loading-spinner"></span> Loading Budget Data...';
 
-        try {
-          // Load all transactions - TREAT ALL AMOUNTS AS INR
-          const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-          allTransactions = txSnap.docs.map(doc => {
-            const data = doc.data();
-            // Validate and ensure amounts are numbers (treat as INR)
-            return validateTransactionData({
-              id: doc.id,
-              ...data
-            });
-          });
-          console.log(`Loaded ${allTransactions.length} transactions as INR`);
-          
-          // Load budgets - ensure amounts are numbers
-          await loadBudgets(user.uid);
-          
-          // Load budget limits
-          await loadBudgetLimits();
-          
-          // Load rollover settings
-          await loadRolloverSettings();
-          
-          // Extract unique accounts
-          allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
-          
-          // Populate dropdowns
-          populateAccountDropdowns();
-          
-          // Initialize dashboard
-          initializeDashboard();
-          
-          loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets (INR Only)`;
-          
-          // Check for budget rollover
-          await checkBudgetRollover();
-          
-        } catch (error) {
-          loadingStatus.textContent = `Error loading data: ${error.message}`;
-          console.error("Error loading data:", error);
-          showNotification('Error loading data: ' + error.message, 'error');
-        }
+          try {
+            // Load data in parallel for faster loading
+            await Promise.all([
+              loadTransactions(user.uid),
+              loadBudgets(user.uid)
+            ]);
+            
+            // Load additional data
+            await Promise.all([
+              loadBudgetLimits(),
+              loadRolloverSettings()
+            ]);
+            
+            // Extract unique accounts
+            allAccounts = [...new Set(allTransactions.map(tx => tx.ACCOUNT_HEADER || "Uncategorized").filter(Boolean))];
+            
+            // Populate dropdowns
+            populateAccountDropdowns();
+            
+            // Initialize dashboard
+            initializeDashboard();
+            
+            loadingStatus.textContent = `Loaded ${allTransactions.length} transactions and ${allBudgets.length} budgets`;
+            
+            // Check for budget rollover
+            setTimeout(() => checkBudgetRollover(), 1000);
+            
+            resolve();
+          } catch (error) {
+            loadingStatus.textContent = `Error loading data: ${error.message}`;
+            console.error("Error loading data:", error);
+            showNotification('Error loading data: ' + error.message, 'error');
+            reject(error);
+          }
+        });
       });
+    }
+
+    // Load transactions with optimization
+    async function loadTransactions(uid) {
+      try {
+        console.log('Loading transactions...');
+        const txSnap = await getDocs(collection(db, "users", uid, "transactions"));
+        allTransactions = txSnap.docs.map(doc => {
+          const data = doc.data();
+          return validateTransactionData({
+            id: doc.id,
+            ...data
+          });
+        });
+        console.log(`Loaded ${allTransactions.length} transactions`);
+      } catch (error) {
+        console.error("Error loading transactions:", error);
+        allTransactions = [];
+        throw error;
+      }
     }
 
     // Validate transaction data - ensure INR amounts
@@ -1307,8 +1558,8 @@
       return {
         ...tx,
         DATE: tx.DATE || new Date().toISOString(),
-        INCOME: Math.abs(Number(tx.INCOME) || 0), // Ensure number
-        EXPENSE: Math.abs(Number(tx.EXPENSE) || 0), // Ensure number
+        INCOME: Math.abs(Number(tx.INCOME) || 0),
+        EXPENSE: Math.abs(Number(tx.EXPENSE) || 0),
         ACCOUNT_HEADER: tx.ACCOUNT_HEADER || 'Uncategorized',
         DESCRIPTION: tx.DESCRIPTION || 'No description'
       };
@@ -1316,33 +1567,29 @@
 
     // Validate INR amount input
     function validateINRAmount(amount) {
-      // Remove any currency symbols and commas
       const cleanAmount = String(amount).replace(/[₹$,]/g, '');
       const numAmount = parseFloat(cleanAmount);
-      
-      if (isNaN(numAmount)) {
-        return 0;
-      }
-      
-      return numAmount;
+      return isNaN(numAmount) ? 0 : numAmount;
     }
 
-    // Load budgets from Firestore - ensure amounts are numbers
+    // Load budgets from Firestore
     async function loadBudgets(uid) {
       try {
+        console.log('Loading budgets...');
         const budgetsSnap = await getDocs(collection(db, "users", uid, "budgets"));
         allBudgets = budgetsSnap.docs.map(doc => {
           const data = doc.data();
           return {
             id: doc.id,
             ...data,
-            amount: Number(data.amount) || 0 // Ensure amount is a number (INR)
+            amount: Number(data.amount) || 0
           };
         });
-        console.log(`Loaded ${allBudgets.length} budgets as INR amounts`);
+        console.log(`Loaded ${allBudgets.length} budgets`);
       } catch (error) {
         console.error("Error loading budgets:", error);
         allBudgets = [];
+        throw error;
       }
     }
 
@@ -1384,15 +1631,12 @@
       const currentMonth = today.format('YYYY-MM');
       const lastMonth = today.clone().subtract(1, 'month').format('YYYY-MM');
       
-      // Check if we have budgets from last month that need rollover
       const lastMonthBudgets = allBudgets.filter(b => b.period === lastMonth && b.frequency === 'Monthly');
       
       if (lastMonthBudgets.length > 0) {
-        // Check if we have budgets for current month
         const currentMonthBudgets = allBudgets.filter(b => b.period === currentMonth);
         
         if (currentMonthBudgets.length === 0) {
-          // Ask user about rollover
           showRolloverModal(lastMonthBudgets, lastMonth, currentMonth);
         }
       }
@@ -1406,10 +1650,8 @@
       const rolloverSelectedBtn = document.getElementById('rolloverSelectedBtn');
       const skipRolloverBtn = document.getElementById('skipRolloverBtn');
       
-      // Clear previous selections
       budgetList.innerHTML = '';
       
-      // Populate budget list
       lastMonthBudgets.forEach(budget => {
         const div = document.createElement('div');
         div.className = 'rollover-option';
@@ -1424,7 +1666,6 @@
         `;
         budgetList.appendChild(div);
         
-        // Add click handler
         div.addEventListener('click', (e) => {
           if (e.target.type !== 'checkbox') {
             const checkbox = div.querySelector('.budget-checkbox');
@@ -1434,12 +1675,10 @@
         });
       });
       
-      // Set modal title
       document.getElementById('rolloverModalTitle').innerHTML = `
         <i class="fas fa-sync-alt"></i> Rollover Budgets from ${lastMonth} to ${currentMonth}
       `;
       
-      // Button handlers
       rolloverAllBtn.onclick = () => handleRollover('all', lastMonthBudgets, currentMonth);
       rolloverSelectedBtn.onclick = () => handleRollover('selected', lastMonthBudgets, currentMonth);
       skipRolloverBtn.onclick = () => {
@@ -1447,7 +1686,6 @@
         showNotification('Skipped budget rollover', 'info');
       };
       
-      // Show modal
       modal.classList.add('active');
     }
 
@@ -1468,7 +1706,6 @@
       let rolledOverCount = 0;
       
       for (const budget of budgetsToRollover) {
-        // Create new budget for current month
         const newBudget = {
           account: budget.account,
           type: budget.type,
@@ -1487,11 +1724,9 @@
       modal.classList.remove('active');
       
       if (rolledOverCount > 0) {
-        // Reload budgets
         await loadBudgets(userUID);
         renderBudgetTable();
         updateDashboard();
-        
         showNotification(`Successfully rolled over ${rolledOverCount} budgets to ${currentMonth}`, 'success');
       } else {
         showNotification('No budgets were rolled over', 'warning');
@@ -1511,11 +1746,9 @@
           lastUpdated: new Date().toISOString() 
         });
         
-        // Add to local copy
         if (!budgetData.id) {
           allBudgets.push({ ...budgetData, id: budgetId });
         } else {
-          // Update existing
           const index = allBudgets.findIndex(b => b.id === budgetData.id);
           if (index !== -1) {
             allBudgets[index] = { ...budgetData, id: budgetId };
@@ -1535,7 +1768,6 @@
         const budgetRef = doc(db, "users", userUID, "budgets", budgetId);
         await deleteDoc(budgetRef);
         
-        // Remove from local copy
         allBudgets = allBudgets.filter(b => b.id !== budgetId);
         
         return true;
@@ -1585,27 +1817,20 @@
 
     // Initialize dashboard
     function initializeDashboard() {
-      console.log('Initializing dashboard UI (INR Only)...');
+      console.log('Initializing dashboard UI...');
       
-      // Update dashboard with current data
       updateDashboard();
-      
-      // Render budget table
       renderBudgetTable();
-      
-      // Update charts and analysis
       updateForecastChart();
       updateVarianceAnalysis();
       updateInvestmentSummary();
       updateBudgetLimitWarnings();
-      
-      // Initialize event listeners
       initializeEventListeners();
       
-      // Show success message
-      setTimeout(() => {
-        showNotification('Dashboard ready! All amounts displayed in INR.', 'success');
-      }, 1000);
+      // Update date display
+      updateDateDisplay();
+      
+      console.log('Dashboard initialized successfully');
     }
 
     // Initialize event listeners
@@ -1638,22 +1863,23 @@
 
     // Update dashboard with current data
     function updateDashboard() {
-      console.log('Updating dashboard (INR)...');
+      console.log('Updating dashboard...');
       
       // Get current date range
-      const dateRange = document.getElementById('dateRange').value;
       let startDate, endDate;
       
-      try {
-        const [startStr, endStr] = dateRange.split(' - ');
-        startDate = moment(startStr, 'DD/MM/YYYY');
-        endDate = moment(endStr, 'DD/MM/YYYY');
-        console.log('Date range:', startDate.format('DD/MM/YYYY'), 'to', endDate.format('DD/MM/YYYY'));
-      } catch (error) {
-        console.error('Error parsing date range:', error);
+      if (window.currentStartDate && window.currentEndDate) {
+        startDate = window.currentStartDate;
+        endDate = window.currentEndDate;
+      } else {
+        // Default to current month
         startDate = moment().startOf('month');
         endDate = moment().endOf('month');
+        window.currentStartDate = startDate;
+        window.currentEndDate = endDate;
       }
+      
+      console.log('Date range:', startDate.format('DD/MM/YYYY'), 'to', endDate.format('DD/MM/YYYY'));
       
       // Filter transactions for date range
       const filteredTx = allTransactions.filter(tx => {
@@ -1695,7 +1921,6 @@
         const account = tx.ACCOUNT_HEADER || "Uncategorized";
         const amount = Number(tx.INCOME || 0) - Number(tx.EXPENSE || 0);
         
-        // Update account summary
         if (!summary.byAccount[account]) {
           summary.byAccount[account] = { income: 0, expense: 0, net: 0 };
         }
@@ -1704,7 +1929,6 @@
         summary.byAccount[account].expense += Number(tx.EXPENSE || 0);
         summary.byAccount[account].net += amount;
         
-        // Update totals
         summary.income += Number(tx.INCOME || 0);
         summary.expense += Number(tx.EXPENSE || 0);
         summary.net += amount;
@@ -1727,7 +1951,6 @@
       const savingsRate = summary.income > 0 ? ((summary.net / summary.income) * 100).toFixed(1) : 0;
       if (savingsRateElem) savingsRateElem.textContent = savingsRate + '%';
       
-      // Update color for net balance
       if (netBalanceElem) {
         netBalanceElem.className = 'stat-value ' + (summary.net >= 0 ? 'income' : 'expense');
       }
@@ -1739,8 +1962,6 @@
       if (!ctx) return;
       
       const budgetPeriod = document.getElementById('budgetPeriod').value;
-      
-      // Get budgets for current period
       const periodBudgets = allBudgets.filter(b => b.period === budgetPeriod);
       const totalBudgetedIncome = periodBudgets
         .filter(b => b.type === 'Income')
@@ -1750,7 +1971,6 @@
         .filter(b => b.type === 'Expense')
         .reduce((sum, b) => sum + Number(b.amount || 0), 0);
       
-      // Destroy existing chart if it exists
       if (budgetVsActualChart) {
         try {
           budgetVsActualChart.destroy();
@@ -1833,7 +2053,6 @@
       const ctx = document.getElementById('spendingByCategoryChart')?.getContext('2d');
       if (!ctx) return;
       
-      // Group by category/account
       const categoryData = {};
       transactions.forEach(tx => {
         if (tx.EXPENSE > 0) {
@@ -1842,7 +2061,6 @@
         }
       });
       
-      // Sort by amount and take top 8
       const sortedCategories = Object.entries(categoryData)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8);
@@ -1850,7 +2068,6 @@
       const labels = sortedCategories.map(([category]) => category);
       const data = sortedCategories.map(([_, amount]) => amount);
       
-      // Generate colors
       const colors = [
         'rgba(239, 68, 68, 0.8)',
         'rgba(245, 158, 11, 0.8)',
@@ -1862,7 +2079,6 @@
         'rgba(6, 182, 212, 0.8)'
       ];
       
-      // Destroy existing chart if it exists
       if (spendingByCategoryChart) {
         try {
           spendingByCategoryChart.destroy();
@@ -1919,12 +2135,10 @@
     function populateAccountDropdowns() {
       const accountSelects = document.querySelectorAll('.account-select');
       accountSelects.forEach(select => {
-        // Clear existing options except the first
         while (select.options.length > 1) {
           select.remove(1);
         }
         
-        // Add account options
         allAccounts.forEach(account => {
           const option = document.createElement('option');
           option.value = account;
@@ -1932,6 +2146,21 @@
           select.appendChild(option);
         });
       });
+      
+      // Also populate budget limit category
+      const limitCategorySelect = document.getElementById('budgetLimitCategory');
+      if (limitCategorySelect) {
+        while (limitCategorySelect.options.length > 1) {
+          limitCategorySelect.remove(1);
+        }
+        
+        allAccounts.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account;
+          option.textContent = account;
+          limitCategorySelect.appendChild(option);
+        });
+      }
     }
 
     // Render budget table
@@ -1949,12 +2178,10 @@
       
       let html = '';
       periodBudgets.forEach((budget, index) => {
-        // Calculate actual spending for this budget
         const actual = calculateActualForBudget(budget);
         const variance = budget.amount - actual;
         const variancePercent = budget.amount > 0 ? (variance / budget.amount * 100).toFixed(1) : 0;
         
-        // Determine variance class
         let varianceClass = '';
         let varianceIcon = '';
         if (variance > 0) {
@@ -1968,12 +2195,10 @@
           varianceIcon = '<i class="fas fa-equals text-muted"></i>';
         }
         
-        // Determine budget type color
         const typeClass = budget.type === 'Income' ? 'type-income' : 
                          budget.type === 'Expense' ? 'type-expense' :
                          budget.type === 'Investment' ? 'type-investment' : 'type-savings';
         
-        // Check if rolled over
         const rolledOverBadge = budget.rolledOverFrom ? 
           `<span class="frequency-badge" style="background: #e0f2fe; color: #0369a1; margin-left: 5px;">
             <i class="fas fa-sync-alt"></i> Rolled
@@ -2060,7 +2285,6 @@
       const budgetPeriod = budget.period;
       const [year, month] = budgetPeriod.split('-').map(Number);
       
-      // Filter transactions for this budget period and account
       const filteredTx = allTransactions.filter(tx => {
         if (!tx.DATE) return false;
         const txDate = new Date(tx.DATE);
@@ -2069,7 +2293,6 @@
                tx.ACCOUNT_HEADER === budget.account;
       });
       
-      // Calculate total based on budget type
       if (budget.type === 'Income') {
         return filteredTx.reduce((sum, tx) => sum + Number(tx.INCOME || 0), 0);
       } else {
@@ -2096,7 +2319,6 @@
         progressBar.style.width = `${progressPercent}%`;
         progressBar.textContent = `${progressPercent.toFixed(1)}%`;
         
-        // Update progress bar color based on percentage
         if (progressPercent > 90) {
           progressBar.className = 'progress-bar danger';
         } else if (progressPercent > 75) {
@@ -2225,7 +2447,6 @@
           });
         });
         
-        // Close on background click
         modal.addEventListener('click', (e) => {
           if (e.target === modal) {
             document.body.removeChild(modal);
@@ -2240,16 +2461,13 @@
       const budget = allBudgets.find(b => b.id === budgetId);
       if (!budget) return;
       
-      // Populate edit form
       document.getElementById('newBudgetAccount').value = budget.account;
       document.getElementById('newBudgetType').value = budget.type;
       document.getElementById('newBudgetAmount').value = budget.amount;
       document.getElementById('newBudgetFrequency').value = budget.frequency;
       
-      // Scroll to form
       document.getElementById('budgetForm').scrollIntoView({ behavior: 'smooth' });
       
-      // Change button text
       const addBtn = document.getElementById('addBudgetBtn');
       addBtn.innerHTML = '<i class="fas fa-save"></i> Update Budget';
       addBtn.onclick = async () => {
@@ -2267,7 +2485,6 @@
       const frequency = document.getElementById('newBudgetFrequency').value;
       const period = document.getElementById('budgetPeriod').value;
       
-      // Validate and convert amount to number (INR)
       const amount = validateINRAmount(rawAmount);
       
       if (!account || !amount || amount <= 0) {
@@ -2287,12 +2504,10 @@
       
       const success = await saveBudget(budgetData);
       if (success) {
-        // Reset form
         document.getElementById('newBudgetAmount').value = '';
         document.getElementById('addBudgetBtn').innerHTML = '<i class="fas fa-plus"></i> Add Budget';
         document.getElementById('addBudgetBtn').onclick = addNewBudget;
         
-        // Update UI
         renderBudgetTable();
         updateDashboard();
         updateVarianceAnalysis();
@@ -2312,7 +2527,6 @@
       const frequency = document.getElementById('newBudgetFrequency').value;
       const period = document.getElementById('budgetPeriod').value;
       
-      // Validate and convert amount to number (INR)
       const amount = validateINRAmount(rawAmount);
       
       if (!account || !amount || amount <= 0) {
@@ -2331,10 +2545,8 @@
       
       const success = await saveBudget(budgetData);
       if (success) {
-        // Clear form
         document.getElementById('newBudgetAmount').value = '';
         
-        // Ask about rollover setting
         if (frequency === 'Monthly') {
           const setRollover = confirm('Do you want to automatically rollover this budget to next month?');
           if (setRollover) {
@@ -2347,7 +2559,6 @@
           }
         }
         
-        // Update UI
         renderBudgetTable();
         updateDashboard();
         updateVarianceAnalysis();
@@ -2364,7 +2575,6 @@
       const category = document.getElementById('budgetLimitCategory').value;
       const rawAmount = document.getElementById('budgetLimitAmount').value;
       
-      // Validate and convert amount to number (INR)
       const limit = validateINRAmount(rawAmount);
       
       if (!category || !limit || limit <= 0) {
@@ -2700,10 +2910,8 @@
 
     // Format currency - ONLY INR (No USD conversion)
     function formatCurrency(amount) {
-      // Ensure amount is a number
       const numAmount = Number(amount) || 0;
       
-      // Format as INR currency without USD conversion
       return new Intl.NumberFormat('en-IN', {
         style: 'currency',
         currency: 'INR',
@@ -2773,7 +2981,7 @@
       </a>
     </div>
     
-    <div id="loadingStatus">Loading Budget Dashboard (INR)...</div>
+    <div id="loadingStatus"><span class="loading-spinner"></span> Loading Dashboard...</div>
     
     <div class="user-info">
       <div class="user-avatar" id="userAvatar">U</div>
@@ -2796,6 +3004,39 @@
         </button>
         <button id="importBudgetsBtn" class="btn btn-outline btn-sm">
           <i class="fas fa-upload"></i> Import
+        </button>
+      </div>
+    </div>
+
+    <!-- Date Range Selector -->
+    <div class="date-range-selector">
+      <button class="date-range-btn" data-range="today">
+        <i class="fas fa-calendar-day"></i> Today
+      </button>
+      <button class="date-range-btn" data-range="yesterday">
+        <i class="fas fa-calendar-minus"></i> Yesterday
+      </button>
+      <button class="date-range-btn" data-range="weekly">
+        <i class="fas fa-calendar-week"></i> Weekly
+      </button>
+      <button class="date-range-btn" data-range="biweekly">
+        <i class="fas fa-calendar-alt"></i> Bi-Weekly
+      </button>
+      <button class="date-range-btn active" data-range="monthly">
+        <i class="fas fa-calendar"></i> Monthly
+      </button>
+      <button class="date-range-btn" data-range="quarterly">
+        <i class="fas fa-calendar-check"></i> Quarterly
+      </button>
+      <button class="date-range-btn" data-range="yearly">
+        <i class="fas fa-calendar-star"></i> Yearly
+      </button>
+      <div class="date-range-custom">
+        <input type="date" id="customStartDate" class="form-control">
+        <span>to</span>
+        <input type="date" id="customEndDate" class="form-control">
+        <button id="applyCustomDate" class="btn btn-outline btn-sm">
+          <i class="fas fa-check"></i> Apply
         </button>
       </div>
     </div>
@@ -2833,16 +3074,6 @@
       <div class="stat-card">
         <h3>Savings Rate</h3>
         <div class="stat-value" id="savingsRate">0%</div>
-      </div>
-    </div>
-
-    <!-- Date Range Filter -->
-    <div class="form-container">
-      <div class="form-row">
-        <div class="form-group">
-          <label>Date Range:</label>
-          <input type="text" id="dateRange" class="form-control" />
-        </div>
       </div>
     </div>
 
