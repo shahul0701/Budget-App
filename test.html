@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Profile - Budget App</title>
   <style>
+    /* Copy all the styles from the previous complete code */
     * {
       margin: 0;
       padding: 0;
@@ -588,6 +589,21 @@
       background: #6c757d;
       cursor: not-allowed;
     }
+    
+    .debug-info {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 15px;
+      margin-top: 20px;
+      font-size: 12px;
+      color: #6c757d;
+      display: none;
+    }
+    
+    .debug-info.show {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -691,6 +707,12 @@
             <div class="empty-state">
               Loading your messages...
             </div>
+          </div>
+          
+          <!-- Debug Info (Hidden by default) -->
+          <div id="debugInfo" class="debug-info">
+            <strong>Debug Information:</strong>
+            <div id="debugContent"></div>
           </div>
         </div>
         
@@ -854,10 +876,23 @@
     const refreshMessagesBtn = document.getElementById('refreshMessagesBtn');
     const messagesList = document.getElementById('messagesList');
     const messageTabs = document.querySelectorAll('.tab');
+    const debugInfo = document.getElementById('debugInfo');
+    const debugContent = document.getElementById('debugContent');
 
     // ============ STATE VARIABLES ============
     let currentSessionId = null;
     let currentFilter = 'all';
+
+    // ============ DEBUG FUNCTIONS ============
+    function showDebug(message, data = null) {
+      debugInfo.classList.add('show');
+      let debugText = `${new Date().toLocaleTimeString()}: ${message}`;
+      if (data) {
+        debugText += `<br>Data: ${JSON.stringify(data, null, 2)}`;
+      }
+      debugContent.innerHTML = debugText + '<br>' + debugContent.innerHTML;
+      console.log(message, data);
+    }
 
     // ============ UTILITY FUNCTIONS ============
     function showAlert(message, type, box = alertBox) {
@@ -1212,6 +1247,8 @@
           return;
         }
 
+        showDebug('Sending message...', { messageType, subject, content });
+
         // Create message data with all required fields
         const messageData = {
           uid: user.uid,
@@ -1224,12 +1261,14 @@
           adminReply: null,
           repliedAt: null,
           repliedBy: null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          createdAt: new Date().toISOString(), // Use ISO string for immediate display
+          updatedAt: new Date().toISOString()
         };
 
         // Add to adminMessages collection
         const docRef = await addDoc(collection(db, 'adminMessages'), messageData);
+        
+        showDebug('Message sent successfully', { id: docRef.id });
 
         // Update user stats
         const userRef = doc(db, 'users', user.uid);
@@ -1258,6 +1297,7 @@
 
       } catch (error) {
         console.error('Error sending message:', error);
+        showDebug('Error sending message', { error: error.message, code: error.code });
         showAlert(`Error sending message: ${error.message}`, 'error', messageAlertBox);
       }
     }
@@ -1265,20 +1305,43 @@
     async function loadUserMessages() {
       try {
         const user = auth.currentUser;
-        if (!user) return;
+        if (!user) {
+          showDebug('No user logged in');
+          return;
+        }
 
-        const messagesQuery = query(
-          collection(db, 'adminMessages'),
-          where('uid', '==', user.uid),
-          orderBy('createdAt', 'desc')
-        );
+        showDebug('Loading messages for user', { uid: user.uid });
 
-        const querySnapshot = await getDocs(messagesQuery);
+        // First, try to get all messages without orderBy to test basic access
+        const messagesRef = collection(db, 'adminMessages');
+        const q = query(messagesRef, where('uid', '==', user.uid));
+        
+        showDebug('Executing query...');
+        const querySnapshot = await getDocs(q);
+        
+        showDebug('Query executed', { size: querySnapshot.size });
+
         const messages = [];
-
+        
         querySnapshot.forEach((doc) => {
-          messages.push({ id: doc.id, ...doc.data() });
+          const data = doc.data();
+          messages.push({ 
+            id: doc.id, 
+            ...data,
+            // Convert Firebase Timestamp to Date if needed
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+            repliedAt: data.repliedAt?.toDate ? data.repliedAt.toDate() : (data.repliedAt ? new Date(data.repliedAt) : null)
+          });
         });
+
+        // Sort messages by createdAt descending
+        messages.sort((a, b) => {
+          const dateA = a.createdAt || new Date(0);
+          const dateB = b.createdAt || new Date(0);
+          return dateB - dateA;
+        });
+
+        showDebug('Messages loaded', { count: messages.length });
 
         // Update message stats
         const pending = messages.filter(m => m.status === 'pending').length;
@@ -1297,7 +1360,26 @@
 
       } catch (error) {
         console.error('Error loading messages:', error);
-        messagesList.innerHTML = '<div class="empty-state">Error loading messages. Please refresh.</div>';
+        showDebug('Error loading messages', { 
+          error: error.message, 
+          code: error.code,
+          stack: error.stack 
+        });
+        
+        // Show specific error message based on error code
+        let errorMessage = 'Error loading messages. ';
+        if (error.code === 'permission-denied') {
+          errorMessage += 'Permission denied. Please check Firestore rules.';
+        } else if (error.code === 'failed-precondition') {
+          errorMessage += 'Please create the required index in Firebase Console.';
+        } else if (error.code === 'unavailable') {
+          errorMessage += 'Service unavailable. Please check your connection.';
+        } else {
+          errorMessage += error.message;
+        }
+        
+        messagesList.innerHTML = `<div class="empty-state">${errorMessage}</div>`;
+        showAlert(errorMessage, 'error', messageAlertBox);
       }
     }
 
@@ -1314,11 +1396,11 @@
         messageElement.className = 'message-item';
 
         const createdAt = message.createdAt ? 
-          new Date(message.createdAt.toDate()).toLocaleString() : 
+          (message.createdAt.toLocaleString ? message.createdAt.toLocaleString() : new Date(message.createdAt).toLocaleString()) : 
           'Unknown time';
 
         const repliedAt = message.repliedAt ? 
-          new Date(message.repliedAt.toDate()).toLocaleString() : 
+          (message.repliedAt.toLocaleString ? message.repliedAt.toLocaleString() : new Date(message.repliedAt).toLocaleString()) : 
           null;
 
         // Message type badge
@@ -1333,6 +1415,8 @@
           case 'complaint':
             typeBadge = '<span class="message-type-badge badge-complaint">⚠️ Complaint</span>';
             break;
+          default:
+            typeBadge = '<span class="message-type-badge badge-suggestion">📝 Message</span>';
         }
 
         // Status badge
@@ -1350,6 +1434,8 @@
           case 'rejected':
             statusBadge = '<span class="message-status status-rejected">❌ Rejected</span>';
             break;
+          default:
+            statusBadge = '<span class="message-status status-pending">⏳ Pending</span>';
         }
 
         // Admin reply HTML
@@ -1373,14 +1459,14 @@
 
         messageElement.innerHTML = `
           <div class="message-header">
-            <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               ${typeBadge}
-              <span style="font-weight: bold;">${message.subject}</span>
+              <span style="font-weight: bold;">${message.subject || 'No Subject'}</span>
             </div>
             ${statusBadge}
           </div>
           <div class="message-content">
-            ${message.content}
+            ${message.content || 'No content'}
           </div>
           ${replyHTML}
           <div class="message-footer">
@@ -1420,6 +1506,8 @@
     // ============ EVENT LISTENERS ============
     auth.onAuthStateChanged(async (user) => {
       if (user) {
+        showDebug('User authenticated', { uid: user.uid, email: user.email });
+        
         displayNameElement.textContent = user.displayName || 'User';
         userEmailElement.textContent = user.email;
         displayNameInput.value = user.displayName || '';
@@ -1441,8 +1529,14 @@
         resolvedMessages.textContent = stats.resolvedMessages || 0;
         
         if (stats.lastLogin) {
-          const lastLoginTime = new Date(stats.lastLogin.toDate());
-          lastLogin.textContent = `Last login: ${lastLoginTime.toLocaleString()} from ${stats.lastIP || 'Unknown IP'}`;
+          try {
+            const lastLoginTime = stats.lastLogin.toDate ? 
+              new Date(stats.lastLogin.toDate()) : 
+              new Date(stats.lastLogin);
+            lastLogin.textContent = `Last login: ${lastLoginTime.toLocaleString()} from ${stats.lastIP || 'Unknown IP'}`;
+          } catch (e) {
+            lastLogin.textContent = `Last login: Unknown time from ${stats.lastIP || 'Unknown IP'}`;
+          }
         }
         
         await updateActiveSessions();
@@ -1453,6 +1547,7 @@
         currentIP.textContent = `IP: ${ip}`;
         
       } else {
+        showDebug('No user authenticated, redirecting...');
         window.location.href = 'index.html';
       }
     });
