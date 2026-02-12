@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Profile - Budget App</title>
   <style>
-    /* Copy all the styles from the previous complete code */
     * {
       margin: 0;
       padding: 0;
@@ -354,7 +353,7 @@
       color: #212529;
     }
     
-    .status-reviewed {
+    .status-review {
       background: #17a2b8;
       color: white;
     }
@@ -391,9 +390,9 @@
       align-items: center;
       font-size: 12px;
       color: #666;
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #eee;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #eee;
     }
     
     .admin-reply {
@@ -564,10 +563,32 @@
       transform: translateX(30px);
     }
     
+    /* Message Actions Styling */
     .message-actions {
       display: flex;
       gap: 10px;
       margin-top: 15px;
+      justify-content: flex-end;
+    }
+    
+    .edit-btn {
+      background: #ffc107;
+      color: #212529;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.3s;
+    }
+    
+    .edit-btn:hover {
+      background: #e0a800;
+    }
+    
+    .edit-btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
     }
     
     .delete-btn {
@@ -590,6 +611,38 @@
       cursor: not-allowed;
     }
     
+    .edit-form {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 15px;
+      border: 1px solid #dee2e6;
+    }
+    
+    .edit-form textarea {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 15px;
+      min-height: 100px;
+    }
+    
+    .edit-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    
+    .message-id {
+      font-family: monospace;
+      background: #f1f1f1;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    
+    /* Debug panel - Hidden by default */
     .debug-info {
       background: #f8f9fa;
       border: 1px solid #dee2e6;
@@ -599,10 +652,24 @@
       font-size: 12px;
       color: #6c757d;
       display: none;
+      max-height: 200px;
+      overflow-y: auto;
     }
     
     .debug-info.show {
       display: block;
+    }
+    
+    .debug-toggle {
+      font-size: 11px;
+      color: #6c757d;
+      cursor: pointer;
+      margin-left: 10px;
+      text-decoration: underline;
+    }
+    
+    .debug-toggle:hover {
+      color: #6200ee;
     }
   </style>
 </head>
@@ -651,7 +718,10 @@
       <div>
         <!-- Message to Admin Section -->
         <div class="settings-card">
-          <h2 class="card-title">📬 Message to Admin</h2>
+          <div class="card-title">
+            📬 Message to Admin
+            <span class="debug-toggle" id="toggleDebug">[Show Debug]</span>
+          </div>
           
           <div id="messageAlertBox" style="display: none;"></div>
           
@@ -698,7 +768,7 @@
           <div class="tabs">
             <div class="tab active" data-filter="all">All</div>
             <div class="tab" data-filter="pending">Pending</div>
-            <div class="tab" data-filter="reviewed">Reviewed</div>
+            <div class="tab" data-filter="review">Review</div>
             <div class="tab" data-filter="resolved">Resolved</div>
             <div class="tab" data-filter="rejected">Rejected</div>
           </div>
@@ -805,8 +875,7 @@
       updateProfile, 
       signOut,
       reauthenticateWithCredential,
-      EmailAuthProvider,
-      getIdToken
+      EmailAuthProvider
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { 
       getFirestore, 
@@ -818,15 +887,12 @@
       getDocs,
       query,
       where,
-      orderBy,
-      limit,
       deleteDoc,
       serverTimestamp,
-      addDoc,
-      Timestamp
+      addDoc
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    // Your Firebase configuration
+    // Firebase configuration
     const firebaseConfig = {
       apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
       authDomain: "budget-app-1365f.firebaseapp.com",
@@ -878,339 +944,77 @@
     const messageTabs = document.querySelectorAll('.tab');
     const debugInfo = document.getElementById('debugInfo');
     const debugContent = document.getElementById('debugContent');
+    const toggleDebug = document.getElementById('toggleDebug');
 
     // ============ STATE VARIABLES ============
     let currentSessionId = null;
     let currentFilter = 'all';
-
-    // ============ DEBUG FUNCTIONS ============
-    function showDebug(message, data = null) {
-      debugInfo.classList.add('show');
-      let debugText = `${new Date().toLocaleTimeString()}: ${message}`;
-      if (data) {
-        debugText += `<br>Data: ${JSON.stringify(data, null, 2)}`;
-      }
-      debugContent.innerHTML = debugText + '<br>' + debugContent.innerHTML;
-      console.log(message, data);
-    }
+    let isEditing = false;
+    let editingMessageId = null;
 
     // ============ UTILITY FUNCTIONS ============
     function showAlert(message, type, box = alertBox) {
       box.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
       box.style.display = 'block';
-      
-      setTimeout(() => {
-        box.style.display = 'none';
-      }, 5000);
+      setTimeout(() => box.style.display = 'none', 5000);
     }
 
-    function getDeviceInfo() {
-      const userAgent = navigator.userAgent;
-      let device = 'Unknown Device';
-      let deviceType = 'desktop';
-      
-      if (/mobile/i.test(userAgent)) deviceType = 'mobile';
-      else if (/tablet/i.test(userAgent)) deviceType = 'tablet';
-      
-      if (/firefox/i.test(userAgent)) device = 'Firefox Browser';
-      else if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) device = 'Chrome Browser';
-      else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) device = 'Safari Browser';
-      else if (/edg/i.test(userAgent)) device = 'Edge Browser';
-      else if (/opera/i.test(userAgent)) device = 'Opera Browser';
-      
-      if (/windows/i.test(userAgent)) device += ' on Windows';
-      else if (/macintosh/i.test(userAgent) || /mac os/i.test(userAgent)) device += ' on macOS';
-      else if (/linux/i.test(userAgent)) device += ' on Linux';
-      else if (/android/i.test(userAgent)) device += ' on Android';
-      else if (/iphone|ipad|ipod/i.test(userAgent)) device += ' on iOS';
-      
-      return { device, deviceType, userAgent: userAgent.substring(0, 100) };
+    function showDebug(message, data = null) {
+      debugContent.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}${data ? ' - ' + JSON.stringify(data) : ''}<br>` + debugContent.innerHTML;
     }
 
+    // Toggle debug panel
+    toggleDebug.addEventListener('click', () => {
+      debugInfo.classList.toggle('show');
+      toggleDebug.textContent = debugInfo.classList.contains('show') ? '[Hide Debug]' : '[Show Debug]';
+    });
+
+    // ============ SESSION MANAGEMENT ============
     async function getIPAddress() {
       try {
         const response = await fetch('https://api.ipify.org?format=json');
         const data = await response.json();
         return data.ip || 'Unknown';
       } catch (error) {
-        console.error('Error getting IP:', error);
         return 'Unknown';
       }
     }
 
-    // ============ SESSION MANAGEMENT ============
     async function recordLoginSession() {
       try {
         const user = auth.currentUser;
         if (!user) return;
         
-        const deviceInfo = getDeviceInfo();
-        const ipAddress = await getIPAddress();
         const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
         currentSessionId = sessionId;
-        
-        currentIP.textContent = `IP: ${ipAddress}`;
-        
-        const sessionData = {
-          uid: user.uid,
-          sessionId: sessionId,
-          email: user.email,
-          displayName: user.displayName,
-          device: deviceInfo.device,
-          deviceType: deviceInfo.deviceType,
-          userAgent: deviceInfo.userAgent,
-          ipAddress: ipAddress,
-          loginTime: serverTimestamp(),
-          lastActive: serverTimestamp(),
-          isActive: true
-        };
-        
-        await setDoc(doc(db, 'loginSessions', sessionId), sessionData);
-        
-        const userRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userRef);
-        
-        if (userDoc.exists()) {
-          const stats = userDoc.data();
-          await updateDoc(userRef, {
-            lastLogin: serverTimestamp(),
-            lastIP: ipAddress,
-            totalLogins: (stats.totalLogins || 0) + 1,
-            updatedAt: serverTimestamp()
-          });
-        } else {
-          await setDoc(userRef, {
-            totalLogins: 1,
-            totalMessages: 0,
-            resolvedMessages: 0,
-            lastLogin: serverTimestamp(),
-            lastIP: ipAddress,
-            email: user.email,
-            displayName: user.displayName,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
-        }
-        
-        await recordLoginHistory(user, deviceInfo, ipAddress);
         localStorage.setItem('currentSessionId', sessionId);
         
-      } catch (error) {
-        console.error('Error recording login session:', error);
-      }
-    }
-
-    async function recordLoginHistory(user, deviceInfo, ipAddress) {
-      try {
-        const historyData = {
-          uid: user.uid,
-          email: user.email,
-          device: deviceInfo.device,
-          ipAddress: ipAddress,
-          timestamp: serverTimestamp(),
-          success: true
-        };
+        const ipAddress = await getIPAddress();
+        currentIP.textContent = `IP: ${ipAddress}`;
         
-        await addDoc(collection(db, 'loginHistory'), historyData);
+        await setDoc(doc(db, 'users', user.uid), {
+          email: user.email,
+          displayName: user.displayName,
+          lastLogin: serverTimestamp(),
+          lastIP: ipAddress,
+          totalLogins: (await getDoc(doc(db, 'users', user.uid))).exists() ? 
+            (await getDoc(doc(db, 'users', user.uid))).data().totalLogins + 1 || 1 : 1,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        
       } catch (error) {
-        console.error('Error recording login history:', error);
+        console.error('Error recording session:', error);
       }
     }
 
     async function getUserStats() {
       try {
         const user = auth.currentUser;
-        if (!user) return { totalLogins: 0, activeSessions: 0, totalMessages: 0, resolvedMessages: 0 };
-        
+        if (!user) return { totalLogins: 0, totalMessages: 0, resolvedMessages: 0 };
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        return userDoc.exists() ? userDoc.data() : { 
-          totalLogins: 0, 
-          activeSessions: 0, 
-          totalMessages: 0, 
-          resolvedMessages: 0,
-          lastLogin: null,
-          lastIP: null 
-        };
+        return userDoc.exists() ? userDoc.data() : { totalLogins: 0, totalMessages: 0, resolvedMessages: 0 };
       } catch (error) {
-        console.error('Error getting user stats:', error);
-        return { totalLogins: 0, activeSessions: 0, totalMessages: 0, resolvedMessages: 0 };
-      }
-    }
-
-    async function updateActiveSessions() {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
-        
-        const sessionsQuery = query(
-          collection(db, 'loginSessions'),
-          where('uid', '==', user.uid),
-          where('isActive', '==', true)
-        );
-        
-        const querySnapshot = await getDocs(sessionsQuery);
-        const sessions = [];
-        
-        querySnapshot.forEach((doc) => {
-          sessions.push({ id: doc.id, ...doc.data() });
-        });
-        
-        activeDevices.textContent = sessions.length;
-        displaySessions(sessions);
-        
-      } catch (error) {
-        console.error('Error updating sessions:', error);
-      }
-    }
-
-    function displaySessions(sessions) {
-      if (sessions.length === 0) {
-        sessionsList.innerHTML = '<div class="empty-state">No active sessions</div>';
-        return;
-      }
-      
-      sessionsList.innerHTML = '';
-      const currentSessionId = localStorage.getItem('currentSessionId');
-      
-      sessions.forEach(session => {
-        const isCurrent = session.sessionId === currentSessionId;
-        const loginTime = session.loginTime ? 
-          new Date(session.loginTime.toDate()).toLocaleString() : 
-          'Unknown time';
-        
-        const sessionElement = document.createElement('div');
-        sessionElement.className = `session-item ${isCurrent ? 'current' : ''}`;
-        
-        let deviceIcon = '💻';
-        if (session.deviceType === 'mobile') deviceIcon = '📱';
-        if (session.deviceType === 'tablet') deviceIcon = '📱';
-        
-        sessionElement.innerHTML = `
-          <div class="session-info">
-            <div class="session-device">
-              <span class="device-icon">${deviceIcon}</span>
-              ${session.device}
-              ${isCurrent ? '<span class="badge badge-success">Current</span>' : ''}
-            </div>
-            <div class="session-details">
-              IP: ${session.ipAddress || 'Unknown'} • 
-              Last active: ${loginTime}
-            </div>
-          </div>
-          <div class="session-actions">
-            ${!isCurrent ? '<button class="btn btn-small btn-danger logout-session-btn" data-session-id="' + session.sessionId + '">Logout</button>' : ''}
-          </div>
-        `;
-        
-        sessionsList.appendChild(sessionElement);
-      });
-      
-      document.querySelectorAll('.logout-session-btn').forEach(button => {
-        button.addEventListener('click', async (e) => {
-          const sessionId = e.target.dataset.sessionId;
-          await logoutSession(sessionId);
-        });
-      });
-    }
-
-    async function logoutSession(sessionId) {
-      try {
-        await updateDoc(doc(db, 'loginSessions', sessionId), {
-          isActive: false,
-          logoutTime: serverTimestamp()
-        });
-        showAlert('Session logged out successfully', 'success');
-        await updateActiveSessions();
-      } catch (error) {
-        showAlert(`Error logging out session: ${error.message}`, 'error');
-      }
-    }
-
-    async function loadLoginHistory() {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
-        
-        const historyQuery = query(
-          collection(db, 'loginHistory'),
-          where('uid', '==', user.uid),
-          orderBy('timestamp', 'desc'),
-          limit(10)
-        );
-        
-        const querySnapshot = await getDocs(historyQuery);
-        
-        if (querySnapshot.empty) {
-          loginHistory.innerHTML = '<div class="empty-state">No login history found</div>';
-          return;
-        }
-        
-        let historyHTML = '';
-        querySnapshot.forEach((doc) => {
-          const history = doc.data();
-          const time = history.timestamp ? 
-            new Date(history.timestamp.toDate()).toLocaleString() : 
-            'Unknown time';
-          
-          historyHTML += `
-            <div class="session-item">
-              <div class="session-info">
-                <div class="session-device">${history.device}</div>
-                <div class="session-details">
-                  ${time} • IP: ${history.ipAddress || 'Unknown'}
-                  <span class="badge badge-success">Success</span>
-                </div>
-              </div>
-            </div>
-          `;
-        });
-        
-        loginHistory.innerHTML = historyHTML;
-      } catch (error) {
-        console.error('Error loading login history:', error);
-        loginHistory.innerHTML = '<div class="empty-state">Error loading history</div>';
-      }
-    }
-
-    async function logoutAllSessions() {
-      if (!confirm('Are you sure you want to logout from all other devices?')) return;
-      
-      try {
-        const user = auth.currentUser;
-        const currentSessionId = localStorage.getItem('currentSessionId');
-        
-        const sessionsQuery = query(
-          collection(db, 'loginSessions'),
-          where('uid', '==', user.uid),
-          where('isActive', '==', true)
-        );
-        
-        const querySnapshot = await getDocs(sessionsQuery);
-        const updates = [];
-        
-        querySnapshot.forEach((doc) => {
-          const session = doc.data();
-          if (session.sessionId !== currentSessionId) {
-            updates.push(updateDoc(doc.ref, { isActive: false, logoutTime: serverTimestamp() }));
-          }
-        });
-        
-        await Promise.all(updates);
-        showAlert('Logged out from all other devices', 'success');
-        await updateActiveSessions();
-      } catch (error) {
-        showAlert(`Error logging out sessions: ${error.message}`, 'error');
-      }
-    }
-
-    async function updateLastActivity() {
-      try {
-        const sessionId = localStorage.getItem('currentSessionId');
-        if (sessionId) {
-          await updateDoc(doc(db, 'loginSessions', sessionId), { lastActive: serverTimestamp() });
-        }
-      } catch (error) {
-        console.error('Error updating last activity:', error);
+        return { totalLogins: 0, totalMessages: 0, resolvedMessages: 0 };
       }
     }
 
@@ -1224,6 +1028,7 @@
       });
     }
 
+    // Send new message
     async function sendMessageToAdmin() {
       try {
         const user = auth.currentUser;
@@ -1237,19 +1042,11 @@
         const subject = messageSubject.value.trim();
         const content = messageContent.value.trim();
 
-        if (!subject) {
-          showAlert('Please enter a subject', 'error', messageAlertBox);
+        if (!subject || !content) {
+          showAlert('Please enter both subject and message', 'error', messageAlertBox);
           return;
         }
 
-        if (!content) {
-          showAlert('Please enter your message', 'error', messageAlertBox);
-          return;
-        }
-
-        showDebug('Sending message...', { messageType, subject, content });
-
-        // Create message data with all required fields
         const messageData = {
           uid: user.uid,
           userEmail: user.email,
@@ -1261,128 +1058,84 @@
           adminReply: null,
           repliedAt: null,
           repliedBy: null,
-          createdAt: new Date().toISOString(), // Use ISO string for immediate display
-          updatedAt: new Date().toISOString()
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
         };
 
-        // Add to adminMessages collection
-        const docRef = await addDoc(collection(db, 'adminMessages'), messageData);
-        
-        showDebug('Message sent successfully', { id: docRef.id });
+        await addDoc(collection(db, 'adminMessages'), messageData);
 
         // Update user stats
         const userRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userRef);
-        
-        if (userDoc.exists()) {
-          const stats = userDoc.data();
-          await updateDoc(userRef, {
-            totalMessages: (stats.totalMessages || 0) + 1,
-            updatedAt: serverTimestamp()
-          });
-        }
+        await updateDoc(userRef, {
+          totalMessages: (userDoc.exists() ? userDoc.data().totalMessages || 0 : 0) + 1
+        });
 
         // Clear form
         messageSubject.value = '';
         messageContent.value = '';
-        
-        // Reset message type
         messageTypeOptions.forEach(opt => opt.classList.remove('active'));
         messageTypeOptions[0].classList.add('active');
 
-        showAlert('Message sent successfully! Admin will respond soon.', 'success', messageAlertBox);
-        
-        // Refresh messages list
+        showAlert('Message sent successfully!', 'success', messageAlertBox);
         await loadUserMessages();
 
       } catch (error) {
-        console.error('Error sending message:', error);
-        showDebug('Error sending message', { error: error.message, code: error.code });
-        showAlert(`Error sending message: ${error.message}`, 'error', messageAlertBox);
+        showAlert('Error sending message: ' + error.message, 'error', messageAlertBox);
+        showDebug('Error sending message', error.message);
       }
     }
 
+    // Load user messages
     async function loadUserMessages() {
       try {
         const user = auth.currentUser;
-        if (!user) {
-          showDebug('No user logged in');
-          return;
-        }
+        if (!user) return;
 
-        showDebug('Loading messages for user', { uid: user.uid });
-
-        // First, try to get all messages without orderBy to test basic access
-        const messagesRef = collection(db, 'adminMessages');
-        const q = query(messagesRef, where('uid', '==', user.uid));
+        showDebug('Loading messages for user: ' + user.uid);
         
-        showDebug('Executing query...');
+        const q = query(
+          collection(db, 'adminMessages'),
+          where('uid', '==', user.uid)
+        );
+        
         const querySnapshot = await getDocs(q);
-        
-        showDebug('Query executed', { size: querySnapshot.size });
-
         const messages = [];
         
         querySnapshot.forEach((doc) => {
           const data = doc.data();
-          messages.push({ 
-            id: doc.id, 
+          messages.push({
+            id: doc.id,
             ...data,
-            // Convert Firebase Timestamp to Date if needed
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
-            repliedAt: data.repliedAt?.toDate ? data.repliedAt.toDate() : (data.repliedAt ? new Date(data.repliedAt) : null)
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            repliedAt: data.repliedAt?.toDate ? data.repliedAt.toDate() : null
           });
         });
 
-        // Sort messages by createdAt descending
-        messages.sort((a, b) => {
-          const dateA = a.createdAt || new Date(0);
-          const dateB = b.createdAt || new Date(0);
-          return dateB - dateA;
-        });
+        // Sort by date descending
+        messages.sort((a, b) => b.createdAt - a.createdAt);
 
-        showDebug('Messages loaded', { count: messages.length });
-
-        // Update message stats
-        const pending = messages.filter(m => m.status === 'pending').length;
-        const resolved = messages.filter(m => m.status === 'resolved').length;
-        
+        // Update stats
         totalMessages.textContent = messages.length;
-        resolvedMessages.textContent = resolved;
+        resolvedMessages.textContent = messages.filter(m => m.status === 'resolved').length;
 
-        // Filter messages based on current tab
+        // Filter by status
         let filteredMessages = messages;
         if (currentFilter !== 'all') {
           filteredMessages = messages.filter(m => m.status === currentFilter);
         }
 
         displayMessages(filteredMessages);
+        showDebug('Messages loaded: ' + messages.length);
 
       } catch (error) {
         console.error('Error loading messages:', error);
-        showDebug('Error loading messages', { 
-          error: error.message, 
-          code: error.code,
-          stack: error.stack 
-        });
-        
-        // Show specific error message based on error code
-        let errorMessage = 'Error loading messages. ';
-        if (error.code === 'permission-denied') {
-          errorMessage += 'Permission denied. Please check Firestore rules.';
-        } else if (error.code === 'failed-precondition') {
-          errorMessage += 'Please create the required index in Firebase Console.';
-        } else if (error.code === 'unavailable') {
-          errorMessage += 'Service unavailable. Please check your connection.';
-        } else {
-          errorMessage += error.message;
-        }
-        
-        messagesList.innerHTML = `<div class="empty-state">${errorMessage}</div>`;
-        showAlert(errorMessage, 'error', messageAlertBox);
+        showDebug('Error loading messages', error.message);
+        messagesList.innerHTML = '<div class="empty-state">Error loading messages. Please refresh.</div>';
       }
     }
 
+    // Display messages
     function displayMessages(messages) {
       if (messages.length === 0) {
         messagesList.innerHTML = '<div class="empty-state">No messages found</div>';
@@ -1395,14 +1148,9 @@
         const messageElement = document.createElement('div');
         messageElement.className = 'message-item';
 
-        const createdAt = message.createdAt ? 
-          (message.createdAt.toLocaleString ? message.createdAt.toLocaleString() : new Date(message.createdAt).toLocaleString()) : 
-          'Unknown time';
-
-        const repliedAt = message.repliedAt ? 
-          (message.repliedAt.toLocaleString ? message.repliedAt.toLocaleString() : new Date(message.repliedAt).toLocaleString()) : 
-          null;
-
+        // Format date
+        const createdAt = message.createdAt ? message.createdAt.toLocaleString() : 'Unknown';
+        
         // Message type badge
         let typeBadge = '';
         switch(message.messageType) {
@@ -1419,43 +1167,65 @@
             typeBadge = '<span class="message-type-badge badge-suggestion">📝 Message</span>';
         }
 
-        // Status badge
+        // Status badge - Only PENDING shows edit/delete for users
         let statusBadge = '';
+        let actionButtons = '';
+        
         switch(message.status) {
           case 'pending':
             statusBadge = '<span class="message-status status-pending">⏳ Pending</span>';
+            // Only show edit/delete for PENDING messages
+            actionButtons = `
+              <button class="edit-btn" onclick="window.editMessage('${message.id}', '${message.content.replace(/'/g, "\\'")}')">Edit</button>
+              <button class="delete-btn" onclick="window.deleteMessage('${message.id}')">Delete</button>
+            `;
             break;
-          case 'reviewed':
-            statusBadge = '<span class="message-status status-reviewed">👀 Reviewed</span>';
+          case 'review':
+            statusBadge = '<span class="message-status status-review">👀 Under Review</span>';
+            // NO edit/delete buttons for review status
             break;
           case 'resolved':
             statusBadge = '<span class="message-status status-resolved">✅ Resolved</span>';
+            // NO edit/delete buttons for resolved status
             break;
           case 'rejected':
             statusBadge = '<span class="message-status status-rejected">❌ Rejected</span>';
+            // NO edit/delete buttons for rejected status
             break;
           default:
             statusBadge = '<span class="message-status status-pending">⏳ Pending</span>';
+            actionButtons = `
+              <button class="edit-btn" onclick="window.editMessage('${message.id}', '${message.content.replace(/'/g, "\\'")}')">Edit</button>
+              <button class="delete-btn" onclick="window.deleteMessage('${message.id}')">Delete</button>
+            `;
         }
 
-        // Admin reply HTML
+        // Admin reply
         let replyHTML = '';
         if (message.adminReply) {
+          const repliedAt = message.repliedAt ? message.repliedAt.toLocaleString() : 'Unknown';
           replyHTML = `
             <div class="admin-reply">
               <div class="admin-reply-header">
                 <span>👤 Admin Response</span>
-                <span style="font-size: 12px;">${repliedAt || 'Unknown time'}</span>
+                <span style="font-size: 12px;">${repliedAt}</span>
               </div>
               <div class="admin-reply-content">${message.adminReply}</div>
             </div>
           `;
         }
 
-        // Delete button only for pending messages
-        const deleteButton = message.status === 'pending' ? 
-          `<button class="delete-btn" onclick="window.deleteMessage('${message.id}')">Delete</button>` : 
-          '';
+        // Edit form (hidden by default)
+        const editFormId = `edit-form-${message.id}`;
+        const editForm = isEditing && editingMessageId === message.id ? `
+          <div id="${editFormId}" class="edit-form">
+            <textarea id="edit-content-${message.id}">${message.content}</textarea>
+            <div class="edit-actions">
+              <button class="btn btn-small btn-success" onclick="window.saveEdit('${message.id}')">Save</button>
+              <button class="btn btn-small btn-outline" onclick="window.cancelEdit()">Cancel</button>
+            </div>
+          </div>
+        ` : '';
 
         messageElement.innerHTML = `
           <div class="message-header">
@@ -1466,22 +1236,57 @@
             ${statusBadge}
           </div>
           <div class="message-content">
-            ${message.content || 'No content'}
+            ${message.content}
           </div>
           ${replyHTML}
+          ${editForm}
           <div class="message-footer">
             <span>Sent: ${createdAt}</span>
-            <span>Message ID: #${message.id.slice(-6)}</span>
+            <span class="message-id">ID: #${message.id.slice(-6)}</span>
           </div>
           <div class="message-actions">
-            ${deleteButton}
+            ${actionButtons}
           </div>
         `;
 
         messagesList.appendChild(messageElement);
       });
 
-      // Add delete function to window object
+      // Add global functions for message actions
+      window.editMessage = (messageId, content) => {
+        isEditing = true;
+        editingMessageId = messageId;
+        loadUserMessages(); // Reload to show edit form
+      };
+
+      window.saveEdit = async (messageId) => {
+        const newContent = document.getElementById(`edit-content-${messageId}`).value.trim();
+        if (!newContent) {
+          showAlert('Message cannot be empty', 'error', messageAlertBox);
+          return;
+        }
+
+        try {
+          await updateDoc(doc(db, 'adminMessages', messageId), {
+            content: newContent,
+            updatedAt: serverTimestamp()
+          });
+          
+          isEditing = false;
+          editingMessageId = null;
+          showAlert('Message updated successfully', 'success', messageAlertBox);
+          await loadUserMessages();
+        } catch (error) {
+          showAlert('Error updating message: ' + error.message, 'error', messageAlertBox);
+        }
+      };
+
+      window.cancelEdit = () => {
+        isEditing = false;
+        editingMessageId = null;
+        loadUserMessages();
+      };
+
       window.deleteMessage = async (messageId) => {
         if (!confirm('Are you sure you want to delete this message?')) return;
         
@@ -1490,12 +1295,12 @@
           showAlert('Message deleted successfully', 'success', messageAlertBox);
           await loadUserMessages();
         } catch (error) {
-          console.error('Error deleting message:', error);
           showAlert('Error deleting message: ' + error.message, 'error', messageAlertBox);
         }
       };
     }
 
+    // Clear message form
     function clearMessageForm() {
       messageSubject.value = '';
       messageContent.value = '';
@@ -1506,48 +1311,41 @@
     // ============ EVENT LISTENERS ============
     auth.onAuthStateChanged(async (user) => {
       if (user) {
-        showDebug('User authenticated', { uid: user.uid, email: user.email });
+        showDebug('User logged in: ' + user.email);
         
+        // Update UI
         displayNameElement.textContent = user.displayName || 'User';
         userEmailElement.textContent = user.email;
         displayNameInput.value = user.displayName || '';
         
         const userName = user.displayName || 'User';
-        const profilePicture = document.getElementById('profilePicture');
-        profilePicture.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6200ee&color=fff`;
+        document.getElementById('profilePicture').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6200ee&color=fff`;
         
-        const currentSessionId = localStorage.getItem('currentSessionId');
-        if (!currentSessionId) {
+        // Record session if new
+        if (!localStorage.getItem('currentSessionId')) {
           await recordLoginSession();
-        } else {
-          await updateLastActivity();
         }
         
+        // Load user data
         const stats = await getUserStats();
         totalLogins.textContent = stats.totalLogins || 0;
         totalMessages.textContent = stats.totalMessages || 0;
         resolvedMessages.textContent = stats.resolvedMessages || 0;
         
         if (stats.lastLogin) {
-          try {
-            const lastLoginTime = stats.lastLogin.toDate ? 
-              new Date(stats.lastLogin.toDate()) : 
-              new Date(stats.lastLogin);
-            lastLogin.textContent = `Last login: ${lastLoginTime.toLocaleString()} from ${stats.lastIP || 'Unknown IP'}`;
-          } catch (e) {
-            lastLogin.textContent = `Last login: Unknown time from ${stats.lastIP || 'Unknown IP'}`;
-          }
+          const lastLoginTime = stats.lastLogin.toDate ? 
+            stats.lastLogin.toDate().toLocaleString() : 
+            new Date(stats.lastLogin).toLocaleString();
+          lastLogin.textContent = `Last login: ${lastLoginTime} from ${stats.lastIP || 'Unknown IP'}`;
         }
         
-        await updateActiveSessions();
-        await loadLoginHistory();
+        // Load messages
         await loadUserMessages();
         
-        const ip = await getIPAddress();
-        currentIP.textContent = `IP: ${ip}`;
+        // Get IP
+        currentIP.textContent = `IP: ${await getIPAddress()}`;
         
       } else {
-        showDebug('No user authenticated, redirecting...');
         window.location.href = 'index.html';
       }
     });
@@ -1561,17 +1359,13 @@
       }
       
       try {
-        const user = auth.currentUser;
-        await updateProfile(user, { displayName: newName });
-        
+        await updateProfile(auth.currentUser, { displayName: newName });
         displayNameElement.textContent = newName;
-        const profilePicture = document.getElementById('profilePicture');
-        profilePicture.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=6200ee&color=fff`;
-        
-        await updateDoc(doc(db, 'users', user.uid), { displayName: newName, updatedAt: serverTimestamp() });
+        document.getElementById('profilePicture').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=6200ee&color=fff`;
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), { displayName: newName });
         showAlert('Name updated successfully!', 'success');
       } catch (error) {
-        showAlert(`Error updating name: ${error.message}`, 'error');
+        showAlert('Error updating name: ' + error.message, 'error');
       }
     });
 
@@ -1608,41 +1402,30 @@
         
         showAlert('Password updated successfully!', 'success');
       } catch (error) {
-        showAlert(`Error updating password: ${error.message}`, 'error');
+        showAlert('Error updating password: ' + error.message, 'error');
       }
     });
 
     // Logout
     logoutBtn.addEventListener('click', async () => {
+      await signOut(auth);
+      localStorage.removeItem('currentSessionId');
+      window.location.href = 'index.html';
+    });
+
+    // Logout all devices
+    logoutAllBtn.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to logout from all devices?')) return;
       try {
-        const sessionId = localStorage.getItem('currentSessionId');
-        if (sessionId) {
-          await updateDoc(doc(db, 'loginSessions', sessionId), { isActive: false, logoutTime: serverTimestamp() });
-        }
-        
         await signOut(auth);
         localStorage.removeItem('currentSessionId');
         window.location.href = 'index.html';
       } catch (error) {
-        showAlert(`Error signing out: ${error.message}`, 'error');
+        showAlert('Error logging out: ' + error.message, 'error');
       }
     });
 
-    // Logout all sessions
-    logoutAllBtn.addEventListener('click', logoutAllSessions);
-
-    // Refresh sessions
-    refreshSessionsBtn.addEventListener('click', async () => {
-      await updateActiveSessions();
-      await loadLoginHistory();
-      showAlert('Sessions refreshed', 'info');
-    });
-
-    // Message functionality
-    initMessageTypeSelector();
-    sendMessageBtn.addEventListener('click', sendMessageToAdmin);
-    clearMessageBtn.addEventListener('click', clearMessageForm);
-    
+    // Refresh messages
     refreshMessagesBtn.addEventListener('click', async () => {
       await loadUserMessages();
       showAlert('Messages refreshed', 'info', messageAlertBox);
@@ -1658,10 +1441,14 @@
       });
     });
 
-    // Update activity
-    setInterval(updateLastActivity, 30000);
-    document.addEventListener('click', updateLastActivity);
-    document.addEventListener('keypress', updateLastActivity);
+    // Initialize message type selector
+    initMessageTypeSelector();
+    
+    // Send message button
+    sendMessageBtn.addEventListener('click', sendMessageToAdmin);
+    
+    // Clear message button
+    clearMessageBtn.addEventListener('click', clearMessageForm);
 
   </script>
 </body>
