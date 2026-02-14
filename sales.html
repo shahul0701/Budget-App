@@ -10,6 +10,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <style>
+        /* [Keep all existing styles exactly as they are] */
         * {
             margin: 0;
             padding: 0;
@@ -661,6 +662,24 @@
             opacity: 0.3;
         }
 
+        /* Debug Panel */
+        .debug-panel {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--info);
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .debug-panel.visible {
+            display: block;
+        }
+
         /* Toast */
         .toast-container {
             position: fixed;
@@ -769,7 +788,16 @@
                 <button class="action-btn warning" onclick="addTestSale()">
                     <i class="fas fa-flask"></i> Add Test Sale
                 </button>
+                <button class="action-btn" onclick="toggleDebug()">
+                    <i class="fas fa-bug"></i> Debug
+                </button>
             </div>
+        </div>
+
+        <!-- Debug Panel -->
+        <div class="debug-panel" id="debugPanel">
+            <strong>Debug Information:</strong>
+            <div id="debugContent"></div>
         </div>
 
         <!-- Stats Cards -->
@@ -1002,6 +1030,7 @@
             if (user) {
                 currentUser = user;
                 console.log('User logged in:', user.email);
+                updateDebug(`User authenticated: ${user.email}`);
                 loadInitialData();
             } else {
                 console.log('No user logged in');
@@ -1012,21 +1041,47 @@
             }
         });
 
+        // Toggle debug panel
+        function toggleDebug() {
+            document.getElementById('debugPanel').classList.toggle('visible');
+        }
+
+        // Update debug content
+        function updateDebug(message) {
+            const debugContent = document.getElementById('debugContent');
+            const timestamp = new Date().toLocaleTimeString();
+            debugContent.innerHTML = `<div>[${timestamp}] ${message}</div>` + debugContent.innerHTML;
+            if (debugContent.children.length > 10) {
+                debugContent.removeChild(debugContent.lastChild);
+            }
+        }
+
         // Load initial data
         async function loadInitialData() {
             try {
                 showToast('Loading sales data...', 'info');
+                updateDebug('Starting to load data...');
+                
                 await Promise.all([
                     loadSales(),
                     loadInventory(),
                     loadCustomers()
                 ]);
+                
+                updateDebug(`Loaded ${sales.length} sales, ${inventoryItems.length} inventory items, ${customers.length} customers`);
+                
                 updateStats();
                 renderSalesTable();
                 updateCustomerFilter();
-                showToast('Data loaded successfully!', 'success');
+                
+                if (sales.length === 0) {
+                    showToast('No sales found. Click "Add Test Sale" to create a test sale.', 'info');
+                } else {
+                    showToast('Data loaded successfully!', 'success');
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
+                updateDebug(`ERROR: ${error.message}`);
                 showToast('Failed to load data: ' + error.message, 'error');
             }
         }
@@ -1034,21 +1089,36 @@
         // Load sales from Firebase
         async function loadSales() {
             try {
-                const snapshot = await db.collection('users').doc(currentUser.uid).collection('sales')
-                    .orderBy('date', 'desc')
-                    .get();
+                updateDebug('Loading sales from Firebase...');
                 
+                const salesRef = db.collection('users').doc(currentUser.uid).collection('sales');
+                const snapshot = await salesRef.orderBy('date', 'desc').get();
+                
+                updateDebug(`Query returned ${snapshot.docs.length} documents`);
+                
+                if (snapshot.empty) {
+                    sales = [];
+                    updateDebug('No sales documents found');
+                    return;
+                }
+
                 sales = snapshot.docs.map(doc => {
                     const data = doc.data();
+                    updateDebug(`Processing sale ${doc.id}: ${JSON.stringify(data).substring(0, 100)}...`);
                     
                     // Handle date properly
                     let saleDate = new Date();
                     if (data.date) {
                         if (data.date.toDate) {
+                            // Firebase Timestamp
                             saleDate = data.date.toDate();
                         } else if (data.date.seconds) {
+                            // Old timestamp format
                             saleDate = new Date(data.date.seconds * 1000);
+                        } else if (data.date instanceof Date) {
+                            saleDate = data.date;
                         } else {
+                            // Try to parse as string
                             saleDate = new Date(data.date);
                         }
                     }
@@ -1069,9 +1139,12 @@
                     };
                 });
 
-                console.log(`Loaded ${sales.length} sales`);
+                updateDebug(`Successfully loaded ${sales.length} sales`);
+                console.log('Loaded sales:', sales);
+                
             } catch (error) {
                 console.error('Error loading sales:', error);
+                updateDebug(`ERROR loading sales: ${error.message}`);
                 throw error;
             }
         }
@@ -1086,7 +1159,7 @@
                     currentStock: doc.data().currentStock || 0,
                     sellingPrice: doc.data().sellingPrice || 0
                 }));
-                console.log(`Loaded ${inventoryItems.length} inventory items`);
+                updateDebug(`Loaded ${inventoryItems.length} inventory items`);
             } catch (error) {
                 console.error('Error loading inventory:', error);
                 throw error;
@@ -1101,7 +1174,7 @@
                     id: doc.id,
                     ...doc.data()
                 }));
-                console.log(`Loaded ${customers.length} customers`);
+                updateDebug(`Loaded ${customers.length} customers`);
             } catch (error) {
                 console.error('Error loading customers:', error);
                 throw error;
@@ -1117,16 +1190,16 @@
             const monthAgo = new Date(now);
             monthAgo.setMonth(monthAgo.getMonth() - 1);
 
-            const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+            const total = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
             const todayTotal = sales
-                .filter(s => s.date.toDateString() === today)
-                .reduce((sum, sale) => sum + sale.total, 0);
+                .filter(s => s.date && s.date.toDateString() === today)
+                .reduce((sum, sale) => sum + (sale.total || 0), 0);
             const weekTotal = sales
-                .filter(s => s.date >= weekAgo)
-                .reduce((sum, sale) => sum + sale.total, 0);
+                .filter(s => s.date && s.date >= weekAgo)
+                .reduce((sum, sale) => sum + (sale.total || 0), 0);
             const monthTotal = sales
-                .filter(s => s.date >= monthAgo)
-                .reduce((sum, sale) => sum + sale.total, 0);
+                .filter(s => s.date && s.date >= monthAgo)
+                .reduce((sum, sale) => sum + (sale.total || 0), 0);
 
             document.getElementById('totalSales').textContent = `₹${total.toFixed(2)}`;
             document.getElementById('todaySales').textContent = `₹${todayTotal.toFixed(2)}`;
@@ -1143,8 +1216,8 @@
             let saleOptions = '<option value="">Walk-in Customer</option>';
             
             customers.forEach(customer => {
-                filterOptions += `<option value="${customer.id}">${customer.name}</option>`;
-                saleOptions += `<option value="${customer.id}">${customer.name}</option>`;
+                filterOptions += `<option value="${customer.id}">${customer.name || 'Unnamed'}</option>`;
+                saleOptions += `<option value="${customer.id}">${customer.name || 'Unnamed'}</option>`;
             });
             
             filter.innerHTML = filterOptions;
@@ -1187,8 +1260,13 @@
             const customerFilter = document.getElementById('customerFilter').value;
             const statusFilter = document.getElementById('statusFilter').value;
 
+            updateDebug(`Rendering table with ${sales.length} total sales`);
+
             // Filter sales
             let filteredSales = sales.filter(sale => {
+                // Skip if no date
+                if (!sale.date) return false;
+
                 // Tab filter
                 if (currentFilter === 'today') {
                     const today = new Date().toDateString();
@@ -1224,6 +1302,8 @@
                 return true;
             });
 
+            updateDebug(`Filtered to ${filteredSales.length} sales`);
+
             // Pagination
             const totalPages = Math.ceil(filteredSales.length / itemsPerPage);
             const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1235,7 +1315,7 @@
                         <td colspan="10" class="empty-state">
                             <i class="fas fa-receipt"></i>
                             <h4>No sales found</h4>
-                            <p>Click "New Sale" to create your first sale</p>
+                            <p>Click "New Sale" to create your first sale or "Add Test Sale" to add a test sale</p>
                         </td>
                     </tr>
                 `;
@@ -1252,12 +1332,12 @@
                                 <small style="color: #666;">${formatTime(sale.date)}</small>
                             </td>
                             <td>${sale.customerName}</td>
-                            <td>${sale.items.length} items</td>
-                            <td>₹${sale.subtotal.toFixed(2)}</td>
-                            <td>₹${sale.tax.toFixed(2)}</td>
-                            <td><strong>₹${sale.total.toFixed(2)}</strong></td>
-                            <td>${sale.paymentMethod}</td>
-                            <td><span class="badge ${statusBadge}">${sale.status}</span></td>
+                            <td>${sale.items ? sale.items.length : 0} items</td>
+                            <td>₹${(sale.subtotal || 0).toFixed(2)}</td>
+                            <td>₹${(sale.tax || 0).toFixed(2)}</td>
+                            <td><strong>₹${(sale.total || 0).toFixed(2)}</strong></td>
+                            <td>${sale.paymentMethod || 'cash'}</td>
+                            <td><span class="badge ${statusBadge}">${sale.status || 'completed'}</span></td>
                             <td>
                                 <div class="action-icons">
                                     <button class="icon-btn" onclick="viewInvoice('${sale.id}')" title="View Invoice">
@@ -1299,6 +1379,7 @@
 
         // Format date
         function formatDate(date) {
+            if (!date) return 'N/A';
             return date.toLocaleDateString('en-IN', {
                 day: '2-digit',
                 month: 'short',
@@ -1307,6 +1388,7 @@
         }
 
         function formatTime(date) {
+            if (!date) return 'N/A';
             return date.toLocaleTimeString('en-IN', {
                 hour: '2-digit',
                 minute: '2-digit'
@@ -1342,8 +1424,8 @@
                 const stockClass = item.currentStock <= (item.minStock || 5) ? 'low' : '';
                 return `
                     <div class="item-card" onclick="addToCart('${item.id}')">
-                        <h5>${item.name}</h5>
-                        <div class="item-price">₹${item.sellingPrice?.toFixed(2) || '0.00'}</div>
+                        <h5>${item.name || 'Unnamed Item'}</h5>
+                        <div class="item-price">₹${(item.sellingPrice || 0).toFixed(2)}</div>
                         <div class="item-stock">
                             <span>Stock: ${item.currentStock}</span>
                             <span class="stock-badge ${stockClass}">${item.unit || 'pcs'}</span>
@@ -1375,7 +1457,7 @@
                 cart.push({
                     id: item.id,
                     name: item.name,
-                    price: item.sellingPrice,
+                    price: item.sellingPrice || 0,
                     quantity: 1,
                     maxStock: item.currentStock,
                     unit: item.unit || 'pcs'
@@ -1450,6 +1532,7 @@
 
             try {
                 showToast('Processing sale...', 'info');
+                updateDebug('Starting sale process...');
 
                 const customerId = document.getElementById('saleCustomer').value;
                 const customer = customers.find(c => c.id === customerId);
@@ -1481,7 +1564,7 @@
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
-                console.log('Saving sale:', saleData);
+                updateDebug(`Saving sale: ${JSON.stringify(saleData)}`);
 
                 // Start batch
                 const batch = db.batch();
@@ -1505,6 +1588,7 @@
                 }
 
                 await batch.commit();
+                updateDebug('Sale saved successfully!');
 
                 // Show invoice
                 showInvoice({
@@ -1522,6 +1606,7 @@
 
             } catch (error) {
                 console.error('Error processing sale:', error);
+                updateDebug(`ERROR processing sale: ${error.message}`);
                 showToast('Failed to process sale: ' + error.message, 'error');
             }
         }
@@ -1530,6 +1615,7 @@
         async function addTestSale() {
             try {
                 showToast('Creating test sale...', 'info');
+                updateDebug('Creating test sale...');
 
                 // Check if we have inventory items
                 if (inventoryItems.length === 0) {
@@ -1559,6 +1645,8 @@
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
+                updateDebug(`Adding test sale: ${JSON.stringify(testSale)}`);
+
                 await db.collection('users').doc(currentUser.uid).collection('sales').add(testSale);
                 
                 // Update inventory stock
@@ -1573,9 +1661,11 @@
                 updateStats();
                 renderSalesTable();
                 
+                updateDebug('Test sale created successfully');
                 showToast('Test sale created successfully!', 'success');
             } catch (error) {
                 console.error('Error creating test sale:', error);
+                updateDebug(`ERROR creating test sale: ${error.message}`);
                 showToast('Failed to create test sale: ' + error.message, 'error');
             }
         }
@@ -1678,6 +1768,7 @@
 
             try {
                 showToast('Deleting sale...', 'info');
+                updateDebug(`Deleting sale: ${deleteSaleId}`);
 
                 // Start batch
                 const batch = db.batch();
@@ -1702,6 +1793,7 @@
                 }
 
                 await batch.commit();
+                updateDebug('Sale deleted successfully');
 
                 closeModal('deleteModal');
                 await loadSales();
@@ -1712,6 +1804,7 @@
                 showToast('Sale deleted successfully!', 'success');
             } catch (error) {
                 console.error('Error deleting sale:', error);
+                updateDebug(`ERROR deleting sale: ${error.message}`);
                 showToast('Failed to delete sale: ' + error.message, 'error');
             }
         }
