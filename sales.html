@@ -336,7 +336,7 @@
         .table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 1600px;
+            min-width: 1800px;
         }
 
         .table th {
@@ -756,6 +756,25 @@
             outline: none;
         }
 
+        /* Delete Modal */
+        .delete-modal {
+            max-width: 400px;
+        }
+
+        .delete-modal .modal-header {
+            background: var(--gradient-danger);
+        }
+
+        .delete-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .delete-actions button {
+            flex: 1;
+        }
+
         /* Invoice Styles */
         .invoice-container {
             padding: 30px;
@@ -973,6 +992,17 @@
                 flex-direction: column;
             }
         }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            opacity: 0.3;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -987,10 +1017,7 @@
                 <button class="action-btn success" onclick="openNewSaleModal()">
                     <i class="fas fa-plus-circle"></i> New Sale
                 </button>
-                <button class="action-btn info" onclick="openTemplateManager()">
-                    <i class="fas fa-file-invoice"></i> Manage Templates
-                </button>
-                <button class="action-btn" onclick="refreshData()">
+                <button class="action-btn info" onclick="refreshData()">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>
             </div>
@@ -1366,6 +1393,23 @@
         </div>
     </div>
 
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="deleteModal">
+        <div class="modal-content delete-modal">
+            <div class="modal-header" style="background: var(--gradient-danger);">
+                <h3><i class="fas fa-trash-alt"></i> Delete Sale</h3>
+                <button class="close-modal" onclick="closeModal('deleteModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 20px; font-size: 16px;">Are you sure you want to delete this sale? This action cannot be undone and will restore the inventory stock.</p>
+                <div class="delete-actions">
+                    <button class="action-btn" onclick="closeModal('deleteModal')">Cancel</button>
+                    <button class="action-btn danger" onclick="confirmDelete()">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -1396,6 +1440,7 @@
         let currentTab = 'all';
         let discountType = 'percentage';
         let selectedTemplate = 'modern';
+        let saleToDelete = null;
 
         // Check authentication
         auth.onAuthStateChanged((user) => {
@@ -1499,6 +1544,13 @@
                     currentStock: doc.data().currentStock || 0,
                     sellingPrice: doc.data().sellingPrice || 0
                 }));
+                
+                console.log(`Loaded ${inventoryItems.length} inventory items`);
+                
+                // If no inventory items, show message
+                if (inventoryItems.length === 0) {
+                    showToast('No inventory items found. Please add items to inventory first.', 'warning');
+                }
             } catch (error) {
                 console.error('Error loading inventory:', error);
                 throw error;
@@ -1523,8 +1575,6 @@
         function updateStats() {
             const now = new Date();
             const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-            const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
             const totalRevenue = sales.reduce((sum, sale) => sum + (sale.amountPaid || 0), 0);
             const totalSales = sales.length;
@@ -1576,6 +1626,17 @@
             const grid = document.getElementById('itemsGrid');
             const searchTerm = document.getElementById('searchItems')?.value.toLowerCase() || '';
 
+            if (inventoryItems.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1/-1;">
+                        <i class="fas fa-box-open"></i>
+                        <h4>No Items Found</h4>
+                        <p>Please add items to your inventory first</p>
+                    </div>
+                `;
+                return;
+            }
+
             const filteredItems = inventoryItems.filter(item => 
                 item.currentStock > 0 && 
                 (item.name?.toLowerCase().includes(searchTerm) ||
@@ -1583,7 +1644,13 @@
             );
 
             if (filteredItems.length === 0) {
-                grid.innerHTML = '<div class="empty-state" style="grid-column: 1/-1; text-align: center; padding: 40px;">No items available</div>';
+                grid.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1/-1;">
+                        <i class="fas fa-search"></i>
+                        <h4>No matching items</h4>
+                        <p>Try a different search term</p>
+                    </div>
+                `;
                 return;
             }
 
@@ -2133,6 +2200,58 @@
             if (sale) showInvoice(sale);
         }
 
+        // Open delete modal
+        function openDeleteModal(saleId) {
+            saleToDelete = sales.find(s => s.id === saleId);
+            if (saleToDelete) {
+                document.getElementById('deleteModal').style.display = 'flex';
+            }
+        }
+
+        // Confirm delete
+        async function confirmDelete() {
+            if (!saleToDelete) return;
+
+            try {
+                showToast('Deleting sale...', 'info');
+
+                // Start batch
+                const batch = db.batch();
+
+                // Delete sale
+                const saleRef = db.collection('users').doc(currentUser.uid).collection('sales').doc(saleToDelete.id);
+                batch.delete(saleRef);
+
+                // Restore inventory stock
+                for (const item of saleToDelete.items) {
+                    if (item.itemId) {
+                        const inventoryRef = db.collection('users').doc(currentUser.uid).collection('inventory').doc(item.itemId);
+                        const inventoryItem = inventoryItems.find(i => i.id === item.itemId);
+                        
+                        if (inventoryItem) {
+                            const newStock = (inventoryItem.currentStock || 0) + item.quantity;
+                            batch.update(inventoryRef, {
+                                currentStock: newStock
+                            });
+                        }
+                    }
+                }
+
+                await batch.commit();
+
+                closeModal('deleteModal');
+                await loadSales();
+                await loadInventory();
+                updateStats();
+                renderSalesTable();
+                
+                showToast('Sale deleted successfully!', 'success');
+            } catch (error) {
+                console.error('Error deleting sale:', error);
+                showToast('Failed to delete sale: ' + error.message, 'error');
+            }
+        }
+
         // Open payment modal
         function openPaymentModal(saleId) {
             const sale = sales.find(s => s.id === saleId);
@@ -2291,6 +2410,9 @@
                                             <i class="fas fa-money-bill"></i>
                                         </button>
                                     ` : ''}
+                                    <button class="icon-btn danger" onclick="openDeleteModal('${sale.id}')" title="Delete">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -2389,11 +2511,6 @@
             });
         }
 
-        // Open template manager
-        function openTemplateManager() {
-            showToast('Template manager coming soon!', 'info');
-        }
-
         // Print invoice
         function printInvoice() {
             window.print();
@@ -2402,8 +2519,7 @@
         // Download invoice (simulated PDF)
         function downloadInvoice() {
             showToast('PDF download started', 'success');
-            // In a real app, you'd generate a PDF here
-            window.print(); // For now, just print
+            window.print();
         }
 
         // Refresh data
@@ -2414,6 +2530,9 @@
         // Close modal
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
+            if (modalId === 'deleteModal') {
+                saleToDelete = null;
+            }
         }
 
         // Toast notification
@@ -2448,6 +2567,9 @@
         window.onclick = function(event) {
             if (event.target.classList.contains('modal-overlay')) {
                 event.target.style.display = 'none';
+                if (event.target.id === 'deleteModal') {
+                    saleToDelete = null;
+                }
             }
         };
     </script>
