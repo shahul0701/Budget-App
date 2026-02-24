@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer & Form Builder with Firebase Rules</title>
+    <title>Excel-Style Form Builder & Data Manager</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -14,503 +14,409 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
-        /* [Previous styles remain the same] */
-        .file-explorer {
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            overflow: hidden;
+        /* Excel-like Styles */
+        .excel-container {
             background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, sans-serif;
         }
         
-        .file-explorer-header {
-            background: #f9fafb;
-            padding: 12px 16px;
+        .excel-toolbar {
+            background: #f3f4f6;
             border-bottom: 1px solid #e5e7eb;
+            padding: 8px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .file-explorer-breadcrumb {
-            display: flex;
-            align-items: center;
             gap: 8px;
             flex-wrap: wrap;
         }
         
-        .breadcrumb-item {
+        .excel-toolbar-group {
             display: flex;
-            align-items: center;
             gap: 4px;
-            color: #4b5563;
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 0 8px;
+            border-right: 1px solid #d1d5db;
         }
         
-        .breadcrumb-item:hover {
+        .excel-toolbar-group:last-child {
+            border-right: none;
+        }
+        
+        .excel-toolbar-btn {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        
+        .excel-toolbar-btn:hover {
             background: #e5e7eb;
+            border-color: #9ca3af;
         }
         
-        .breadcrumb-item.active {
+        .excel-toolbar-btn.active {
             background: #3b82f6;
             color: white;
+            border-color: #2563eb;
         }
         
-        .file-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 16px;
-            padding: 16px;
-            min-height: 300px;
-        }
-        
-        .file-item {
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 16px;
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-            background: white;
-        }
-        
-        .file-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            border-color: #3b82f6;
-        }
-        
-        .file-item.selected {
-            border: 2px solid #3b82f6;
-            background: #f0f9ff;
-        }
-        
-        .file-icon {
-            font-size: 48px;
-            text-align: center;
-            margin-bottom: 12px;
-            color: #6b7280;
-        }
-        
-        .file-icon.folder {
-            color: #fbbf24;
-        }
-        
-        .file-icon.form {
-            color: #3b82f6;
-        }
-        
-        .file-name {
-            font-weight: 500;
-            text-align: center;
-            word-break: break-word;
-        }
-        
-        .file-actions {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            display: flex;
-            gap: 4px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        
-        .file-item:hover .file-actions {
-            opacity: 1;
-        }
-        
-        .file-action-btn {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            padding: 4px 8px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .file-action-btn:hover {
-            background: #f3f4f6;
-        }
-        
-        .file-action-btn.delete:hover {
-            background: #ef4444;
-            color: white;
-            border-color: #ef4444;
-        }
-        
-        .dropzone {
-            border: 2px dashed #d1d5db;
-            border-radius: 8px;
-            padding: 40px;
-            text-align: center;
-            background: #f9fafb;
-            transition: all 0.2s;
-            cursor: pointer;
-            min-height: 200px;
-        }
-        
-        .dropzone.drag-over {
-            border-color: #3b82f6;
-            background: #f0f9ff;
-        }
-        
-        .dropzone i {
-            font-size: 48px;
-            color: #9ca3af;
-            margin-bottom: 16px;
-        }
-        
-        .form-field {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
-            position: relative;
-        }
-        
-        .form-field:hover {
-            border-color: #3b82f6;
-        }
-        
-        .field-label {
-            font-weight: 500;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .field-label input {
-            flex: 1;
-            padding: 4px 8px;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-        }
-        
-        .field-type-selector {
-            margin-bottom: 12px;
-        }
-        
-        .field-type-selector select {
-            padding: 4px 8px;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            background: white;
-        }
-        
-        .field-actions {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            display: flex;
-            gap: 4px;
-        }
-        
-        .field-action-btn {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            padding: 4px 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .field-action-btn:hover {
-            background: #f3f4f6;
-        }
-        
-        .field-action-btn.delete:hover {
-            background: #ef4444;
-            color: white;
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .modal.active {
-            display: flex;
-        }
-        
-        .modal-content {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            width: 90%;
-            max-width: 900px;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-        
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        
-        .modal-close {
-            cursor: pointer;
-            font-size: 20px;
-            color: #9ca3af;
-        }
-        
-        .modal-close:hover {
-            color: #4b5563;
-        }
-        
-        .toast-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1001;
-        }
-        
-        .toast {
-            background: white;
-            border-radius: 8px;
-            padding: 12px 20px;
-            margin-top: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            animation: slideIn 0.3s ease;
-        }
-        
-        .toast.success {
-            border-left: 4px solid #10b981;
-        }
-        
-        .toast.error {
-            border-left: 4px solid #ef4444;
-        }
-        
-        .toast.info {
-            border-left: 4px solid #3b82f6;
-        }
-        
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        
-        .form-data-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        .form-data-table th {
-            background: #f9fafb;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            border-bottom: 2px solid #e5e7eb;
-        }
-        
-        .form-data-table td {
-            padding: 12px;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        
-        .form-data-table tr:hover {
-            background: #f9fafb;
-        }
-        
-        .form-data-actions {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .data-action-btn {
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .data-action-btn.edit:hover {
-            background: #3b82f6;
-            color: white;
-        }
-        
-        .data-action-btn.delete:hover {
-            background: #ef4444;
-            color: white;
-        }
-        
-        .login-container {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 40px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        
-        .login-container h2 {
-            margin-bottom: 20px;
-            color: #1f2937;
-        }
-        
-        .login-btn {
-            background: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background 0.2s;
-            width: 100%;
-        }
-        
-        .login-btn:hover {
-            background: #2563eb;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .user-email {
-            color: #4b5563;
+        .excel-toolbar-btn i {
             font-size: 14px;
         }
         
-        .logout-btn {
-            background: #ef4444;
-            color: white;
-            padding: 6px 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
+        .excel-table-container {
+            overflow-x: auto;
+            overflow-y: auto;
+            max-height: 500px;
+            position: relative;
         }
         
-        .logout-btn:hover {
-            background: #dc2626;
+        .excel-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+            min-width: 100%;
         }
         
-        .tab-buttons {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #e5e7eb;
-            padding-bottom: 10px;
-        }
-        
-        .tab-button {
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
+        .excel-table th {
+            background: #f9fafb;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 0;
+            border: 1px solid #e5e7eb;
             font-weight: 500;
-            transition: all 0.2s;
         }
         
-        .tab-button.active {
-            background: #3b82f6;
-            color: white;
+        .excel-table td {
+            border: 1px solid #e5e7eb;
+            padding: 8px 12px;
+            min-width: 120px;
         }
         
-        .tab-button:not(.active) {
-            background: #f3f4f6;
-            color: #4b5563;
+        .excel-table tr:hover td {
+            background: #f9fafb;
         }
         
-        .tab-button:not(.active):hover {
+        .excel-table td:focus-within {
+            outline: 2px solid #3b82f6;
+            outline-offset: -1px;
+        }
+        
+        .excel-table td input {
+            width: 100%;
+            border: none;
+            padding: 4px;
+            background: transparent;
+        }
+        
+        .excel-table td input:focus {
+            outline: none;
+        }
+        
+        .column-header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .column-header-content:hover {
             background: #e5e7eb;
         }
         
-        .mode-toggle {
+        .filter-indicator {
+            color: #3b82f6;
+            margin-left: 4px;
+        }
+        
+        .filter-dropdown {
+            position: absolute;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            min-width: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            padding: 8px;
+        }
+        
+        .filter-option {
             display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            padding: 4px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            width: fit-content;
-        }
-        
-        .mode-btn {
-            padding: 8px 16px;
-            border-radius: 6px;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
             cursor: pointer;
-            font-weight: 500;
-            transition: all 0.2s;
         }
         
-        .mode-btn.active {
+        .filter-option:hover {
+            background: #f3f4f6;
+        }
+        
+        .filter-option input[type="checkbox"] {
+            margin: 0;
+        }
+        
+        .filter-search {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        
+        .filter-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .filter-btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .filter-btn.clear {
+            color: #ef4444;
+        }
+        
+        .filter-btn.apply {
             background: #3b82f6;
             color: white;
         }
         
-        .mode-btn:not(.active) {
-            color: #4b5563;
-        }
-        
-        .form-view {
-            padding: 20px;
+        /* Formula Bar */
+        .formula-bar {
             background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .formula-label {
+            background: #e5e7eb;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .formula-input {
+            flex: 1;
+            padding: 6px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .formula-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        
+        .formula-help {
+            color: #6b7280;
+            font-size: 12px;
+        }
+        
+        /* Pivot Table Styles */
+        .pivot-container {
+            background: white;
             border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
         }
         
-        .form-field-view {
-            margin-bottom: 20px;
+        .pivot-fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
         }
         
-        .form-field-view label {
-            display: block;
+        .pivot-field-group {
+            background: #f9fafb;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        
+        .pivot-field-group h4 {
             font-weight: 500;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             color: #374151;
         }
         
-        .form-field-view input,
-        .form-field-view select,
-        .form-field-view textarea {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
+        .pivot-field-item {
             background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 4px;
+            cursor: move;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
         
-        .form-field-view input[type="checkbox"] {
-            width: auto;
+        .pivot-field-item:hover {
+            border-color: #3b82f6;
         }
         
-        .edit-badge {
+        /* Chart Styles */
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+        
+        .chart-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        
+        /* Summary Cards */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .summary-card .label {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+        
+        .summary-card .value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        
+        .summary-card .change {
+            font-size: 12px;
+            margin-top: 8px;
+            opacity: 0.8;
+        }
+        
+        /* Data Validation */
+        .validation-badge {
             background: #10b981;
             color: white;
-            padding: 4px 8px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 10px;
+            margin-left: 6px;
+        }
+        
+        /* Conditional Formatting */
+        .condition-form {
+            background: #f9fafb;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        
+        /* Import/Export */
+        .import-export-menu {
+            position: absolute;
+            background: white;
+            border: 1px solid #e5e7eb;
             border-radius: 4px;
-            font-size: 12px;
-            margin-left: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 8px 0;
+            min-width: 150px;
+        }
+        
+        .import-export-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .import-export-item:hover {
+            background: #f3f4f6;
+        }
+        
+        /* Macros */
+        .macro-badge {
+            background: #8b5cf6;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-left: 6px;
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .excel-toolbar {
+                flex-direction: column;
+            }
+            
+            .excel-toolbar-group {
+                border-right: none;
+                border-bottom: 1px solid #d1d5db;
+                padding-bottom: 8px;
+            }
+        }
+        
+        /* Cell Types */
+        .cell-number {
+            text-align: right;
+        }
+        
+        .cell-currency {
+            text-align: right;
+            font-family: monospace;
+        }
+        
+        .cell-percentage {
+            text-align: right;
+        }
+        
+        .cell-date {
+            color: #2563eb;
+        }
+        
+        /* Animations */
+        @keyframes highlight {
+            0% { background: #fef3c7; }
+            100% { background: transparent; }
+        }
+        
+        .cell-highlight {
+            animation: highlight 1s ease;
         }
     </style>
 </head>
@@ -540,13 +446,292 @@
         const storage = firebase.storage();
         const auth = firebase.auth();
 
+        // Formula Parser Class
+        class FormulaParser {
+            static evaluate(formula, data, rowIndex, fields) {
+                if (!formula || !formula.startsWith('=')) return formula;
+                
+                try {
+                    // Remove the '='
+                    const expr = formula.substring(1).trim();
+                    
+                    // Handle different functions
+                    if (expr.toUpperCase().startsWith('SUM')) {
+                        return this.handleSum(expr, data, fields);
+                    } else if (expr.toUpperCase().startsWith('AVERAGE')) {
+                        return this.handleAverage(expr, data, fields);
+                    } else if (expr.toUpperCase().startsWith('COUNT')) {
+                        return this.handleCount(expr, data, fields);
+                    } else if (expr.toUpperCase().startsWith('MAX')) {
+                        return this.handleMax(expr, data, fields);
+                    } else if (expr.toUpperCase().startsWith('MIN')) {
+                        return this.handleMin(expr, data, fields);
+                    } else if (expr.toUpperCase().startsWith('IF')) {
+                        return this.handleIf(expr, data, rowIndex, fields);
+                    } else if (expr.toUpperCase().startsWith('CONCAT')) {
+                        return this.handleConcat(expr, data, rowIndex, fields);
+                    } else {
+                        // Simple arithmetic
+                        return this.evaluateArithmetic(expr, data, rowIndex, fields);
+                    }
+                } catch (error) {
+                    console.error('Formula error:', error);
+                    return '#ERROR!';
+                }
+            }
+            
+            static handleSum(expr, data, fields) {
+                const range = this.parseRange(expr);
+                let sum = 0;
+                
+                if (range.column) {
+                    // Sum a specific column across all rows
+                    data.forEach(row => {
+                        const val = parseFloat(row[range.column]) || 0;
+                        sum += val;
+                    });
+                } else if (range.start && range.end) {
+                    // Sum a range of cells (simplified)
+                    // You can expand this for more complex ranges
+                }
+                
+                return sum;
+            }
+            
+            static handleAverage(expr, data, fields) {
+                const range = this.parseRange(expr);
+                let sum = 0;
+                let count = 0;
+                
+                if (range.column) {
+                    data.forEach(row => {
+                        const val = parseFloat(row[range.column]);
+                        if (!isNaN(val)) {
+                            sum += val;
+                            count++;
+                        }
+                    });
+                }
+                
+                return count > 0 ? (sum / count).toFixed(2) : 0;
+            }
+            
+            static handleCount(expr, data, fields) {
+                const range = this.parseRange(expr);
+                let count = 0;
+                
+                if (range.column) {
+                    data.forEach(row => {
+                        if (row[range.column] !== undefined && row[range.column] !== '') {
+                            count++;
+                        }
+                    });
+                }
+                
+                return count;
+            }
+            
+            static handleMax(expr, data, fields) {
+                const range = this.parseRange(expr);
+                let max = -Infinity;
+                
+                if (range.column) {
+                    data.forEach(row => {
+                        const val = parseFloat(row[range.column]);
+                        if (!isNaN(val) && val > max) {
+                            max = val;
+                        }
+                    });
+                }
+                
+                return max !== -Infinity ? max : 0;
+            }
+            
+            static handleMin(expr, data, fields) {
+                const range = this.parseRange(expr);
+                let min = Infinity;
+                
+                if (range.column) {
+                    data.forEach(row => {
+                        const val = parseFloat(row[range.column]);
+                        if (!isNaN(val) && val < min) {
+                            min = val;
+                        }
+                    });
+                }
+                
+                return min !== Infinity ? min : 0;
+            }
+            
+            static handleIf(expr, data, rowIndex, fields) {
+                // Format: =IF(condition, value_if_true, value_if_false)
+                const match = expr.match(/IF\((.+?),(.+?),(.+)\)/i);
+                if (match) {
+                    const condition = match[1].trim();
+                    const trueVal = match[2].trim();
+                    const falseVal = match[3].trim();
+                    
+                    // Evaluate condition (simplified)
+                    const conditionResult = this.evaluateCondition(condition, data, rowIndex, fields);
+                    
+                    return conditionResult ? this.evaluateValue(trueVal, data, rowIndex, fields) : 
+                                           this.evaluateValue(falseVal, data, rowIndex, fields);
+                }
+                return '#ERROR!';
+            }
+            
+            static handleConcat(expr, data, rowIndex, fields) {
+                const match = expr.match(/CONCAT\((.+)\)/i);
+                if (match) {
+                    const args = match[1].split(',').map(arg => arg.trim());
+                    return args.map(arg => this.evaluateValue(arg, data, rowIndex, fields)).join('');
+                }
+                return '#ERROR!';
+            }
+            
+            static evaluateArithmetic(expr, data, rowIndex, fields) {
+                // Replace field references with values
+                let evalExpr = expr;
+                
+                // Find all field references (e.g., [Field Name])
+                const fieldMatches = expr.match(/\[(.*?)\]/g);
+                if (fieldMatches) {
+                    fieldMatches.forEach(match => {
+                        const fieldName = match.slice(1, -1);
+                        const value = data[rowIndex]?.[fieldName];
+                        
+                        if (value !== undefined) {
+                            const numValue = parseFloat(value);
+                            evalExpr = evalExpr.replace(match, isNaN(numValue) ? '0' : numValue);
+                        } else {
+                            evalExpr = evalExpr.replace(match, '0');
+                        }
+                    });
+                }
+                
+                // Evaluate safely
+                try {
+                    // eslint-disable-next-line no-new-func
+                    const result = new Function('return ' + evalExpr)();
+                    return isNaN(result) ? '#VALUE!' : result;
+                } catch {
+                    return '#ERROR!';
+                }
+            }
+            
+            static parseRange(expr) {
+                // Parse something like SUM(A1:A10) or SUM([Column Name])
+                const rangeMatch = expr.match(/\((.*?)\)/);
+                if (rangeMatch) {
+                    const range = rangeMatch[1];
+                    
+                    // Check if it's a column reference
+                    const columnMatch = range.match(/\[(.*?)\]/);
+                    if (columnMatch) {
+                        return { column: columnMatch[1] };
+                    }
+                    
+                    // Check if it's a cell range (simplified)
+                    const cellRangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+                    if (cellRangeMatch) {
+                        return {
+                            start: { col: cellRangeMatch[1], row: parseInt(cellRangeMatch[2]) },
+                            end: { col: cellRangeMatch[3], row: parseInt(cellRangeMatch[4]) }
+                        };
+                    }
+                }
+                return {};
+            }
+            
+            static evaluateCondition(condition, data, rowIndex, fields) {
+                // Simple condition evaluation
+                const operators = ['==', '!=', '>=', '<=', '>', '<'];
+                
+                for (const op of operators) {
+                    if (condition.includes(op)) {
+                        const parts = condition.split(op);
+                        const left = this.evaluateValue(parts[0].trim(), data, rowIndex, fields);
+                        const right = this.evaluateValue(parts[1].trim(), data, rowIndex, fields);
+                        
+                        switch (op) {
+                            case '==': return left == right;
+                            case '!=': return left != right;
+                            case '>=': return parseFloat(left) >= parseFloat(right);
+                            case '<=': return parseFloat(left) <= parseFloat(right);
+                            case '>': return parseFloat(left) > parseFloat(right);
+                            case '<': return parseFloat(left) < parseFloat(right);
+                        }
+                    }
+                }
+                
+                return false;
+            }
+            
+            static evaluateValue(value, data, rowIndex, fields) {
+                // Check if it's a field reference
+                const fieldMatch = value.match(/\[(.*?)\]/);
+                if (fieldMatch) {
+                    return data[rowIndex]?.[fieldMatch[1]] || '';
+                }
+                
+                // Check if it's a number
+                if (!isNaN(parseFloat(value))) {
+                    return parseFloat(value);
+                }
+                
+                // Return as string
+                return value.replace(/^['"]|['"]$/g, '');
+            }
+        }
+
+        // Filter Manager Class
+        class FilterManager {
+            constructor(data, fields) {
+                this.data = data;
+                this.fields = fields;
+                this.filters = {};
+            }
+            
+            setFilter(fieldId, filterValues) {
+                if (filterValues && filterValues.length > 0) {
+                    this.filters[fieldId] = filterValues;
+                } else {
+                    delete this.filters[fieldId];
+                }
+            }
+            
+            applyFilters() {
+                if (Object.keys(this.filters).length === 0) {
+                    return this.data;
+                }
+                
+                return this.data.filter(row => {
+                    for (const [fieldId, filterValues] of Object.entries(this.filters)) {
+                        const value = String(row[fieldId] || '').toLowerCase();
+                        if (!filterValues.some(fv => value.includes(String(fv).toLowerCase()))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+            
+            clearFilters() {
+                this.filters = {};
+            }
+            
+            getActiveFilters() {
+                return this.filters;
+            }
+        }
+
         // Toast Component
         const Toast = ({ message, type, onClose }) => (
             <div className={`toast ${type}`}>
                 <i className={`fas ${
-                    type === 'success' ? 'fa-check-circle text-green-500' :
-                    type === 'error' ? 'fa-exclamation-circle text-red-500' :
-                    'fa-info-circle text-blue-500'
+                    type === 'success' ? 'fa-check-circle' :
+                    type === 'error' ? 'fa-exclamation-circle' :
+                    'fa-info-circle'
                 }`}></i>
                 <span>{message}</span>
                 <button onClick={onClose} className="ml-4 text-gray-400 hover:text-gray-600">
@@ -566,21 +751,51 @@
             const [showFormBuilder, setShowFormBuilder] = useState(false);
             const [formFields, setFormFields] = useState([]);
             const [formData, setFormData] = useState([]);
+            const [filteredData, setFilteredData] = useState([]);
             const [editingRecord, setEditingRecord] = useState(null);
             const [toasts, setToasts] = useState([]);
             const [isDraggingOver, setIsDraggingOver] = useState(false);
             const [newFileType, setNewFileType] = useState('form');
             const [newFileName, setNewFileName] = useState('');
             const [isAdmin, setIsAdmin] = useState(false);
-            const [formMode, setFormMode] = useState('view'); // 'view' or 'edit'
-            const [activeTab, setActiveTab] = useState('form'); // 'form' or 'data'
+            const [formMode, setFormMode] = useState('view');
+            const [activeTab, setActiveTab] = useState('form');
+            const [filters, setFilters] = useState({});
+            const [showFilterDropdown, setShowFilterDropdown] = useState(null);
+            const [formulas, setFormulas] = useState({});
+            const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' });
+            const [selectedCells, setSelectedCells] = useState([]);
+            const [clipboard, setClipboard] = useState(null);
+            const [showPivotTable, setShowPivotTable] = useState(false);
+            const [pivotConfig, setPivotConfig] = useState({
+                rows: [],
+                columns: [],
+                values: [],
+                filters: []
+            });
+            const [chartType, setChartType] = useState('bar');
+            const [showChart, setShowChart] = useState(false);
+            const [conditionalFormats, setConditionalFormats] = useState([]);
+            const [dataValidations, setDataValidations] = useState({});
+            const [macros, setMacros] = useState([]);
+            const [recordingMacro, setRecordingMacro] = useState(false);
+            const [macroSteps, setMacroSteps] = useState([]);
+            const [summaryStats, setSummaryStats] = useState({});
+            const [searchText, setSearchText] = useState('');
+            const [undoStack, setUndoStack] = useState([]);
+            const [redoStack, setRedoStack] = useState([]);
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
+            const filterRef = useRef(null);
+            const tableRef = useRef(null);
+            const filterManager = useRef(null);
 
             const fieldTypes = [
                 { value: 'text', label: 'Text', icon: 'font' },
                 { value: 'number', label: 'Number', icon: 'hashtag' },
+                { value: 'currency', label: 'Currency', icon: 'dollar-sign' },
+                { value: 'percentage', label: 'Percentage', icon: 'percent' },
                 { value: 'email', label: 'Email', icon: 'envelope' },
                 { value: 'tel', label: 'Phone', icon: 'phone' },
                 { value: 'date', label: 'Date', icon: 'calendar' },
@@ -590,7 +805,8 @@
                 { value: 'textarea', label: 'Text Area', icon: 'align-left' },
                 { value: 'yesno', label: 'Yes/No', icon: 'circle-question' },
                 { value: 'color', label: 'Color', icon: 'palette' },
-                { value: 'range', label: 'Range', icon: 'sliders' }
+                { value: 'range', label: 'Range', icon: 'sliders' },
+                { value: 'formula', label: 'Formula', icon: 'function' }
             ];
 
             // Monitor auth state
@@ -599,7 +815,6 @@
                     if (user) {
                         setUser(user);
                         
-                        // Check if user is admin
                         const token = await user.getIdTokenResult();
                         setIsAdmin(
                             token.claims.admin === true || 
@@ -607,7 +822,6 @@
                             user.email === 'shahulsha254@gmail.com'
                         );
                         
-                        // Record login session
                         try {
                             await db.collection('loginSessions').add({
                                 uid: user.uid,
@@ -617,18 +831,6 @@
                             });
                         } catch (error) {
                             console.error('Error recording login session:', error);
-                        }
-                        
-                        // Record login history
-                        try {
-                            await db.collection('loginHistory').add({
-                                uid: user.uid,
-                                email: user.email,
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                                action: 'login'
-                            });
-                        } catch (error) {
-                            console.error('Error recording login history:', error);
                         }
                     } else {
                         setUser(null);
@@ -647,59 +849,69 @@
                 }
             }, [user, currentPath]);
 
-            // Anonymous sign in
-            const signInAnonymously = async () => {
-                try {
-                    setLoading(true);
-                    await auth.signInAnonymously();
-                    showToast('success', 'Signed in successfully!');
-                } catch (error) {
-                    showToast('error', 'Sign in failed: ' + error.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            // Sign in with email
-            const signInWithEmail = async (email, password) => {
-                try {
-                    setLoading(true);
-                    await auth.signInWithEmailAndPassword(email, password);
-                    showToast('success', 'Signed in successfully!');
-                } catch (error) {
-                    showToast('error', 'Sign in failed: ' + error.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            // Sign out
-            const signOut = async () => {
-                try {
-                    if (user) {
-                        await db.collection('loginHistory').add({
-                            uid: user.uid,
-                            email: user.email,
-                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                            action: 'logout'
+            // Update filtered data when formData or filters change
+            useEffect(() => {
+                if (formData.length > 0) {
+                    filterManager.current = new FilterManager(formData, formFields);
+                    Object.keys(filters).forEach(fieldId => {
+                        filterManager.current.setFilter(fieldId, filters[fieldId]);
+                    });
+                    
+                    let filtered = filterManager.current.applyFilters();
+                    
+                    // Apply search
+                    if (searchText) {
+                        filtered = filtered.filter(row => {
+                            return Object.values(row).some(val => 
+                                String(val).toLowerCase().includes(searchText.toLowerCase())
+                            );
                         });
                     }
                     
-                    await auth.signOut();
-                    setCurrentPath(['My Files']);
-                    setFiles([]);
-                    setSelectedFile(null);
-                    setShowFormBuilder(false);
-                    showToast('success', 'Signed out successfully!');
-                } catch (error) {
-                    showToast('error', 'Sign out failed: ' + error.message);
+                    // Apply sort
+                    if (sortConfig.field) {
+                        filtered.sort((a, b) => {
+                            const aVal = a[sortConfig.field] || '';
+                            const bVal = b[sortConfig.field] || '';
+                            
+                            if (sortConfig.direction === 'asc') {
+                                return aVal > bVal ? 1 : -1;
+                            } else {
+                                return aVal < bVal ? 1 : -1;
+                            }
+                        });
+                    }
+                    
+                    setFilteredData(filtered);
+                    
+                    // Update summary statistics
+                    calculateSummaryStats(filtered);
+                } else {
+                    setFilteredData([]);
                 }
-            };
+            }, [formData, filters, sortConfig, searchText]);
 
-            // Get user-specific collection reference
-            const getUserCollection = (collectionName) => {
-                if (!user) throw new Error('User not authenticated');
-                return db.collection('users').doc(user.uid).collection(collectionName);
+            // Calculate summary statistics
+            const calculateSummaryStats = (data) => {
+                const stats = {};
+                
+                formFields.forEach(field => {
+                    if (field.type === 'number' || field.type === 'currency' || field.type === 'percentage') {
+                        const values = data.map(row => parseFloat(row[field.id])).filter(v => !isNaN(v));
+                        
+                        if (values.length > 0) {
+                            stats[field.id] = {
+                                sum: values.reduce((a, b) => a + b, 0),
+                                avg: values.reduce((a, b) => a + b, 0) / values.length,
+                                min: Math.min(...values),
+                                max: Math.max(...values),
+                                count: values.length
+                            };
+                        }
+                    }
+                });
+                
+                setSummaryStats(stats);
             };
 
             // Load files from Firebase
@@ -708,7 +920,7 @@
 
                 try {
                     const path = currentPath.join('/');
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     const snapshot = await filesRef
                         .where('path', '==', path)
                         .get();
@@ -720,11 +932,7 @@
                     
                     setFiles(fileList);
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Check your Firebase rules.');
-                    } else {
-                        showToast('error', 'Error loading files: ' + error.message);
-                    }
+                    showToast('error', 'Error loading files: ' + error.message);
                 }
             };
 
@@ -751,7 +959,7 @@
 
                 try {
                     const path = currentPath.join('/');
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     
                     const fileData = {
                         name: newFileName,
@@ -765,6 +973,9 @@
                     if (newFileType === 'form') {
                         fileData.fields = [];
                         fileData.data = [];
+                        fileData.formulas = {};
+                        fileData.conditionalFormats = [];
+                        fileData.dataValidations = {};
                     }
 
                     await filesRef.add(fileData);
@@ -774,11 +985,7 @@
                     loadFiles();
                     showToast('success', `${newFileType === 'folder' ? 'Folder' : 'Form'} created successfully!`);
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Check your Firebase rules.');
-                    } else {
-                        showToast('error', 'Error creating: ' + error.message);
-                    }
+                    showToast('error', 'Error creating: ' + error.message);
                 }
             };
 
@@ -786,39 +993,17 @@
             const deleteFile = async (file, e) => {
                 e.stopPropagation();
                 
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
-
-                if (!window.confirm(`Are you sure you want to delete "${file.name}"?`)) {
-                    return;
-                }
+                if (!user) return;
+                if (!window.confirm(`Are you sure you want to delete "${file.name}"?`)) return;
 
                 try {
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     await filesRef.doc(file.id).delete();
-                    
-                    if (file.type === 'folder') {
-                        const folderPath = [...currentPath, file.name].join('/');
-                        const contents = await filesRef
-                            .where('path', '>=', folderPath)
-                            .where('path', '<', folderPath + '\uf8ff')
-                            .get();
-                        
-                        const batch = db.batch();
-                        contents.docs.forEach(doc => batch.delete(doc.ref));
-                        await batch.commit();
-                    }
                     
                     loadFiles();
                     showToast('success', 'Deleted successfully!');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can delete files.');
-                    } else {
-                        showToast('error', 'Error deleting: ' + error.message);
-                    }
+                    showToast('error', 'Error deleting: ' + error.message);
                 }
             };
 
@@ -830,9 +1015,15 @@
                     setSelectedFile(file);
                     setFormFields(file.fields || []);
                     setFormData(file.data || []);
-                    setFormMode('view'); // Start in view mode
-                    setActiveTab('form');
+                    setFormulas(file.formulas || {});
+                    setConditionalFormats(file.conditionalFormats || []);
+                    setDataValidations(file.dataValidations || {});
+                    setFormMode('view');
+                    setActiveTab('data');
                     setShowFormBuilder(true);
+                    setFilters({});
+                    setSortConfig({ field: null, direction: 'asc' });
+                    setSearchText('');
                 }
             };
 
@@ -850,7 +1041,6 @@
                     e.dataTransfer.setData('text/plain', fieldType);
                 } else {
                     e.preventDefault();
-                    showToast('info', 'Switch to Edit Mode to modify the form');
                 }
             };
 
@@ -860,12 +1050,6 @@
                     e.preventDefault();
                     setIsDraggingOver(true);
                 }
-            };
-
-            // Handle drag leave for dropzone
-            const handleDragLeave = (e) => {
-                e.preventDefault();
-                setIsDraggingOver(false);
             };
 
             // Handle drop for form builder
@@ -904,68 +1088,92 @@
 
             // Save form structure
             const saveFormStructure = async () => {
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
-
-                if (!selectedFile) return;
+                if (!user || !selectedFile) return;
 
                 try {
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     await filesRef.doc(selectedFile.id).update({
                         fields: formFields,
+                        formulas: formulas,
+                        conditionalFormats: conditionalFormats,
+                        dataValidations: dataValidations,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
-                    // Update selected file with new fields
-                    setSelectedFile({ ...selectedFile, fields: formFields });
-                    
+                    setSelectedFile({ ...selectedFile, fields: formFields, formulas, conditionalFormats, dataValidations });
                     showToast('success', 'Form structure saved!');
-                    setFormMode('view'); // Switch back to view mode after saving
+                    setFormMode('view');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can modify this form.');
-                    } else {
-                        showToast('error', 'Error saving form: ' + error.message);
-                    }
+                    showToast('error', 'Error saving form: ' + error.message);
                 }
             };
 
-            // Save form data - FIXED: Removed serverTimestamp from array
+            // Save form data
             const saveFormData = async (formDataToSave) => {
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
-
-                if (!selectedFile) return;
+                if (!user || !selectedFile) return;
 
                 try {
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     
-                    // Get current data
-                    const currentData = selectedFile.data || [];
-                    
-                    // Create new record with ISO string instead of serverTimestamp
-                    const newRecord = { 
-                        ...formDataToSave, 
-                        id: Date.now(),
-                        uid: user.uid,
-                        createdAt: new Date().toISOString() // Use ISO string instead of serverTimestamp
-                    };
-                    
-                    const newData = [...currentData, newRecord];
-                    
-                    // Update the document
-                    await filesRef.doc(selectedFile.id).update({
-                        data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() // This is fine - it's not in an array
+                    // Apply data validations
+                    let isValid = true;
+                    Object.keys(dataValidations).forEach(fieldId => {
+                        const validation = dataValidations[fieldId];
+                        const value = formDataToSave[fieldId];
+                        
+                        if (validation.required && !value) {
+                            isValid = false;
+                            showToast('error', `${validation.fieldName} is required`);
+                        }
+                        
+                        if (validation.type === 'number' && value) {
+                            const num = parseFloat(value);
+                            if (validation.min && num < validation.min) {
+                                isValid = false;
+                                showToast('error', `${validation.fieldName} must be at least ${validation.min}`);
+                            }
+                            if (validation.max && num > validation.max) {
+                                isValid = false;
+                                showToast('error', `${validation.fieldName} must be at most ${validation.max}`);
+                            }
+                        }
                     });
                     
-                    // Update local state
+                    if (!isValid) return;
+                    
+                    // Apply formulas
+                    const processedData = { ...formDataToSave };
+                    Object.keys(formulas).forEach(fieldId => {
+                        if (formulas[fieldId]) {
+                            const result = FormulaParser.evaluate(
+                                formulas[fieldId], 
+                                [...formData, processedData], 
+                                formData.length,
+                                formFields
+                            );
+                            processedData[fieldId] = result;
+                        }
+                    });
+                    
+                    const newRecord = { 
+                        ...processedData, 
+                        id: Date.now(),
+                        uid: user.uid,
+                        createdAt: new Date().toISOString()
+                    };
+                    
+                    const newData = [...formData, newRecord];
+                    
+                    await filesRef.doc(selectedFile.id).update({
+                        data: newData,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
                     setFormData(newData);
                     setSelectedFile({ ...selectedFile, data: newData });
+                    
+                    // Apply conditional formatting
+                    applyConditionalFormatting(newData);
                     
                     showToast('success', 'Data saved!');
                 } catch (error) {
@@ -974,36 +1182,45 @@
                 }
             };
 
-            // Update form data - FIXED: Removed serverTimestamp from array
+            // Update form data
             const updateFormData = async (updatedRecord) => {
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
-
-                if (!selectedFile) return;
+                if (!user || !selectedFile) return;
 
                 try {
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     
-                    // Update the record in the array
+                    // Apply formulas to updated record
+                    const processedRecord = { ...updatedRecord };
+                    Object.keys(formulas).forEach(fieldId => {
+                        if (formulas[fieldId]) {
+                            const result = FormulaParser.evaluate(
+                                formulas[fieldId], 
+                                formData.map(r => r.id === updatedRecord.id ? processedRecord : r),
+                                formData.findIndex(r => r.id === updatedRecord.id),
+                                formFields
+                            );
+                            processedRecord[fieldId] = result;
+                        }
+                    });
+                    
                     const newData = formData.map(record => 
                         record.id === updatedRecord.id ? { 
-                            ...updatedRecord,
-                            updatedAt: new Date().toISOString() // Use ISO string
+                            ...processedRecord,
+                            updatedAt: new Date().toISOString()
                         } : record
                     );
                     
-                    // Update the document
                     await filesRef.doc(selectedFile.id).update({
                         data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() // This is fine - it's not in an array
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
-                    // Update local state
                     setFormData(newData);
                     setSelectedFile({ ...selectedFile, data: newData });
                     setEditingRecord(null);
+                    
+                    // Apply conditional formatting
+                    applyConditionalFormatting(newData);
                     
                     showToast('success', 'Data updated!');
                 } catch (error) {
@@ -1014,15 +1231,11 @@
 
             // Delete form data
             const deleteFormData = async (recordId) => {
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
-
+                if (!user || !selectedFile) return;
                 if (!window.confirm('Delete this record?')) return;
 
                 try {
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     const newData = formData.filter(record => record.id !== recordId);
                     
                     await filesRef.doc(selectedFile.id).update({
@@ -1040,17 +1253,14 @@
 
             // Upload file
             const uploadFile = async (file) => {
-                if (!user) {
-                    showToast('error', 'Please sign in first');
-                    return;
-                }
+                if (!user) return;
 
                 try {
                     const path = currentPath.join('/');
                     const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
                     await storageRef.put(file);
                     
-                    const filesRef = getUserCollection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
                     const fileData = {
                         name: file.name,
                         path: path,
@@ -1066,11 +1276,7 @@
                     loadFiles();
                     showToast('success', 'File uploaded!');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can upload files.');
-                    } else {
-                        showToast('error', 'Error uploading: ' + error.message);
-                    }
+                    showToast('error', 'Error uploading: ' + error.message);
                 }
             };
 
@@ -1080,6 +1286,119 @@
                 if (file) {
                     uploadFile(file);
                 }
+            };
+
+            // Apply conditional formatting
+            const applyConditionalFormatting = (data) => {
+                // This would apply CSS classes based on conditions
+                // For now, just log
+                console.log('Applying conditional formatting', conditionalFormats, data);
+            };
+
+            // Export to CSV
+            const exportToCSV = () => {
+                const headers = formFields.map(f => f.label).join(',');
+                const rows = filteredData.map(row => {
+                    return formFields.map(field => {
+                        const value = row[field.id] || '';
+                        return `"${String(value).replace(/"/g, '""')}"`;
+                    }).join(',');
+                });
+                
+                const csv = [headers, ...rows].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${selectedFile?.name || 'export'}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                showToast('success', 'Exported to CSV');
+            };
+
+            // Export to Excel (XLSX simulation)
+            const exportToExcel = () => {
+                // For demo, just export as CSV with .xlsx extension
+                exportToCSV();
+                showToast('info', 'Note: This is a CSV file with .xlsx extension for demo');
+            };
+
+            // Import from CSV
+            const importFromCSV = (csvText) => {
+                const lines = csvText.split('\n');
+                const headers = lines[0].split(',').map(h => h.trim());
+                
+                const newData = [];
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    
+                    const values = lines[i].split(',').map(v => v.replace(/^"|"$/g, '').trim());
+                    const row = { id: Date.now() + i };
+                    
+                    headers.forEach((header, index) => {
+                        const field = formFields.find(f => f.label === header);
+                        if (field) {
+                            row[field.id] = values[index];
+                        }
+                    });
+                    
+                    newData.push(row);
+                }
+                
+                return newData;
+            };
+
+            // Handle paste from Excel
+            const handleExcelPaste = async () => {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    const newData = importFromCSV(text);
+                    
+                    // Merge with existing data
+                    const mergedData = [...formData, ...newData];
+                    
+                    // Save to Firebase
+                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
+                    await filesRef.doc(selectedFile.id).update({
+                        data: mergedData,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    setFormData(mergedData);
+                    showToast('success', `Imported ${newData.length} rows from clipboard`);
+                } catch (error) {
+                    showToast('error', 'Error pasting: ' + error.message);
+                }
+            };
+
+            // Create pivot table
+            const createPivotTable = () => {
+                setShowPivotTable(!showPivotTable);
+            };
+
+            // Create chart
+            const createChart = () => {
+                setShowChart(!showChart);
+            };
+
+            // Record macro
+            const startMacroRecording = () => {
+                setRecordingMacro(true);
+                setMacroSteps([]);
+                showToast('info', 'Recording macro...');
+            };
+
+            const stopMacroRecording = () => {
+                setRecordingMacro(false);
+                if (macroSteps.length > 0) {
+                    const macroName = prompt('Enter macro name:');
+                    if (macroName) {
+                        setMacros([...macros, { name: macroName, steps: [...macroSteps] }]);
+                        showToast('success', `Macro "${macroName}" saved`);
+                    }
+                }
+                setMacroSteps([]);
             };
 
             // Render input field based on type
@@ -1100,6 +1419,22 @@
                     
                     case 'number':
                         return <input type="number" {...commonProps} />;
+                    
+                    case 'currency':
+                        return (
+                            <div className="relative">
+                                <span className="absolute left-3 top-2 text-gray-500">$</span>
+                                <input type="number" {...commonProps} className="pl-7 w-full p-2 border rounded" />
+                            </div>
+                        );
+                    
+                    case 'percentage':
+                        return (
+                            <div className="relative">
+                                <input type="number" {...commonProps} step="0.01" min="0" max="100" />
+                                <span className="absolute right-3 top-2 text-gray-500">%</span>
+                            </div>
+                        );
                     
                     case 'date':
                         return <input type="date" {...commonProps} />;
@@ -1141,7 +1476,7 @@
                         return <textarea {...commonProps} rows="4" />;
                     
                     case 'color':
-                        return <input type="color" {...commonProps} className="w-full p-2 border rounded h-10" />;
+                        return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
                     
                     case 'range':
                         return (
@@ -1156,46 +1491,341 @@
                             />
                         );
                     
+                    case 'formula':
+                        return (
+                            <div className="relative">
+                                <span className="absolute left-3 top-2 text-blue-500 font-bold">=</span>
+                                <input
+                                    type="text"
+                                    value={value || ''}
+                                    onChange={(e) => onChange(field.id, e.target.value)}
+                                    className="w-full pl-7 p-2 border rounded font-mono text-sm"
+                                    placeholder="=SUM([Field1], [Field2])"
+                                    disabled={disabled}
+                                />
+                            </div>
+                        );
+                    
                     default:
                         return null;
                 }
             };
 
-            // Render form in view mode
-            const renderFormView = () => {
-                const [formData, setFormData] = useState({});
-
-                const handleFieldChange = (fieldId, value) => {
-                    setFormData({ ...formData, [fieldId]: value });
-                };
-
-                const handleSubmit = (e) => {
-                    e.preventDefault();
-                    saveFormData(formData);
-                    setFormData({});
-                };
-
+            // Render filter dropdown
+            const renderFilterDropdown = (field) => {
+                if (showFilterDropdown !== field.id) return null;
+                
+                const uniqueValues = [...new Set(formData.map(row => row[field.id]))].filter(v => v != null);
+                
                 return (
-                    <form onSubmit={handleSubmit} className="form-view">
-                        {formFields.map(field => (
-                            <div key={field.id} className="form-field-view">
-                                <label>
-                                    {field.label}
-                                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                                </label>
-                                {renderInputField(field, formData[field.id], handleFieldChange, false)}
-                            </div>
-                        ))}
+                    <div className="filter-dropdown" ref={filterRef}>
+                        <input
+                            type="text"
+                            className="filter-search"
+                            placeholder="Search..."
+                            onChange={(e) => {
+                                // Filter values based on search
+                            }}
+                        />
                         
-                        {formFields.length > 0 && (
+                        <div className="max-h-40 overflow-y-auto">
+                            {uniqueValues.map(value => (
+                                <label key={value} className="filter-option">
+                                    <input
+                                        type="checkbox"
+                                        checked={filters[field.id]?.includes(value) || false}
+                                        onChange={(e) => {
+                                            const currentFilters = filters[field.id] || [];
+                                            let newFilters;
+                                            
+                                            if (e.target.checked) {
+                                                newFilters = [...currentFilters, value];
+                                            } else {
+                                                newFilters = currentFilters.filter(v => v !== value);
+                                            }
+                                            
+                                            setFilters({ ...filters, [field.id]: newFilters });
+                                        }}
+                                    />
+                                    <span>{String(value) || '(blank)'}</span>
+                                </label>
+                            ))}
+                        </div>
+                        
+                        <div className="filter-actions">
                             <button
-                                type="submit"
-                                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                className="filter-btn clear"
+                                onClick={() => {
+                                    const newFilters = { ...filters };
+                                    delete newFilters[field.id];
+                                    setFilters(newFilters);
+                                    setShowFilterDropdown(null);
+                                }}
                             >
-                                Save Record
+                                Clear
                             </button>
+                            <button
+                                className="filter-btn apply"
+                                onClick={() => setShowFilterDropdown(null)}
+                            >
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            // Render data table
+            const renderDataTable = () => {
+                return (
+                    <div className="excel-container">
+                        <div className="excel-toolbar">
+                            <div className="excel-toolbar-group">
+                                <button className="excel-toolbar-btn" onClick={() => setActiveTab('form')}>
+                                    <i className="fas fa-wpforms"></i>
+                                    Form View
+                                </button>
+                                <button className="excel-toolbar-btn active">
+                                    <i className="fas fa-table"></i>
+                                    Table View
+                                </button>
+                            </div>
+                            
+                            <div className="excel-toolbar-group">
+                                <button className="excel-toolbar-btn" onClick={exportToCSV}>
+                                    <i className="fas fa-file-csv"></i>
+                                    Export CSV
+                                </button>
+                                <button className="excel-toolbar-btn" onClick={exportToExcel}>
+                                    <i className="fas fa-file-excel"></i>
+                                    Export Excel
+                                </button>
+                                <button className="excel-toolbar-btn" onClick={handleExcelPaste}>
+                                    <i className="fas fa-paste"></i>
+                                    Paste from Excel
+                                </button>
+                            </div>
+                            
+                            <div className="excel-toolbar-group">
+                                <button className="excel-toolbar-btn" onClick={createPivotTable}>
+                                    <i className="fas fa-chart-pivot"></i>
+                                    Pivot Table
+                                </button>
+                                <button className="excel-toolbar-btn" onClick={createChart}>
+                                    <i className="fas fa-chart-bar"></i>
+                                    Chart
+                                </button>
+                            </div>
+                            
+                            <div className="excel-toolbar-group">
+                                {!recordingMacro ? (
+                                    <button className="excel-toolbar-btn" onClick={startMacroRecording}>
+                                        <i className="fas fa-circle text-red-500"></i>
+                                        Record Macro
+                                    </button>
+                                ) : (
+                                    <button className="excel-toolbar-btn" onClick={stopMacroRecording}>
+                                        <i className="fas fa-stop text-red-500"></i>
+                                        Stop Recording
+                                    </button>
+                                )}
+                            </div>
+                            
+                            <div className="flex-1">
+                                <input
+                                    type="text"
+                                    placeholder="Search all fields..."
+                                    className="w-full p-1 px-3 border rounded"
+                                    value={searchText}
+                                    onChange={(e) => setSearchText(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        
+                        {/* Formula Bar */}
+                        <div className="formula-bar">
+                            <span className="formula-label">fx</span>
+                            <input
+                                type="text"
+                                className="formula-input"
+                                placeholder="Enter formula (e.g., =SUM([Amount]))"
+                                value={formulas['selected'] || ''}
+                                onChange={(e) => {
+                                    // Handle formula input
+                                }}
+                            />
+                            <span className="formula-help">Use [Field Name] to reference fields</span>
+                        </div>
+                        
+                        {/* Summary Cards */}
+                        {Object.keys(summaryStats).length > 0 && (
+                            <div className="summary-cards p-4">
+                                {Object.entries(summaryStats).map(([fieldId, stats]) => {
+                                    const field = formFields.find(f => f.id === fieldId);
+                                    return (
+                                        <div key={fieldId} className="summary-card">
+                                            <div className="label">{field?.label}</div>
+                                            <div className="value">
+                                                {field?.type === 'currency' ? '$' : ''}
+                                                {stats.sum.toLocaleString()}
+                                            </div>
+                                            <div className="change">
+                                                Avg: {field?.type === 'currency' ? '$' : ''}{stats.avg.toFixed(2)} | 
+                                                Count: {stats.count}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         )}
-                    </form>
+                        
+                        {/* Data Table */}
+                        <div className="excel-table-container" ref={tableRef}>
+                            <table className="excel-table">
+                                <thead>
+                                    <tr>
+                                        {formFields.map(field => (
+                                            <th key={field.id}>
+                                                <div className="column-header-content">
+                                                    <span>{field.label}</span>
+                                                    <div>
+                                                        <i 
+                                                            className={`fas fa-filter filter-indicator ${filters[field.id] ? 'text-blue-600' : 'text-gray-400'}`}
+                                                            onClick={() => setShowFilterDropdown(
+                                                                showFilterDropdown === field.id ? null : field.id
+                                                            )}
+                                                        ></i>
+                                                        {sortConfig.field === field.id && (
+                                                            <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} ml-1`}></i>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {renderFilterDropdown(field)}
+                                            </th>
+                                        ))}
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredData.map((row, rowIndex) => (
+                                        <tr key={row.id}>
+                                            {formFields.map(field => {
+                                                const value = row[field.id];
+                                                let displayValue = value;
+                                                
+                                                // Format based on field type
+                                                if (field.type === 'currency' && value) {
+                                                    displayValue = `$${parseFloat(value).toFixed(2)}`;
+                                                } else if (field.type === 'percentage' && value) {
+                                                    displayValue = `${value}%`;
+                                                } else if (field.type === 'date' && value) {
+                                                    displayValue = new Date(value).toLocaleDateString();
+                                                } else if (field.type === 'checkbox') {
+                                                    displayValue = value ? '✓' : '✗';
+                                                }
+                                                
+                                                return (
+                                                    <td key={field.id}
+                                                        onDoubleClick={() => {
+                                                            // Enable inline editing
+                                                        }}
+                                                    >
+                                                        {displayValue}
+                                                    </td>
+                                                );
+                                            })}
+                                            <td>
+                                                <div className="form-data-actions">
+                                                    <button 
+                                                        className="data-action-btn edit"
+                                                        onClick={() => {
+                                                            setEditingRecord(row);
+                                                            setActiveTab('form');
+                                                        }}
+                                                    >
+                                                        <i className="fas fa-edit"></i>
+                                                    </button>
+                                                    <button 
+                                                        className="data-action-btn delete"
+                                                        onClick={() => deleteFormData(row.id)}
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        {/* Pivot Table */}
+                        {showPivotTable && (
+                            <div className="pivot-container">
+                                <h3 className="font-bold mb-4">Pivot Table</h3>
+                                <div className="pivot-fields">
+                                    <div className="pivot-field-group">
+                                        <h4>Rows</h4>
+                                        {formFields.map(field => (
+                                            <div key={field.id} className="pivot-field-item" draggable>
+                                                <i className="fas fa-grip-vertical text-gray-400"></i>
+                                                {field.label}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="pivot-field-group">
+                                        <h4>Columns</h4>
+                                    </div>
+                                    <div className="pivot-field-group">
+                                        <h4>Values</h4>
+                                    </div>
+                                    <div className="pivot-field-group">
+                                        <h4>Filters</h4>
+                                    </div>
+                                </div>
+                                <p className="text-gray-500 text-center py-4">
+                                    Drag fields to create pivot table (demo feature)
+                                </p>
+                            </div>
+                        )}
+                        
+                        {/* Chart */}
+                        {showChart && (
+                            <div className="chart-container">
+                                <h3 className="font-bold mb-4">Chart Visualization</h3>
+                                <div className="chart-controls">
+                                    <select 
+                                        className="p-2 border rounded"
+                                        value={chartType}
+                                        onChange={(e) => setChartType(e.target.value)}
+                                    >
+                                        <option value="bar">Bar Chart</option>
+                                        <option value="line">Line Chart</option>
+                                        <option value="pie">Pie Chart</option>
+                                        <option value="doughnut">Doughnut Chart</option>
+                                    </select>
+                                    <select className="p-2 border rounded">
+                                        <option>Select X Axis</option>
+                                        {formFields.map(f => (
+                                            <option key={f.id}>{f.label}</option>
+                                        ))}
+                                    </select>
+                                    <select className="p-2 border rounded">
+                                        <option>Select Y Axis</option>
+                                        {formFields.filter(f => f.type === 'number' || f.type === 'currency').map(f => (
+                                            <option key={f.id}>{f.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="h-64 bg-gray-100 rounded flex items-center justify-center">
+                                    <p className="text-gray-500">
+                                        <i className="fas fa-chart-bar text-4xl mb-2 block"></i>
+                                        Chart preview (demo)
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 );
             };
 
@@ -1215,11 +1845,11 @@
             if (!user) {
                 return (
                     <div className="login-container">
-                        <h2 className="text-2xl font-bold mb-6">Welcome to File Explorer</h2>
-                        <p className="text-gray-600 mb-6">Please sign in to access your files</p>
+                        <h2 className="text-2xl font-bold mb-6">Welcome to Excel-Style Data Manager</h2>
+                        <p className="text-gray-600 mb-6">Please sign in to access your spreadsheets</p>
                         
                         <button 
-                            onClick={signInAnonymously}
+                            onClick={() => auth.signInAnonymously()}
                             className="login-btn mb-4"
                         >
                             <i className="fas fa-user-secret mr-2"></i>
@@ -1236,32 +1866,28 @@
                         </div>
                         
                         <button 
-                            onClick={() => signInWithEmail('demo@gmail.com', 'password123')}
+                            onClick={() => auth.signInWithEmailAndPassword('demo@gmail.com', 'password123')}
                             className="login-btn bg-purple-600 hover:bg-purple-700"
                         >
                             <i className="fas fa-user mr-2"></i>
                             Sign in as demo@gmail.com
                         </button>
-                        
-                        <p className="text-xs text-gray-400 mt-6">
-                            Note: For demo purposes only.
-                        </p>
                     </div>
                 );
             }
 
             // Main app
             return (
-                <div className="container mx-auto p-4 max-w-6xl">
-                    {/* Header with user info */}
+                <div className="container mx-auto p-4 max-w-7xl">
+                    {/* Header */}
                     <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
                         <div className="flex justify-between items-center">
                             <div>
                                 <h1 className="text-3xl font-bold flex items-center gap-3">
-                                    <i className="fas fa-folder-open"></i>
-                                    File Explorer & Form Builder
+                                    <i className="fas fa-file-excel"></i>
+                                    Excel-Style Form Builder & Data Manager
                                 </h1>
-                                <p className="mt-2 opacity-90">Create forms, manage data, and organize your files</p>
+                                <p className="mt-2 opacity-90">Create forms, analyze data with Excel-like features</p>
                             </div>
                             
                             <div className="user-info">
@@ -1270,11 +1896,10 @@
                                         {user.email || (user.isAnonymous ? 'Anonymous User' : user.uid)}
                                     </div>
                                     <div className="user-email">
-                                        {user.email && <span>{user.email}</span>}
                                         {isAdmin && <span className="ml-2 bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs">Admin</span>}
                                     </div>
                                 </div>
-                                <button onClick={signOut} className="logout-btn">
+                                <button onClick={() => auth.signOut()} className="logout-btn">
                                     <i className="fas fa-sign-out-alt mr-1"></i>
                                     Sign Out
                                 </button>
@@ -1302,49 +1927,28 @@
                             
                             <div className="flex gap-2">
                                 {currentPath.length > 1 && (
-                                    <button 
-                                        onClick={navigateUp}
-                                        className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                                    >
+                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
                                         <i className="fas fa-arrow-up mr-1"></i>Up
                                     </button>
                                 )}
                                 
-                                <button 
-                                    onClick={() => setShowNewFileModal(true)}
-                                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                >
+                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
                                     <i className="fas fa-plus mr-1"></i>New
                                 </button>
                                 
-                                <button 
-                                    onClick={() => fileInputRef.current.click()}
-                                    className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
-                                >
+                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
                                     <i className="fas fa-upload mr-1"></i>Upload
                                 </button>
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef}
-                                    onChange={handleFileSelect}
-                                    className="hidden"
-                                />
+                                <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                             </div>
                         </div>
                         
                         {/* File Grid */}
                         <div className="file-grid">
                             {files.map(file => (
-                                <div 
-                                    key={file.id}
-                                    className={`file-item ${selectedFile?.id === file.id ? 'selected' : ''}`}
-                                    onClick={() => openFile(file)}
-                                >
+                                <div key={file.id} className="file-item" onClick={() => openFile(file)}>
                                     <div className="file-actions">
-                                        <button 
-                                            className="file-action-btn delete"
-                                            onClick={(e) => deleteFile(file, e)}
-                                        >
+                                        <button className="file-action-btn delete" onClick={(e) => deleteFile(file, e)}>
                                             <i className="fas fa-trash"></i>
                                         </button>
                                     </div>
@@ -1352,18 +1956,12 @@
                                     <div className={`file-icon ${file.type}`}>
                                         <i className={`fas ${
                                             file.type === 'folder' ? 'fa-folder' :
-                                            file.type === 'form' ? 'fa-wpforms' :
+                                            file.type === 'form' ? 'fa-file-excel' :
                                             'fa-file'
                                         }`}></i>
                                     </div>
                                     
                                     <div className="file-name">{file.name}</div>
-                                    
-                                    {file.type === 'file' && file.size && (
-                                        <div className="text-xs text-gray-500 text-center mt-2">
-                                            {(file.size / 1024).toFixed(1)} KB
-                                        </div>
-                                    )}
                                     
                                     {file.type === 'form' && file.fields && (
                                         <div className="text-xs text-gray-500 text-center mt-2">
@@ -1377,7 +1975,7 @@
                                 <div className="col-span-full text-center py-12 text-gray-500">
                                     <i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i>
                                     <p>This folder is empty</p>
-                                    <p className="text-sm mt-2">Create a new folder or form to get started</p>
+                                    <p className="text-sm mt-2">Create a new spreadsheet to get started</p>
                                 </div>
                             )}
                         </div>
@@ -1387,67 +1985,38 @@
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
                         <div className="modal-content" style={{ maxWidth: '500px' }}>
                             <div className="modal-header">
-                                <h2 className="text-xl font-bold">Create New</h2>
-                                <button 
-                                    className="modal-close"
-                                    onClick={() => setShowNewFileModal(false)}
-                                >
+                                <h2 className="text-xl font-bold">Create New Spreadsheet</h2>
+                                <button className="modal-close" onClick={() => setShowNewFileModal(false)}>
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
                             
                             <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Type
-                                </label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
                                 <div className="flex gap-4">
                                     <label className="flex items-center gap-2">
-                                        <input
-                                            type="radio"
-                                            value="folder"
-                                            checked={newFileType === 'folder'}
-                                            onChange={(e) => setNewFileType(e.target.value)}
-                                        />
-                                        <i className="fas fa-folder text-yellow-500"></i>
-                                        Folder
+                                        <input type="radio" value="folder" checked={newFileType === 'folder'} onChange={(e) => setNewFileType(e.target.value)} />
+                                        <i className="fas fa-folder text-yellow-500"></i> Folder
                                     </label>
                                     <label className="flex items-center gap-2">
-                                        <input
-                                            type="radio"
-                                            value="form"
-                                            checked={newFileType === 'form'}
-                                            onChange={(e) => setNewFileType(e.target.value)}
-                                        />
-                                        <i className="fas fa-wpforms text-blue-500"></i>
-                                        Form
+                                        <input type="radio" value="form" checked={newFileType === 'form'} onChange={(e) => setNewFileType(e.target.value)} />
+                                        <i className="fas fa-file-excel text-green-500"></i> Spreadsheet
                                     </label>
                                 </div>
                             </div>
                             
                             <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Name
-                                </label>
-                                <input
-                                    type="text"
-                                    value={newFileName}
-                                    onChange={(e) => setNewFileName(e.target.value)}
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                                <input type="text" value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
                                     className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                    placeholder={`Enter ${newFileType} name`}
-                                />
+                                    placeholder={`Enter ${newFileType} name`} />
                             </div>
                             
                             <div className="flex justify-end gap-2">
-                                <button
-                                    onClick={() => setShowNewFileModal(false)}
-                                    className="px-4 py-2 border rounded hover:bg-gray-100"
-                                >
+                                <button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded hover:bg-gray-100">
                                     Cancel
                                 </button>
-                                <button
-                                    onClick={createNewFile}
-                                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                >
+                                <button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
                                     Create
                                 </button>
                             </div>
@@ -1456,270 +2025,156 @@
 
                     {/* Form Builder/Viewer Modal */}
                     <div className={`modal ${showFormBuilder ? 'active' : ''}`}>
-                        <div className="modal-content" style={{ maxWidth: '900px' }}>
+                        <div className="modal-content" style={{ maxWidth: '1200px' }}>
                             <div className="modal-header">
                                 <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <i className="fas fa-wpforms text-blue-500"></i>
+                                    <i className="fas fa-file-excel text-green-500"></i>
                                     {selectedFile?.name}
                                     {formMode === 'edit' && <span className="edit-badge">Edit Mode</span>}
                                 </h2>
-                                <button 
-                                    className="modal-close"
-                                    onClick={() => {
-                                        setShowFormBuilder(false);
-                                        setSelectedFile(null);
-                                        setFormFields([]);
-                                        setFormData([]);
-                                        setFormMode('view');
-                                    }}
-                                >
+                                <button className="modal-close" onClick={() => {
+                                    setShowFormBuilder(false);
+                                    setSelectedFile(null);
+                                    setFormFields([]);
+                                    setFormData([]);
+                                    setFormMode('view');
+                                    setFilters({});
+                                    setShowPivotTable(false);
+                                    setShowChart(false);
+                                }}>
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
                             
                             {/* Mode Toggle */}
                             <div className="mode-toggle">
-                                <button
-                                    className={`mode-btn ${formMode === 'view' ? 'active' : ''}`}
-                                    onClick={() => setFormMode('view')}
-                                >
-                                    <i className="fas fa-eye mr-1"></i>View Form
+                                <button className={`mode-btn ${formMode === 'view' ? 'active' : ''}`} onClick={() => setFormMode('view')}>
+                                    <i className="fas fa-eye mr-1"></i>View Data
                                 </button>
-                                <button
-                                    className={`mode-btn ${formMode === 'edit' ? 'active' : ''}`}
-                                    onClick={() => setFormMode('edit')}
-                                >
-                                    <i className="fas fa-edit mr-1"></i>Edit Form
+                                <button className={`mode-btn ${formMode === 'edit' ? 'active' : ''}`} onClick={() => setFormMode('edit')}>
+                                    <i className="fas fa-edit mr-1"></i>Edit Structure
                                 </button>
                             </div>
                             
                             {/* Tabs */}
                             <div className="tab-buttons">
-                                <button
-                                    className={`tab-button ${activeTab === 'form' ? 'active' : ''}`}
-                                    onClick={() => setActiveTab('form')}
-                                >
-                                    <i className="fas fa-wpforms mr-1"></i>Form
+                                <button className={`tab-button ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>
+                                    <i className="fas fa-table mr-1"></i>Data Table ({filteredData.length})
                                 </button>
-                                <button
-                                    className={`tab-button ${activeTab === 'data' ? 'active' : ''}`}
-                                    onClick={() => setActiveTab('data')}
-                                >
-                                    <i className="fas fa-table mr-1"></i>Data ({formData.length})
+                                <button className={`tab-button ${activeTab === 'form' ? 'active' : ''}`} onClick={() => setActiveTab('form')}>
+                                    <i className="fas fa-wpforms mr-1"></i>Form Entry
+                                </button>
+                                <button className={`tab-button ${activeTab === 'structure' ? 'active' : ''}`} onClick={() => setActiveTab('structure')}>
+                                    <i className="fas fa-cog mr-1"></i>Structure
                                 </button>
                             </div>
                             
-                            {activeTab === 'form' && (
-                                <>
-                                    {/* Edit Mode - Show field palette and dropzone */}
-                                    {formMode === 'edit' && (
-                                        <>
-                                            <div className="mb-6">
-                                                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                                                    Drag & Drop Fields (Drag to add to form)
-                                                </h3>
-                                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                                    {fieldTypes.map(type => (
-                                                        <div
-                                                            key={type.value}
-                                                            draggable
-                                                            onDragStart={(e) => handleDragStart(e, type.value)}
-                                                            className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
-                                                        >
-                                                            <i className={`fas fa-${type.icon} block text-lg mb-1`}></i>
-                                                            <span className="text-xs">{type.label}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                            
-                                            {/* Form Builder Dropzone */}
-                                            <div 
-                                                className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`}
-                                                onDragOver={handleDragOver}
-                                                onDragLeave={handleDragLeave}
-                                                onDrop={handleDrop}
-                                            >
-                                                {formFields.length === 0 ? (
-                                                    <>
-                                                        <i className="fas fa-cloud-upload-alt"></i>
-                                                        <p className="text-gray-600">Drag and drop fields here to build your form</p>
-                                                    </>
-                                                ) : (
-                                                    formFields.map((field, index) => (
-                                                        <div key={field.id} className="form-field">
-                                                            <div className="field-actions">
-                                                                <button 
-                                                                    className="field-action-btn delete"
-                                                                    onClick={() => deleteField(index)}
-                                                                >
-                                                                    <i className="fas fa-trash"></i>
-                                                                </button>
-                                                            </div>
-                                                            
-                                                            <div className="field-label">
-                                                                <input
-                                                                    type="text"
-                                                                    value={field.label}
-                                                                    onChange={(e) => updateField(index, { label: e.target.value })}
-                                                                    placeholder="Field Label"
-                                                                />
-                                                                <label className="flex items-center gap-1 text-sm">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={field.required}
-                                                                        onChange={(e) => updateField(index, { required: e.target.checked })}
-                                                                    />
-                                                                    Required
-                                                                </label>
-                                                            </div>
-                                                            
-                                                            <div className="field-type-selector">
-                                                                <select
-                                                                    value={field.type}
-                                                                    onChange={(e) => updateField(index, { type: e.target.value })}
-                                                                >
-                                                                    {fieldTypes.map(ft => (
-                                                                        <option key={ft.value} value={ft.value}>
-                                                                            {ft.label}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-                                                            
-                                                            {field.type === 'select' && (
-                                                                <div className="mt-2">
-                                                                    <label className="text-sm text-gray-600">Options (comma-separated)</label>
-                                                                    <input
-                                                                        type="text"
-                                                                        value={field.options?.join(', ') || ''}
-                                                                        onChange={(e) => updateField(index, { 
-                                                                            options: e.target.value.split(',').map(opt => opt.trim()) 
-                                                                        })}
-                                                                        className="w-full p-2 border rounded mt-1"
-                                                                        placeholder="Option 1, Option 2, Option 3"
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                            
-                                                            {/* Field Preview */}
-                                                            <div className="mt-3 pt-3 border-t">
-                                                                <div className="text-sm text-gray-500 mb-2">Preview:</div>
-                                                                {renderInputField(field, '', (id, value) => {}, true)}
-                                                            </div>
-                                                        </div>
-                                                    ))
-                                                )}
-                                            </div>
-                                            
-                                            {/* Form Actions */}
-                                            <div className="flex justify-between mt-4">
-                                                <div>
-                                                    <button
-                                                        onClick={() => {
-                                                            if (window.confirm('Clear all fields?')) {
-                                                                setFormFields([]);
-                                                            }
-                                                        }}
-                                                        className="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50"
-                                                    >
-                                                        Clear All Fields
-                                                    </button>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={saveFormStructure}
-                                                        className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-                                                    >
-                                                        <i className="fas fa-save mr-1"></i>Save Form
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-                                    
-                                    {/* View Mode - Show the actual form for data entry */}
-                                    {formMode === 'view' && (
-                                        <div className="form-view">
-                                            {formFields.length === 0 ? (
-                                                <div className="text-center py-10 text-gray-500">
-                                                    <i className="fas fa-wpforms text-4xl mb-3"></i>
-                                                    <p>This form has no fields yet.</p>
-                                                    <p className="text-sm mt-2">Switch to Edit Mode to add fields.</p>
-                                                </div>
-                                            ) : (
-                                                <FormDataEntry 
-                                                    fields={formFields}
-                                                    onSave={saveFormData}
-                                                    renderInputField={renderInputField}
-                                                />
-                                            )}
-                                        </div>
-                                    )}
-                                </>
-                            )}
+                            {activeTab === 'data' && renderDataTable()}
                             
-                            {activeTab === 'data' && (
-                                <div>
-                                    <h3 className="text-lg font-bold mb-4">Saved Data</h3>
-                                    
-                                    {formData.length > 0 ? (
-                                        <div className="overflow-x-auto">
-                                            <table className="form-data-table">
-                                                <thead>
-                                                    <tr>
-                                                        {formFields.map(field => (
-                                                            <th key={field.id}>{field.label}</th>
-                                                        ))}
-                                                        <th>Created At</th>
-                                                        <th>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {formData.map(record => (
-                                                        <tr key={record.id}>
-                                                            {formFields.map(field => (
-                                                                <td key={field.id}>
-                                                                    {field.type === 'checkbox' 
-                                                                        ? (record[field.id] ? '✓' : '✗')
-                                                                        : record[field.id] || '-'}
-                                                                </td>
-                                                            ))}
-                                                            <td className="text-sm text-gray-500">
-                                                                {record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}
-                                                            </td>
-                                                            <td>
-                                                                <div className="form-data-actions">
-                                                                    <button 
-                                                                        className="data-action-btn edit"
-                                                                        onClick={() => {
-                                                                            setEditingRecord(record);
-                                                                            setActiveTab('form');
-                                                                            setFormMode('view');
-                                                                        }}
-                                                                    >
-                                                                        <i className="fas fa-edit"></i>
-                                                                    </button>
-                                                                    <button 
-                                                                        className="data-action-btn delete"
-                                                                        onClick={() => deleteFormData(record.id)}
-                                                                    >
-                                                                        <i className="fas fa-trash"></i>
-                                                                    </button>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                            {activeTab === 'form' && (
+                                <div className="form-view">
+                                    {formMode === 'edit' ? (
+                                        <div className="text-center py-10 text-gray-500">
+                                            <i className="fas fa-edit text-4xl mb-3"></i>
+                                            <p>Switch to View Data mode to enter records</p>
                                         </div>
                                     ) : (
-                                        <div className="text-center py-10 text-gray-500">
-                                            <i className="fas fa-database text-4xl mb-3"></i>
-                                            <p>No data saved yet.</p>
-                                            <p className="text-sm mt-2">Go to the Form tab to add records.</p>
-                                        </div>
+                                        <>
+                                            <h3 className="text-lg font-bold mb-4">Enter New Record</h3>
+                                            <FormDataEntry 
+                                                fields={formFields}
+                                                onSave={saveFormData}
+                                                renderInputField={renderInputField}
+                                            />
+                                        </>
                                     )}
+                                </div>
+                            )}
+                            
+                            {activeTab === 'structure' && formMode === 'edit' && (
+                                <div>
+                                    {/* Field Types Palette */}
+                                    <div className="mb-6">
+                                        <h3 className="text-sm font-medium text-gray-700 mb-2">
+                                            Drag & Drop Fields
+                                        </h3>
+                                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                                            {fieldTypes.map(type => (
+                                                <div key={type.value}
+                                                    draggable
+                                                    onDragStart={(e) => handleDragStart(e, type.value)}
+                                                    className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200">
+                                                    <i className={`fas fa-${type.icon} block text-lg mb-1`}></i>
+                                                    <span className="text-xs">{type.label}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Form Builder Dropzone */}
+                                    <div className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`}
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={() => setIsDraggingOver(false)}
+                                        onDrop={handleDrop}>
+                                        
+                                        {formFields.length === 0 ? (
+                                            <>
+                                                <i className="fas fa-cloud-upload-alt"></i>
+                                                <p className="text-gray-600">Drag and drop fields here to build your spreadsheet structure</p>
+                                            </>
+                                        ) : (
+                                            formFields.map((field, index) => (
+                                                <div key={field.id} className="form-field">
+                                                    <div className="field-actions">
+                                                        <button className="field-action-btn delete" onClick={() => deleteField(index)}>
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <div className="field-label">
+                                                        <input type="text" value={field.label}
+                                                            onChange={(e) => updateField(index, { label: e.target.value })}
+                                                            placeholder="Field Label" />
+                                                        <label className="flex items-center gap-1 text-sm">
+                                                            <input type="checkbox" checked={field.required}
+                                                                onChange={(e) => updateField(index, { required: e.target.checked })} />
+                                                            Required
+                                                        </label>
+                                                    </div>
+                                                    
+                                                    <div className="field-type-selector">
+                                                        <select value={field.type} onChange={(e) => updateField(index, { type: e.target.value })}>
+                                                            {fieldTypes.map(ft => (
+                                                                <option key={ft.value} value={ft.value}>{ft.label}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    
+                                                    {field.type === 'select' && (
+                                                        <div className="mt-2">
+                                                            <label className="text-sm text-gray-600">Options (comma-separated)</label>
+                                                            <input type="text" value={field.options?.join(', ') || ''}
+                                                                onChange={(e) => updateField(index, { 
+                                                                    options: e.target.value.split(',').map(opt => opt.trim()) 
+                                                                })}
+                                                                className="w-full p-2 border rounded mt-1"
+                                                                placeholder="Option 1, Option 2, Option 3" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                    
+                                    {/* Form Actions */}
+                                    <div className="flex justify-between mt-4">
+                                        <button onClick={() => setFormFields([])} className="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50">
+                                            Clear All Fields
+                                        </button>
+                                        <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                                            <i className="fas fa-save mr-1"></i>Save Structure
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1731,10 +2186,7 @@
                             <div className="modal-content" style={{ maxWidth: '600px' }}>
                                 <div className="modal-header">
                                     <h2 className="text-xl font-bold">Edit Record</h2>
-                                    <button 
-                                        className="modal-close"
-                                        onClick={() => setEditingRecord(null)}
-                                    >
+                                    <button className="modal-close" onClick={() => setEditingRecord(null)}>
                                         <i className="fas fa-times"></i>
                                     </button>
                                 </div>
@@ -1753,12 +2205,8 @@
                     {/* Toast Notifications */}
                     <div className="toast-container">
                         {toasts.map(toast => (
-                            <Toast
-                                key={toast.id}
-                                message={toast.message}
-                                type={toast.type}
-                                onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                            />
+                            <Toast key={toast.id} message={toast.message} type={toast.type}
+                                onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))} />
                         ))}
                     </div>
                 </div>
@@ -1800,17 +2248,20 @@
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 {field.label}
                                 {field.required && <span className="text-red-500 ml-1">*</span>}
+                                {field.type === 'formula' && <span className="macro-badge">Formula</span>}
                             </label>
                             {renderInputField(field, formData[field.id], handleFieldChange, false)}
+                            {field.type === 'formula' && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Use =SUM([Field1], [Field2]) or =AVERAGE([Field])
+                                </p>
+                            )}
                         </div>
                     ))}
                     
                     {fields.length > 0 && (
                         <div className="flex justify-end gap-2 pt-4">
-                            <button
-                                type="submit"
-                                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                            >
+                            <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
                                 {isEditing ? 'Update' : 'Save'} Record
                             </button>
                         </div>
