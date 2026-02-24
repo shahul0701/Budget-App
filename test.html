@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Excel-Style Form Builder & Data Manager</title>
+    <title>Smart Data Manager - Excel-like File Explorer</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -14,415 +14,684 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
-        /* Excel-like Styles */
-        .excel-container {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow: hidden;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+        /* Modern UI Variables */
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --dark: #1f2937;
+            --light: #f9fafb;
+            --border: #e5e7eb;
         }
-        
-        .excel-toolbar {
-            background: #f3f4f6;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 8px;
+
+        /* File Explorer Styles */
+        .file-explorer {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+
+        .explorer-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px 24px;
+            color: white;
+        }
+
+        .explorer-title {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .explorer-stats {
+            display: flex;
+            gap: 24px;
+            margin-top: 12px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .breadcrumb-nav {
+            background: #f8fafc;
+            padding: 12px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .breadcrumb-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .breadcrumb-item:hover {
+            background: #e2e8f0;
+        }
+
+        .breadcrumb-item.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .breadcrumb-item i {
+            font-size: 12px;
+        }
+
+        .toolbar {
+            padding: 16px 24px;
+            background: white;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .toolbar-actions {
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
         }
-        
-        .excel-toolbar-group {
+
+        .toolbar-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: white;
+        }
+
+        .toolbar-btn:hover {
+            background: #f3f4f6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+
+        .toolbar-btn.primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+        }
+
+        .toolbar-btn.primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .toolbar-btn.success {
+            background: var(--secondary);
+            color: white;
+            border: none;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px 12px;
+            min-width: 250px;
+        }
+
+        .search-box i {
+            color: #9ca3af;
+        }
+
+        .search-box input {
+            border: none;
+            padding: 8px 12px;
+            outline: none;
+            width: 100%;
+        }
+
+        /* File Grid */
+        .file-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+            padding: 24px;
+        }
+
+        .file-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .file-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 20px -8px rgba(0,0,0,0.15);
+            border-color: var(--primary);
+        }
+
+        .file-card.selected {
+            border: 2px solid var(--primary);
+            background: #f0f9ff;
+        }
+
+        .file-icon {
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .file-icon.folder { color: #fbbf24; }
+        .file-icon.excel { color: #10b981; }
+        .file-icon.form { color: #3b82f6; }
+        .file-icon.file { color: #6b7280; }
+
+        .file-name {
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .file-meta {
+            font-size: 12px;
+            color: #6b7280;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .file-badge {
+            background: #e5e7eb;
+            color: #374151;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            display: inline-block;
+        }
+
+        .file-actions {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            opacity: 0;
+            transition: opacity 0.2s;
             display: flex;
             gap: 4px;
-            padding: 0 8px;
-            border-right: 1px solid #d1d5db;
         }
-        
-        .excel-toolbar-group:last-child {
-            border-right: none;
+
+        .file-card:hover .file-actions {
+            opacity: 1;
         }
-        
-        .excel-toolbar-btn {
-            padding: 6px 12px;
+
+        .file-action {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
             background: white;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .file-action:hover {
+            background: var(--danger);
+            color: white;
+            border-color: var(--danger);
+        }
+
+        /* Data View Container */
+        .data-container {
+            padding: 24px;
+            background: #f8fafc;
+            border-radius: 0 0 12px 12px;
+        }
+
+        /* Excel-like Table */
+        .excel-wrapper {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .excel-toolbar {
+            background: #f8fafc;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .excel-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
             font-size: 13px;
             display: flex;
             align-items: center;
             gap: 6px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: white;
             transition: all 0.2s;
         }
-        
-        .excel-toolbar-btn:hover {
-            background: #e5e7eb;
-            border-color: #9ca3af;
-        }
-        
-        .excel-toolbar-btn.active {
-            background: #3b82f6;
-            color: white;
-            border-color: #2563eb;
-        }
-        
-        .excel-toolbar-btn i {
-            font-size: 14px;
-        }
-        
-        .excel-table-container {
-            overflow-x: auto;
-            overflow-y: auto;
-            max-height: 500px;
-            position: relative;
-        }
-        
-        .excel-table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: auto;
-            min-width: 100%;
-        }
-        
-        .excel-table th {
-            background: #f9fafb;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            padding: 0;
-            border: 1px solid #e5e7eb;
-            font-weight: 500;
-        }
-        
-        .excel-table td {
-            border: 1px solid #e5e7eb;
-            padding: 8px 12px;
-            min-width: 120px;
-        }
-        
-        .excel-table tr:hover td {
-            background: #f9fafb;
-        }
-        
-        .excel-table td:focus-within {
-            outline: 2px solid #3b82f6;
-            outline-offset: -1px;
-        }
-        
-        .excel-table td input {
-            width: 100%;
-            border: none;
-            padding: 4px;
-            background: transparent;
-        }
-        
-        .excel-table td input:focus {
-            outline: none;
-        }
-        
-        .column-header-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            cursor: pointer;
-            user-select: none;
-        }
-        
-        .column-header-content:hover {
-            background: #e5e7eb;
-        }
-        
-        .filter-indicator {
-            color: #3b82f6;
-            margin-left: 4px;
-        }
-        
-        .filter-dropdown {
-            position: absolute;
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            min-width: 200px;
-            max-height: 300px;
-            overflow-y: auto;
-            z-index: 1000;
-            padding: 8px;
-        }
-        
-        .filter-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 8px;
-            cursor: pointer;
-        }
-        
-        .filter-option:hover {
+
+        .excel-btn:hover {
             background: #f3f4f6;
         }
-        
-        .filter-option input[type="checkbox"] {
-            margin: 0;
+
+        .excel-btn i {
+            font-size: 12px;
         }
-        
-        .filter-search {
-            width: 100%;
-            padding: 6px;
-            margin-bottom: 8px;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-        }
-        
-        .filter-actions {
+
+        .filter-bar {
+            background: #f8fafc;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
             display: flex;
-            justify-content: space-between;
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e5e7eb;
-        }
-        
-        .filter-btn {
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        
-        .filter-btn.clear {
-            color: #ef4444;
-        }
-        
-        .filter-btn.apply {
-            background: #3b82f6;
-            color: white;
-        }
-        
-        /* Formula Bar */
-        .formula-bar {
-            background: #f9fafb;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 8px 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .formula-label {
-            background: #e5e7eb;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 12px;
-        }
-        
-        .formula-input {
-            flex: 1;
-            padding: 6px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-        
-        .formula-input:focus {
-            outline: none;
-            border-color: #3b82f6;
-        }
-        
-        .formula-help {
-            color: #6b7280;
-            font-size: 12px;
-        }
-        
-        /* Pivot Table Styles */
-        .pivot-container {
-            background: white;
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 16px;
-        }
-        
-        .pivot-fields {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 16px;
-            margin-bottom: 16px;
+            align-items: center;
+            flex-wrap: wrap;
         }
-        
-        .pivot-field-group {
-            background: #f9fafb;
-            border-radius: 6px;
-            padding: 12px;
-        }
-        
-        .pivot-field-group h4 {
-            font-weight: 500;
-            margin-bottom: 8px;
-            color: #374151;
-        }
-        
-        .pivot-field-item {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            padding: 6px 10px;
-            margin-bottom: 4px;
-            cursor: move;
+
+        .filter-tag {
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
             display: flex;
             align-items: center;
             gap: 6px;
         }
-        
-        .pivot-field-item:hover {
-            border-color: #3b82f6;
+
+        .filter-tag i {
+            cursor: pointer;
         }
-        
-        /* Chart Styles */
-        .chart-container {
+
+        .table-container {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 800px;
+        }
+
+        .data-table th {
+            position: sticky;
+            top: 0;
+            background: #f9fafb;
+            color: #374151;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 16px 12px;
+            border-bottom: 2px solid var(--border);
+            text-align: left;
+        }
+
+        .data-table td {
+            padding: 14px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+        }
+
+        .data-table tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        .data-table tbody tr.selected {
+            background: #e0f2fe;
+        }
+
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .sortable:hover {
+            background: #e5e7eb;
+        }
+
+        .sort-icon {
+            margin-left: 6px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .filter-icon {
+            margin-left: 8px;
+            cursor: pointer;
+            color: #9ca3af;
+            transition: color 0.2s;
+        }
+
+        .filter-icon.active {
+            color: var(--primary);
+        }
+
+        .filter-icon:hover {
+            color: var(--primary);
+        }
+
+        /* Filter Dropdown */
+        .filter-dropdown {
+            position: absolute;
             background: white;
-            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+            min-width: 280px;
+            max-width: 400px;
+            z-index: 1000;
+            margin-top: 4px;
+        }
+
+        .filter-header {
             padding: 16px;
-            margin-top: 16px;
-        }
-        
-        .chart-controls {
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
             display: flex;
-            gap: 12px;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
         }
-        
+
+        .filter-body {
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .filter-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .filter-option:hover {
+            background: #f3f4f6;
+        }
+
+        .filter-option input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+        }
+
+        .filter-search {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+
+        .filter-footer {
+            padding: 16px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
         /* Summary Cards */
         .summary-cards {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .summary-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid;
+        }
+
+        .summary-card.total { border-color: #3b82f6; }
+        .summary-card.average { border-color: #10b981; }
+        .summary-card.min { border-color: #f59e0b; }
+        .summary-card.max { border-color: #ef4444; }
+
+        .summary-label {
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .summary-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .summary-sub {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 8px;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            cursor: pointer;
+            font-size: 20px;
+            color: #9ca3af;
+            transition: color 0.2s;
+        }
+
+        .modal-close:hover {
+            color: var(--danger);
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        /* Form Styles */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+
+        .form-field {
             margin-bottom: 16px;
         }
-        
-        .summary-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .summary-card .label {
+
+        .form-label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: #374151;
             font-size: 14px;
-            opacity: 0.9;
-            margin-bottom: 8px;
         }
-        
-        .summary-card .value {
-            font-size: 28px;
-            font-weight: bold;
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            transition: all 0.2s;
         }
-        
-        .summary-card .change {
-            font-size: 12px;
-            margin-top: 8px;
-            opacity: 0.8;
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
         }
-        
-        /* Data Validation */
-        .validation-badge {
-            background: #10b981;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 12px;
-            font-size: 10px;
-            margin-left: 6px;
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 3000;
         }
-        
-        /* Conditional Formatting */
-        .condition-form {
-            background: #f9fafb;
-            border-radius: 6px;
-            padding: 12px;
-            margin-bottom: 8px;
-        }
-        
-        /* Import/Export */
-        .import-export-menu {
-            position: absolute;
+
+        .toast {
             background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            padding: 8px 0;
-            min-width: 150px;
-        }
-        
-        .import-export-item {
-            padding: 8px 16px;
-            cursor: pointer;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-top: 10px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid;
         }
-        
-        .import-export-item:hover {
-            background: #f3f4f6;
+
+        .toast.success { border-color: #10b981; }
+        .toast.error { border-color: #ef4444; }
+        .toast.info { border-color: #3b82f6; }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
-        
-        /* Macros */
-        .macro-badge {
-            background: #8b5cf6;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 10px;
-            margin-left: 6px;
+
+        /* Empty States */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
         }
-        
-        /* Mobile Responsive */
+
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            font-weight: 500;
+            color: #4b5563;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
         @media (max-width: 768px) {
-            .excel-toolbar {
-                flex-direction: column;
+            .file-grid {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
             }
             
-            .excel-toolbar-group {
-                border-right: none;
-                border-bottom: 1px solid #d1d5db;
-                padding-bottom: 8px;
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
             }
-        }
-        
-        /* Cell Types */
-        .cell-number {
-            text-align: right;
-        }
-        
-        .cell-currency {
-            text-align: right;
-            font-family: monospace;
-        }
-        
-        .cell-percentage {
-            text-align: right;
-        }
-        
-        .cell-date {
-            color: #2563eb;
-        }
-        
-        /* Animations */
-        @keyframes highlight {
-            0% { background: #fef3c7; }
-            100% { background: transparent; }
-        }
-        
-        .cell-highlight {
-            animation: highlight 1s ease;
+            
+            .search-box {
+                width: 100%;
+            }
         }
     </style>
 </head>
 <body class="bg-gray-50">
     <div id="root"></div>
-    
+
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
@@ -443,298 +712,18 @@
         }
         
         const db = firebase.firestore();
-        const storage = firebase.storage();
         const auth = firebase.auth();
-
-        // Formula Parser Class
-        class FormulaParser {
-            static evaluate(formula, data, rowIndex, fields) {
-                if (!formula || !formula.startsWith('=')) return formula;
-                
-                try {
-                    // Remove the '='
-                    const expr = formula.substring(1).trim();
-                    
-                    // Handle different functions
-                    if (expr.toUpperCase().startsWith('SUM')) {
-                        return this.handleSum(expr, data, fields);
-                    } else if (expr.toUpperCase().startsWith('AVERAGE')) {
-                        return this.handleAverage(expr, data, fields);
-                    } else if (expr.toUpperCase().startsWith('COUNT')) {
-                        return this.handleCount(expr, data, fields);
-                    } else if (expr.toUpperCase().startsWith('MAX')) {
-                        return this.handleMax(expr, data, fields);
-                    } else if (expr.toUpperCase().startsWith('MIN')) {
-                        return this.handleMin(expr, data, fields);
-                    } else if (expr.toUpperCase().startsWith('IF')) {
-                        return this.handleIf(expr, data, rowIndex, fields);
-                    } else if (expr.toUpperCase().startsWith('CONCAT')) {
-                        return this.handleConcat(expr, data, rowIndex, fields);
-                    } else {
-                        // Simple arithmetic
-                        return this.evaluateArithmetic(expr, data, rowIndex, fields);
-                    }
-                } catch (error) {
-                    console.error('Formula error:', error);
-                    return '#ERROR!';
-                }
-            }
-            
-            static handleSum(expr, data, fields) {
-                const range = this.parseRange(expr);
-                let sum = 0;
-                
-                if (range.column) {
-                    // Sum a specific column across all rows
-                    data.forEach(row => {
-                        const val = parseFloat(row[range.column]) || 0;
-                        sum += val;
-                    });
-                } else if (range.start && range.end) {
-                    // Sum a range of cells (simplified)
-                    // You can expand this for more complex ranges
-                }
-                
-                return sum;
-            }
-            
-            static handleAverage(expr, data, fields) {
-                const range = this.parseRange(expr);
-                let sum = 0;
-                let count = 0;
-                
-                if (range.column) {
-                    data.forEach(row => {
-                        const val = parseFloat(row[range.column]);
-                        if (!isNaN(val)) {
-                            sum += val;
-                            count++;
-                        }
-                    });
-                }
-                
-                return count > 0 ? (sum / count).toFixed(2) : 0;
-            }
-            
-            static handleCount(expr, data, fields) {
-                const range = this.parseRange(expr);
-                let count = 0;
-                
-                if (range.column) {
-                    data.forEach(row => {
-                        if (row[range.column] !== undefined && row[range.column] !== '') {
-                            count++;
-                        }
-                    });
-                }
-                
-                return count;
-            }
-            
-            static handleMax(expr, data, fields) {
-                const range = this.parseRange(expr);
-                let max = -Infinity;
-                
-                if (range.column) {
-                    data.forEach(row => {
-                        const val = parseFloat(row[range.column]);
-                        if (!isNaN(val) && val > max) {
-                            max = val;
-                        }
-                    });
-                }
-                
-                return max !== -Infinity ? max : 0;
-            }
-            
-            static handleMin(expr, data, fields) {
-                const range = this.parseRange(expr);
-                let min = Infinity;
-                
-                if (range.column) {
-                    data.forEach(row => {
-                        const val = parseFloat(row[range.column]);
-                        if (!isNaN(val) && val < min) {
-                            min = val;
-                        }
-                    });
-                }
-                
-                return min !== Infinity ? min : 0;
-            }
-            
-            static handleIf(expr, data, rowIndex, fields) {
-                // Format: =IF(condition, value_if_true, value_if_false)
-                const match = expr.match(/IF\((.+?),(.+?),(.+)\)/i);
-                if (match) {
-                    const condition = match[1].trim();
-                    const trueVal = match[2].trim();
-                    const falseVal = match[3].trim();
-                    
-                    // Evaluate condition (simplified)
-                    const conditionResult = this.evaluateCondition(condition, data, rowIndex, fields);
-                    
-                    return conditionResult ? this.evaluateValue(trueVal, data, rowIndex, fields) : 
-                                           this.evaluateValue(falseVal, data, rowIndex, fields);
-                }
-                return '#ERROR!';
-            }
-            
-            static handleConcat(expr, data, rowIndex, fields) {
-                const match = expr.match(/CONCAT\((.+)\)/i);
-                if (match) {
-                    const args = match[1].split(',').map(arg => arg.trim());
-                    return args.map(arg => this.evaluateValue(arg, data, rowIndex, fields)).join('');
-                }
-                return '#ERROR!';
-            }
-            
-            static evaluateArithmetic(expr, data, rowIndex, fields) {
-                // Replace field references with values
-                let evalExpr = expr;
-                
-                // Find all field references (e.g., [Field Name])
-                const fieldMatches = expr.match(/\[(.*?)\]/g);
-                if (fieldMatches) {
-                    fieldMatches.forEach(match => {
-                        const fieldName = match.slice(1, -1);
-                        const value = data[rowIndex]?.[fieldName];
-                        
-                        if (value !== undefined) {
-                            const numValue = parseFloat(value);
-                            evalExpr = evalExpr.replace(match, isNaN(numValue) ? '0' : numValue);
-                        } else {
-                            evalExpr = evalExpr.replace(match, '0');
-                        }
-                    });
-                }
-                
-                // Evaluate safely
-                try {
-                    // eslint-disable-next-line no-new-func
-                    const result = new Function('return ' + evalExpr)();
-                    return isNaN(result) ? '#VALUE!' : result;
-                } catch {
-                    return '#ERROR!';
-                }
-            }
-            
-            static parseRange(expr) {
-                // Parse something like SUM(A1:A10) or SUM([Column Name])
-                const rangeMatch = expr.match(/\((.*?)\)/);
-                if (rangeMatch) {
-                    const range = rangeMatch[1];
-                    
-                    // Check if it's a column reference
-                    const columnMatch = range.match(/\[(.*?)\]/);
-                    if (columnMatch) {
-                        return { column: columnMatch[1] };
-                    }
-                    
-                    // Check if it's a cell range (simplified)
-                    const cellRangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-                    if (cellRangeMatch) {
-                        return {
-                            start: { col: cellRangeMatch[1], row: parseInt(cellRangeMatch[2]) },
-                            end: { col: cellRangeMatch[3], row: parseInt(cellRangeMatch[4]) }
-                        };
-                    }
-                }
-                return {};
-            }
-            
-            static evaluateCondition(condition, data, rowIndex, fields) {
-                // Simple condition evaluation
-                const operators = ['==', '!=', '>=', '<=', '>', '<'];
-                
-                for (const op of operators) {
-                    if (condition.includes(op)) {
-                        const parts = condition.split(op);
-                        const left = this.evaluateValue(parts[0].trim(), data, rowIndex, fields);
-                        const right = this.evaluateValue(parts[1].trim(), data, rowIndex, fields);
-                        
-                        switch (op) {
-                            case '==': return left == right;
-                            case '!=': return left != right;
-                            case '>=': return parseFloat(left) >= parseFloat(right);
-                            case '<=': return parseFloat(left) <= parseFloat(right);
-                            case '>': return parseFloat(left) > parseFloat(right);
-                            case '<': return parseFloat(left) < parseFloat(right);
-                        }
-                    }
-                }
-                
-                return false;
-            }
-            
-            static evaluateValue(value, data, rowIndex, fields) {
-                // Check if it's a field reference
-                const fieldMatch = value.match(/\[(.*?)\]/);
-                if (fieldMatch) {
-                    return data[rowIndex]?.[fieldMatch[1]] || '';
-                }
-                
-                // Check if it's a number
-                if (!isNaN(parseFloat(value))) {
-                    return parseFloat(value);
-                }
-                
-                // Return as string
-                return value.replace(/^['"]|['"]$/g, '');
-            }
-        }
-
-        // Filter Manager Class
-        class FilterManager {
-            constructor(data, fields) {
-                this.data = data;
-                this.fields = fields;
-                this.filters = {};
-            }
-            
-            setFilter(fieldId, filterValues) {
-                if (filterValues && filterValues.length > 0) {
-                    this.filters[fieldId] = filterValues;
-                } else {
-                    delete this.filters[fieldId];
-                }
-            }
-            
-            applyFilters() {
-                if (Object.keys(this.filters).length === 0) {
-                    return this.data;
-                }
-                
-                return this.data.filter(row => {
-                    for (const [fieldId, filterValues] of Object.entries(this.filters)) {
-                        const value = String(row[fieldId] || '').toLowerCase();
-                        if (!filterValues.some(fv => value.includes(String(fv).toLowerCase()))) {
-                            return false;
-                        }
-                    }
-                    return true;
-                });
-            }
-            
-            clearFilters() {
-                this.filters = {};
-            }
-            
-            getActiveFilters() {
-                return this.filters;
-            }
-        }
 
         // Toast Component
         const Toast = ({ message, type, onClose }) => (
             <div className={`toast ${type}`}>
                 <i className={`fas ${
-                    type === 'success' ? 'fa-check-circle' :
-                    type === 'error' ? 'fa-exclamation-circle' :
-                    'fa-info-circle'
+                    type === 'success' ? 'fa-check-circle text-green-500' :
+                    type === 'error' ? 'fa-exclamation-circle text-red-500' :
+                    'fa-info-circle text-blue-500'
                 }`}></i>
-                <span>{message}</span>
-                <button onClick={onClose} className="ml-4 text-gray-400 hover:text-gray-600">
+                <span className="flex-1">{message}</span>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                     <i className="fas fa-times"></i>
                 </button>
             </div>
@@ -744,120 +733,51 @@
         function App() {
             const [user, setUser] = useState(null);
             const [loading, setLoading] = useState(true);
-            const [currentPath, setCurrentPath] = useState(['My Files']);
+            const [currentPath, setCurrentPath] = useState(['My Drive']);
             const [files, setFiles] = useState([]);
             const [selectedFile, setSelectedFile] = useState(null);
             const [showNewFileModal, setShowNewFileModal] = useState(false);
-            const [showFormBuilder, setShowFormBuilder] = useState(false);
+            const [showDataModal, setShowDataModal] = useState(false);
             const [formFields, setFormFields] = useState([]);
             const [formData, setFormData] = useState([]);
             const [filteredData, setFilteredData] = useState([]);
-            const [editingRecord, setEditingRecord] = useState(null);
             const [toasts, setToasts] = useState([]);
-            const [isDraggingOver, setIsDraggingOver] = useState(false);
-            const [newFileType, setNewFileType] = useState('form');
             const [newFileName, setNewFileName] = useState('');
-            const [isAdmin, setIsAdmin] = useState(false);
-            const [formMode, setFormMode] = useState('view');
-            const [activeTab, setActiveTab] = useState('form');
-            const [filters, setFilters] = useState({});
-            const [showFilterDropdown, setShowFilterDropdown] = useState(null);
-            const [formulas, setFormulas] = useState({});
-            const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' });
-            const [selectedCells, setSelectedCells] = useState([]);
-            const [clipboard, setClipboard] = useState(null);
-            const [showPivotTable, setShowPivotTable] = useState(false);
-            const [pivotConfig, setPivotConfig] = useState({
-                rows: [],
-                columns: [],
-                values: [],
-                filters: []
-            });
-            const [chartType, setChartType] = useState('bar');
-            const [showChart, setShowChart] = useState(false);
-            const [conditionalFormats, setConditionalFormats] = useState([]);
-            const [dataValidations, setDataValidations] = useState({});
-            const [macros, setMacros] = useState([]);
-            const [recordingMacro, setRecordingMacro] = useState(false);
-            const [macroSteps, setMacroSteps] = useState([]);
-            const [summaryStats, setSummaryStats] = useState({});
             const [searchText, setSearchText] = useState('');
-            const [undoStack, setUndoStack] = useState([]);
-            const [redoStack, setRedoStack] = useState([]);
-            
-            const dragField = useRef(null);
-            const fileInputRef = useRef(null);
-            const filterRef = useRef(null);
-            const tableRef = useRef(null);
-            const filterManager = useRef(null);
+            const [filters, setFilters] = useState({});
+            const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' });
+            const [showFilterDropdown, setShowFilterDropdown] = useState(null);
+            const [selectedRows, setSelectedRows] = useState([]);
+            const [summaryStats, setSummaryStats] = useState({});
+            const [editingRecord, setEditingRecord] = useState(null);
+            const [isCreatingNew, setIsCreatingNew] = useState(false);
 
-            const fieldTypes = [
-                { value: 'text', label: 'Text', icon: 'font' },
-                { value: 'number', label: 'Number', icon: 'hashtag' },
-                { value: 'currency', label: 'Currency', icon: 'dollar-sign' },
-                { value: 'percentage', label: 'Percentage', icon: 'percent' },
-                { value: 'email', label: 'Email', icon: 'envelope' },
-                { value: 'tel', label: 'Phone', icon: 'phone' },
-                { value: 'date', label: 'Date', icon: 'calendar' },
-                { value: 'time', label: 'Time', icon: 'clock' },
-                { value: 'checkbox', label: 'Checkbox', icon: 'square-check' },
-                { value: 'select', label: 'Dropdown', icon: 'caret-down' },
-                { value: 'textarea', label: 'Text Area', icon: 'align-left' },
-                { value: 'yesno', label: 'Yes/No', icon: 'circle-question' },
-                { value: 'color', label: 'Color', icon: 'palette' },
-                { value: 'range', label: 'Range', icon: 'sliders' },
-                { value: 'formula', label: 'Formula', icon: 'function' }
-            ];
+            const filterRef = useRef(null);
 
             // Monitor auth state
             useEffect(() => {
-                const unsubscribe = auth.onAuthStateChanged(async (user) => {
-                    if (user) {
-                        setUser(user);
-                        
-                        const token = await user.getIdTokenResult();
-                        setIsAdmin(
-                            token.claims.admin === true || 
-                            token.claims.isAdmin === true || 
-                            user.email === 'shahulsha254@gmail.com'
-                        );
-                        
-                        try {
-                            await db.collection('loginSessions').add({
-                                uid: user.uid,
-                                email: user.email,
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                                userAgent: navigator.userAgent
-                            });
-                        } catch (error) {
-                            console.error('Error recording login session:', error);
-                        }
-                    } else {
-                        setUser(null);
-                        setIsAdmin(false);
-                    }
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    setUser(user);
                     setLoading(false);
+                    if (user) {
+                        loadFiles();
+                    }
                 });
 
                 return () => unsubscribe();
             }, []);
 
-            // Load files when user and path change
+            // Load files when path changes
             useEffect(() => {
                 if (user) {
                     loadFiles();
                 }
-            }, [user, currentPath]);
+            }, [currentPath]);
 
             // Update filtered data when formData or filters change
             useEffect(() => {
                 if (formData.length > 0) {
-                    filterManager.current = new FilterManager(formData, formFields);
-                    Object.keys(filters).forEach(fieldId => {
-                        filterManager.current.setFilter(fieldId, filters[fieldId]);
-                    });
-                    
-                    let filtered = filterManager.current.applyFilters();
+                    let filtered = [...formData];
                     
                     // Apply search
                     if (searchText) {
@@ -867,6 +787,19 @@
                             );
                         });
                     }
+                    
+                    // Apply column filters
+                    Object.keys(filters).forEach(fieldId => {
+                        const filterValues = filters[fieldId];
+                        if (filterValues && filterValues.length > 0) {
+                            filtered = filtered.filter(row => {
+                                const value = String(row[fieldId] || '').toLowerCase();
+                                return filterValues.some(fv => 
+                                    value.includes(String(fv).toLowerCase())
+                                );
+                            });
+                        }
+                    });
                     
                     // Apply sort
                     if (sortConfig.field) {
@@ -883,36 +816,11 @@
                     }
                     
                     setFilteredData(filtered);
-                    
-                    // Update summary statistics
                     calculateSummaryStats(filtered);
                 } else {
                     setFilteredData([]);
                 }
             }, [formData, filters, sortConfig, searchText]);
-
-            // Calculate summary statistics
-            const calculateSummaryStats = (data) => {
-                const stats = {};
-                
-                formFields.forEach(field => {
-                    if (field.type === 'number' || field.type === 'currency' || field.type === 'percentage') {
-                        const values = data.map(row => parseFloat(row[field.id])).filter(v => !isNaN(v));
-                        
-                        if (values.length > 0) {
-                            stats[field.id] = {
-                                sum: values.reduce((a, b) => a + b, 0),
-                                avg: values.reduce((a, b) => a + b, 0) / values.length,
-                                min: Math.min(...values),
-                                max: Math.max(...values),
-                                count: values.length
-                            };
-                        }
-                    }
-                });
-                
-                setSummaryStats(stats);
-            };
 
             // Load files from Firebase
             const loadFiles = async () => {
@@ -920,7 +828,7 @@
 
                 try {
                     const path = currentPath.join('/');
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
                     const snapshot = await filesRef
                         .where('path', '==', path)
                         .get();
@@ -942,7 +850,7 @@
                 setToasts(prev => [...prev, { id, type, message }]);
                 setTimeout(() => {
                     setToasts(prev => prev.filter(t => t.id !== id));
-                }, 5000);
+                }, 3000);
             };
 
             // Create new file/folder
@@ -959,37 +867,36 @@
 
                 try {
                     const path = currentPath.join('/');
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
                     
                     const fileData = {
                         name: newFileName,
                         path: path,
-                        type: newFileType,
+                        type: 'spreadsheet',
                         uid: user.uid,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        fields: [
+                            { id: 'id', label: 'ID', type: 'text', required: true },
+                            { id: 'name', label: 'Name', type: 'text', required: true },
+                            { id: 'amount', label: 'Amount', type: 'currency' },
+                            { id: 'date', label: 'Date', type: 'date' },
+                            { id: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive', 'Pending'] }
+                        ],
+                        data: [],
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
-
-                    if (newFileType === 'form') {
-                        fileData.fields = [];
-                        fileData.data = [];
-                        fileData.formulas = {};
-                        fileData.conditionalFormats = [];
-                        fileData.dataValidations = {};
-                    }
 
                     await filesRef.add(fileData);
                     
                     setShowNewFileModal(false);
                     setNewFileName('');
                     loadFiles();
-                    showToast('success', `${newFileType === 'folder' ? 'Folder' : 'Form'} created successfully!`);
+                    showToast('success', 'Spreadsheet created successfully!');
                 } catch (error) {
                     showToast('error', 'Error creating: ' + error.message);
                 }
             };
 
-            // Delete file/folder
+            // Delete file
             const deleteFile = async (file, e) => {
                 e.stopPropagation();
                 
@@ -997,7 +904,7 @@
                 if (!window.confirm(`Are you sure you want to delete "${file.name}"?`)) return;
 
                 try {
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
                     await filesRef.doc(file.id).delete();
                     
                     loadFiles();
@@ -1007,24 +914,21 @@
                 }
             };
 
-            // Open file/folder
+            // Open file
             const openFile = (file) => {
-                if (file.type === 'folder') {
-                    setCurrentPath([...currentPath, file.name]);
-                } else if (file.type === 'form') {
-                    setSelectedFile(file);
-                    setFormFields(file.fields || []);
-                    setFormData(file.data || []);
-                    setFormulas(file.formulas || {});
-                    setConditionalFormats(file.conditionalFormats || []);
-                    setDataValidations(file.dataValidations || {});
-                    setFormMode('view');
-                    setActiveTab('data');
-                    setShowFormBuilder(true);
-                    setFilters({});
-                    setSortConfig({ field: null, direction: 'asc' });
-                    setSearchText('');
-                }
+                setSelectedFile(file);
+                setFormFields(file.fields || []);
+                setFormData(file.data || []);
+                setFilters({});
+                setSortConfig({ field: null, direction: 'asc' });
+                setSearchText('');
+                setSelectedRows([]);
+                setShowDataModal(true);
+            };
+
+            // Navigate to folder
+            const navigateToFolder = (folderName) => {
+                setCurrentPath([...currentPath, folderName]);
             };
 
             // Navigate up
@@ -1034,265 +938,136 @@
                 }
             };
 
-            // Handle drag start for field types
-            const handleDragStart = (e, fieldType) => {
-                if (formMode === 'edit') {
-                    dragField.current = fieldType;
-                    e.dataTransfer.setData('text/plain', fieldType);
-                } else {
-                    e.preventDefault();
-                }
+            // Navigate to path
+            const navigateToPath = (index) => {
+                setCurrentPath(currentPath.slice(0, index + 1));
             };
 
-            // Handle drag over for dropzone
-            const handleDragOver = (e) => {
-                if (formMode === 'edit') {
-                    e.preventDefault();
-                    setIsDraggingOver(true);
-                }
-            };
-
-            // Handle drop for form builder
-            const handleDrop = (e) => {
-                e.preventDefault();
-                setIsDraggingOver(false);
-                
-                if (formMode === 'edit' && dragField.current) {
-                    const newField = {
-                        id: Date.now() + Math.random(),
-                        type: dragField.current,
-                        label: `${dragField.current.charAt(0).toUpperCase() + dragField.current.slice(1)} Field`,
-                        required: false,
-                        options: dragField.current === 'select' ? ['Option 1', 'Option 2', 'Option 3'] : []
-                    };
-                    
-                    setFormFields([...formFields, newField]);
-                    dragField.current = null;
-                }
-            };
-
-            // Update field
-            const updateField = (index, updates) => {
-                const newFields = [...formFields];
-                newFields[index] = { ...newFields[index], ...updates };
-                setFormFields(newFields);
-            };
-
-            // Delete field
-            const deleteField = (index) => {
-                if (window.confirm('Delete this field?')) {
-                    const newFields = formFields.filter((_, i) => i !== index);
-                    setFormFields(newFields);
-                }
-            };
-
-            // Save form structure
-            const saveFormStructure = async () => {
+            // Save new record
+            const saveNewRecord = async (recordData) => {
                 if (!user || !selectedFile) return;
 
                 try {
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
-                    await filesRef.doc(selectedFile.id).update({
-                        fields: formFields,
-                        formulas: formulas,
-                        conditionalFormats: conditionalFormats,
-                        dataValidations: dataValidations,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
                     
-                    setSelectedFile({ ...selectedFile, fields: formFields, formulas, conditionalFormats, dataValidations });
-                    showToast('success', 'Form structure saved!');
-                    setFormMode('view');
-                } catch (error) {
-                    showToast('error', 'Error saving form: ' + error.message);
-                }
-            };
-
-            // Save form data
-            const saveFormData = async (formDataToSave) => {
-                if (!user || !selectedFile) return;
-
-                try {
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
-                    
-                    // Apply data validations
-                    let isValid = true;
-                    Object.keys(dataValidations).forEach(fieldId => {
-                        const validation = dataValidations[fieldId];
-                        const value = formDataToSave[fieldId];
-                        
-                        if (validation.required && !value) {
-                            isValid = false;
-                            showToast('error', `${validation.fieldName} is required`);
-                        }
-                        
-                        if (validation.type === 'number' && value) {
-                            const num = parseFloat(value);
-                            if (validation.min && num < validation.min) {
-                                isValid = false;
-                                showToast('error', `${validation.fieldName} must be at least ${validation.min}`);
-                            }
-                            if (validation.max && num > validation.max) {
-                                isValid = false;
-                                showToast('error', `${validation.fieldName} must be at most ${validation.max}`);
-                            }
-                        }
-                    });
-                    
-                    if (!isValid) return;
-                    
-                    // Apply formulas
-                    const processedData = { ...formDataToSave };
-                    Object.keys(formulas).forEach(fieldId => {
-                        if (formulas[fieldId]) {
-                            const result = FormulaParser.evaluate(
-                                formulas[fieldId], 
-                                [...formData, processedData], 
-                                formData.length,
-                                formFields
-                            );
-                            processedData[fieldId] = result;
-                        }
-                    });
-                    
-                    const newRecord = { 
-                        ...processedData, 
+                    const newRecord = {
+                        ...recordData,
                         id: Date.now(),
-                        uid: user.uid,
                         createdAt: new Date().toISOString()
                     };
                     
                     const newData = [...formData, newRecord];
                     
                     await filesRef.doc(selectedFile.id).update({
-                        data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        data: newData
                     });
                     
                     setFormData(newData);
-                    setSelectedFile({ ...selectedFile, data: newData });
-                    
-                    // Apply conditional formatting
-                    applyConditionalFormatting(newData);
-                    
-                    showToast('success', 'Data saved!');
+                    setIsCreatingNew(false);
+                    showToast('success', 'Record saved successfully!');
                 } catch (error) {
-                    console.error('Error saving data:', error);
-                    showToast('error', 'Error saving data: ' + error.message);
+                    showToast('error', 'Error saving: ' + error.message);
                 }
             };
 
-            // Update form data
-            const updateFormData = async (updatedRecord) => {
+            // Update record
+            const updateRecord = async (recordData) => {
                 if (!user || !selectedFile) return;
 
                 try {
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
-                    
-                    // Apply formulas to updated record
-                    const processedRecord = { ...updatedRecord };
-                    Object.keys(formulas).forEach(fieldId => {
-                        if (formulas[fieldId]) {
-                            const result = FormulaParser.evaluate(
-                                formulas[fieldId], 
-                                formData.map(r => r.id === updatedRecord.id ? processedRecord : r),
-                                formData.findIndex(r => r.id === updatedRecord.id),
-                                formFields
-                            );
-                            processedRecord[fieldId] = result;
-                        }
-                    });
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
                     
                     const newData = formData.map(record => 
-                        record.id === updatedRecord.id ? { 
-                            ...processedRecord,
-                            updatedAt: new Date().toISOString()
-                        } : record
+                        record.id === recordData.id ? { ...recordData, updatedAt: new Date().toISOString() } : record
                     );
                     
                     await filesRef.doc(selectedFile.id).update({
-                        data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        data: newData
                     });
                     
                     setFormData(newData);
-                    setSelectedFile({ ...selectedFile, data: newData });
                     setEditingRecord(null);
-                    
-                    // Apply conditional formatting
-                    applyConditionalFormatting(newData);
-                    
-                    showToast('success', 'Data updated!');
+                    showToast('success', 'Record updated successfully!');
                 } catch (error) {
-                    console.error('Error updating data:', error);
-                    showToast('error', 'Error updating data: ' + error.message);
+                    showToast('error', 'Error updating: ' + error.message);
                 }
             };
 
-            // Delete form data
-            const deleteFormData = async (recordId) => {
+            // Delete record
+            const deleteRecord = async (recordId) => {
                 if (!user || !selectedFile) return;
                 if (!window.confirm('Delete this record?')) return;
 
                 try {
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
+                    const filesRef = db.collection('users').doc(user.uid).collection('files');
+                    
                     const newData = formData.filter(record => record.id !== recordId);
                     
                     await filesRef.doc(selectedFile.id).update({
-                        data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        data: newData
                     });
                     
                     setFormData(newData);
-                    setSelectedFile({ ...selectedFile, data: newData });
-                    showToast('success', 'Data deleted!');
+                    showToast('success', 'Record deleted successfully!');
                 } catch (error) {
-                    showToast('error', 'Error deleting data: ' + error.message);
+                    showToast('error', 'Error deleting: ' + error.message);
                 }
             };
 
-            // Upload file
-            const uploadFile = async (file) => {
-                if (!user) return;
-
-                try {
-                    const path = currentPath.join('/');
-                    const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
-                    await storageRef.put(file);
-                    
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
-                    const fileData = {
-                        name: file.name,
-                        path: path,
-                        type: 'file',
-                        size: file.size,
-                        contentType: file.type,
-                        uid: user.uid,
-                        storagePath: `users/${user.uid}/${path}/${file.name}`,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    };
-                    
-                    await filesRef.add(fileData);
-                    loadFiles();
-                    showToast('success', 'File uploaded!');
-                } catch (error) {
-                    showToast('error', 'Error uploading: ' + error.message);
-                }
+            // Calculate summary statistics
+            const calculateSummaryStats = (data) => {
+                const stats = {};
+                
+                formFields.forEach(field => {
+                    if (field.type === 'number' || field.type === 'currency') {
+                        const values = data.map(row => parseFloat(row[field.id])).filter(v => !isNaN(v));
+                        
+                        if (values.length > 0) {
+                            stats[field.id] = {
+                                sum: values.reduce((a, b) => a + b, 0),
+                                avg: values.reduce((a, b) => a + b, 0) / values.length,
+                                min: Math.min(...values),
+                                max: Math.max(...values),
+                                count: values.length
+                            };
+                        }
+                    }
+                });
+                
+                setSummaryStats(stats);
             };
 
-            // Handle file selection for upload
-            const handleFileSelect = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    uploadFile(file);
-                }
+            // Handle sort
+            const handleSort = (fieldId) => {
+                setSortConfig({
+                    field: fieldId,
+                    direction: sortConfig.field === fieldId && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+                });
             };
 
-            // Apply conditional formatting
-            const applyConditionalFormatting = (data) => {
-                // This would apply CSS classes based on conditions
-                // For now, just log
-                console.log('Applying conditional formatting', conditionalFormats, data);
+            // Toggle filter dropdown
+            const toggleFilter = (fieldId, e) => {
+                e.stopPropagation();
+                setShowFilterDropdown(showFilterDropdown === fieldId ? null : fieldId);
+            };
+
+            // Apply filter
+            const applyFilter = (fieldId, values) => {
+                setFilters({ ...filters, [fieldId]: values });
+                setShowFilterDropdown(null);
+            };
+
+            // Clear filter
+            const clearFilter = (fieldId) => {
+                const newFilters = { ...filters };
+                delete newFilters[fieldId];
+                setFilters(newFilters);
+            };
+
+            // Clear all filters
+            const clearAllFilters = () => {
+                setFilters({});
+                setSearchText('');
             };
 
             // Export to CSV
@@ -1317,234 +1092,47 @@
                 showToast('success', 'Exported to CSV');
             };
 
-            // Export to Excel (XLSX simulation)
-            const exportToExcel = () => {
-                // For demo, just export as CSV with .xlsx extension
-                exportToCSV();
-                showToast('info', 'Note: This is a CSV file with .xlsx extension for demo');
-            };
-
-            // Import from CSV
-            const importFromCSV = (csvText) => {
-                const lines = csvText.split('\n');
-                const headers = lines[0].split(',').map(h => h.trim());
-                
-                const newData = [];
-                for (let i = 1; i < lines.length; i++) {
-                    if (!lines[i].trim()) continue;
-                    
-                    const values = lines[i].split(',').map(v => v.replace(/^"|"$/g, '').trim());
-                    const row = { id: Date.now() + i };
-                    
-                    headers.forEach((header, index) => {
-                        const field = formFields.find(f => f.label === header);
-                        if (field) {
-                            row[field.id] = values[index];
-                        }
-                    });
-                    
-                    newData.push(row);
-                }
-                
-                return newData;
-            };
-
-            // Handle paste from Excel
-            const handleExcelPaste = async () => {
-                try {
-                    const text = await navigator.clipboard.readText();
-                    const newData = importFromCSV(text);
-                    
-                    // Merge with existing data
-                    const mergedData = [...formData, ...newData];
-                    
-                    // Save to Firebase
-                    const filesRef = db.collection('users').doc(user.uid).collection('tables');
-                    await filesRef.doc(selectedFile.id).update({
-                        data: mergedData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    setFormData(mergedData);
-                    showToast('success', `Imported ${newData.length} rows from clipboard`);
-                } catch (error) {
-                    showToast('error', 'Error pasting: ' + error.message);
-                }
-            };
-
-            // Create pivot table
-            const createPivotTable = () => {
-                setShowPivotTable(!showPivotTable);
-            };
-
-            // Create chart
-            const createChart = () => {
-                setShowChart(!showChart);
-            };
-
-            // Record macro
-            const startMacroRecording = () => {
-                setRecordingMacro(true);
-                setMacroSteps([]);
-                showToast('info', 'Recording macro...');
-            };
-
-            const stopMacroRecording = () => {
-                setRecordingMacro(false);
-                if (macroSteps.length > 0) {
-                    const macroName = prompt('Enter macro name:');
-                    if (macroName) {
-                        setMacros([...macros, { name: macroName, steps: [...macroSteps] }]);
-                        showToast('success', `Macro "${macroName}" saved`);
-                    }
-                }
-                setMacroSteps([]);
-            };
-
-            // Render input field based on type
-            const renderInputField = (field, value, onChange, disabled = false) => {
-                const commonProps = {
-                    value: value || '',
-                    onChange: (e) => onChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value),
-                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500",
-                    disabled: disabled,
-                    required: field.required && !disabled
-                };
-
-                switch (field.type) {
-                    case 'text':
-                    case 'email':
-                    case 'tel':
-                        return <input type={field.type} {...commonProps} />;
-                    
-                    case 'number':
-                        return <input type="number" {...commonProps} />;
-                    
-                    case 'currency':
-                        return (
-                            <div className="relative">
-                                <span className="absolute left-3 top-2 text-gray-500">$</span>
-                                <input type="number" {...commonProps} className="pl-7 w-full p-2 border rounded" />
-                            </div>
-                        );
-                    
-                    case 'percentage':
-                        return (
-                            <div className="relative">
-                                <input type="number" {...commonProps} step="0.01" min="0" max="100" />
-                                <span className="absolute right-3 top-2 text-gray-500">%</span>
-                            </div>
-                        );
-                    
-                    case 'date':
-                        return <input type="date" {...commonProps} />;
-                    
-                    case 'time':
-                        return <input type="time" {...commonProps} />;
-                    
-                    case 'checkbox':
-                        return (
-                            <input
-                                type="checkbox"
-                                checked={value || false}
-                                onChange={(e) => onChange(field.id, e.target.checked)}
-                                className="h-5 w-5"
-                                disabled={disabled}
-                            />
-                        );
-                    
-                    case 'select':
-                        return (
-                            <select {...commonProps}>
-                                <option value="">Select...</option>
-                                {(field.options || []).map((opt, i) => (
-                                    <option key={i} value={opt}>{opt}</option>
-                                ))}
-                            </select>
-                        );
-                    
-                    case 'yesno':
-                        return (
-                            <select {...commonProps}>
-                                <option value="">Select...</option>
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                            </select>
-                        );
-                    
-                    case 'textarea':
-                        return <textarea {...commonProps} rows="4" />;
-                    
-                    case 'color':
-                        return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
-                    
-                    case 'range':
-                        return (
-                            <input
-                                type="range"
-                                value={value || 50}
-                                onChange={(e) => onChange(field.id, e.target.value)}
-                                className="w-full"
-                                min="0"
-                                max="100"
-                                disabled={disabled}
-                            />
-                        );
-                    
-                    case 'formula':
-                        return (
-                            <div className="relative">
-                                <span className="absolute left-3 top-2 text-blue-500 font-bold">=</span>
-                                <input
-                                    type="text"
-                                    value={value || ''}
-                                    onChange={(e) => onChange(field.id, e.target.value)}
-                                    className="w-full pl-7 p-2 border rounded font-mono text-sm"
-                                    placeholder="=SUM([Field1], [Field2])"
-                                    disabled={disabled}
-                                />
-                            </div>
-                        );
-                    
-                    default:
-                        return null;
-                }
-            };
-
             // Render filter dropdown
             const renderFilterDropdown = (field) => {
                 if (showFilterDropdown !== field.id) return null;
                 
                 const uniqueValues = [...new Set(formData.map(row => row[field.id]))].filter(v => v != null);
+                const [search, setSearch] = useState('');
+                const [selected, setSelected] = useState(filters[field.id] || []);
+                
+                const filteredValues = uniqueValues.filter(v => 
+                    String(v).toLowerCase().includes(search.toLowerCase())
+                );
                 
                 return (
-                    <div className="filter-dropdown" ref={filterRef}>
-                        <input
-                            type="text"
-                            className="filter-search"
-                            placeholder="Search..."
-                            onChange={(e) => {
-                                // Filter values based on search
-                            }}
-                        />
+                    <div className="filter-dropdown" style={{ position: 'absolute' }} ref={filterRef}>
+                        <div className="filter-header">
+                            <span>Filter by {field.label}</span>
+                            <button onClick={() => setShowFilterDropdown(null)}>
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
                         
-                        <div className="max-h-40 overflow-y-auto">
-                            {uniqueValues.map(value => (
+                        <div className="filter-body">
+                            <input
+                                type="text"
+                                className="filter-search"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                            
+                            {filteredValues.map(value => (
                                 <label key={value} className="filter-option">
                                     <input
                                         type="checkbox"
-                                        checked={filters[field.id]?.includes(value) || false}
+                                        checked={selected.includes(value)}
                                         onChange={(e) => {
-                                            const currentFilters = filters[field.id] || [];
-                                            let newFilters;
-                                            
                                             if (e.target.checked) {
-                                                newFilters = [...currentFilters, value];
+                                                setSelected([...selected, value]);
                                             } else {
-                                                newFilters = currentFilters.filter(v => v !== value);
+                                                setSelected(selected.filter(v => v !== value));
                                             }
-                                            
-                                            setFilters({ ...filters, [field.id]: newFilters });
                                         }}
                                     />
                                     <span>{String(value) || '(blank)'}</span>
@@ -1552,21 +1140,16 @@
                             ))}
                         </div>
                         
-                        <div className="filter-actions">
-                            <button
-                                className="filter-btn clear"
-                                onClick={() => {
-                                    const newFilters = { ...filters };
-                                    delete newFilters[field.id];
-                                    setFilters(newFilters);
-                                    setShowFilterDropdown(null);
-                                }}
+                        <div className="filter-footer">
+                            <button 
+                                className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded"
+                                onClick={() => setSelected([])}
                             >
                                 Clear
                             </button>
-                            <button
-                                className="filter-btn apply"
-                                onClick={() => setShowFilterDropdown(null)}
+                            <button 
+                                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                                onClick={() => applyFilter(field.id, selected)}
                             >
                                 Apply
                             </button>
@@ -1577,129 +1160,74 @@
 
             // Render data table
             const renderDataTable = () => {
+                if (formFields.length === 0) {
+                    return (
+                        <div className="empty-state">
+                            <i className="fas fa-table"></i>
+                            <h3>No fields defined</h3>
+                            <p>This spreadsheet has no fields yet.</p>
+                        </div>
+                    );
+                }
+
                 return (
-                    <div className="excel-container">
+                    <div className="excel-wrapper">
                         <div className="excel-toolbar">
-                            <div className="excel-toolbar-group">
-                                <button className="excel-toolbar-btn" onClick={() => setActiveTab('form')}>
-                                    <i className="fas fa-wpforms"></i>
-                                    Form View
-                                </button>
-                                <button className="excel-toolbar-btn active">
-                                    <i className="fas fa-table"></i>
-                                    Table View
-                                </button>
-                            </div>
-                            
-                            <div className="excel-toolbar-group">
-                                <button className="excel-toolbar-btn" onClick={exportToCSV}>
-                                    <i className="fas fa-file-csv"></i>
-                                    Export CSV
-                                </button>
-                                <button className="excel-toolbar-btn" onClick={exportToExcel}>
-                                    <i className="fas fa-file-excel"></i>
-                                    Export Excel
-                                </button>
-                                <button className="excel-toolbar-btn" onClick={handleExcelPaste}>
-                                    <i className="fas fa-paste"></i>
-                                    Paste from Excel
-                                </button>
-                            </div>
-                            
-                            <div className="excel-toolbar-group">
-                                <button className="excel-toolbar-btn" onClick={createPivotTable}>
-                                    <i className="fas fa-chart-pivot"></i>
-                                    Pivot Table
-                                </button>
-                                <button className="excel-toolbar-btn" onClick={createChart}>
-                                    <i className="fas fa-chart-bar"></i>
-                                    Chart
-                                </button>
-                            </div>
-                            
-                            <div className="excel-toolbar-group">
-                                {!recordingMacro ? (
-                                    <button className="excel-toolbar-btn" onClick={startMacroRecording}>
-                                        <i className="fas fa-circle text-red-500"></i>
-                                        Record Macro
-                                    </button>
-                                ) : (
-                                    <button className="excel-toolbar-btn" onClick={stopMacroRecording}>
-                                        <i className="fas fa-stop text-red-500"></i>
-                                        Stop Recording
-                                    </button>
-                                )}
-                            </div>
-                            
-                            <div className="flex-1">
-                                <input
-                                    type="text"
-                                    placeholder="Search all fields..."
-                                    className="w-full p-1 px-3 border rounded"
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                />
-                            </div>
+                            <button className="excel-btn" onClick={() => setIsCreatingNew(true)}>
+                                <i className="fas fa-plus"></i>
+                                Add Record
+                            </button>
+                            <button className="excel-btn" onClick={exportToCSV}>
+                                <i className="fas fa-download"></i>
+                                Export CSV
+                            </button>
+                            <button className="excel-btn" onClick={clearAllFilters}>
+                                <i className="fas fa-filter-circle-xmark"></i>
+                                Clear Filters
+                            </button>
+                            <span className="text-sm text-gray-500 ml-auto">
+                                {filteredData.length} of {formData.length} records
+                            </span>
                         </div>
-                        
-                        {/* Formula Bar */}
-                        <div className="formula-bar">
-                            <span className="formula-label">fx</span>
-                            <input
-                                type="text"
-                                className="formula-input"
-                                placeholder="Enter formula (e.g., =SUM([Amount]))"
-                                value={formulas['selected'] || ''}
-                                onChange={(e) => {
-                                    // Handle formula input
-                                }}
-                            />
-                            <span className="formula-help">Use [Field Name] to reference fields</span>
-                        </div>
-                        
-                        {/* Summary Cards */}
-                        {Object.keys(summaryStats).length > 0 && (
-                            <div className="summary-cards p-4">
-                                {Object.entries(summaryStats).map(([fieldId, stats]) => {
+
+                        {/* Filter Bar */}
+                        {Object.keys(filters).length > 0 && (
+                            <div className="filter-bar">
+                                <span className="text-sm font-medium">Active Filters:</span>
+                                {Object.entries(filters).map(([fieldId, values]) => {
                                     const field = formFields.find(f => f.id === fieldId);
                                     return (
-                                        <div key={fieldId} className="summary-card">
-                                            <div className="label">{field?.label}</div>
-                                            <div className="value">
-                                                {field?.type === 'currency' ? '$' : ''}
-                                                {stats.sum.toLocaleString()}
-                                            </div>
-                                            <div className="change">
-                                                Avg: {field?.type === 'currency' ? '$' : ''}{stats.avg.toFixed(2)} | 
-                                                Count: {stats.count}
-                                            </div>
-                                        </div>
+                                        <span key={fieldId} className="filter-tag">
+                                            {field?.label}: {values.length} selected
+                                            <i className="fas fa-times" onClick={() => clearFilter(fieldId)}></i>
+                                        </span>
                                     );
                                 })}
                             </div>
                         )}
-                        
-                        {/* Data Table */}
-                        <div className="excel-table-container" ref={tableRef}>
-                            <table className="excel-table">
+
+                        <div className="table-container">
+                            <table className="data-table">
                                 <thead>
                                     <tr>
                                         {formFields.map(field => (
-                                            <th key={field.id}>
-                                                <div className="column-header-content">
-                                                    <span>{field.label}</span>
-                                                    <div>
-                                                        <i 
-                                                            className={`fas fa-filter filter-indicator ${filters[field.id] ? 'text-blue-600' : 'text-gray-400'}`}
-                                                            onClick={() => setShowFilterDropdown(
-                                                                showFilterDropdown === field.id ? null : field.id
-                                                            )}
-                                                        ></i>
-                                                        {sortConfig.field === field.id && (
-                                                            <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} ml-1`}></i>
-                                                        )}
-                                                    </div>
-                                                </div>
+                                            <th key={field.id} className="sortable" onClick={() => handleSort(field.id)}>
+                                                {field.label}
+                                                {field.type === 'currency' && ' ($)'}
+                                                {field.type === 'number' && ' (#'}
+                                                <span className="sort-icon">
+                                                    {sortConfig.field === field.id ? (
+                                                        <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'}`}></i>
+                                                    ) : (
+                                                        <i className="fas fa-sort"></i>
+                                                    )}
+                                                </span>
+                                                <span 
+                                                    className={`filter-icon ${filters[field.id] ? 'active' : ''}`}
+                                                    onClick={(e) => toggleFilter(field, e)}
+                                                >
+                                                    <i className="fas fa-filter"></i>
+                                                </span>
                                                 {renderFilterDropdown(field)}
                                             </th>
                                         ))}
@@ -1707,47 +1235,33 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredData.map((row, rowIndex) => (
-                                        <tr key={row.id}>
+                                    {filteredData.map((row, index) => (
+                                        <tr key={row.id} className={selectedRows.includes(row.id) ? 'selected' : ''}>
                                             {formFields.map(field => {
-                                                const value = row[field.id];
-                                                let displayValue = value;
+                                                let value = row[field.id];
                                                 
-                                                // Format based on field type
+                                                // Format value based on type
                                                 if (field.type === 'currency' && value) {
-                                                    displayValue = `$${parseFloat(value).toFixed(2)}`;
-                                                } else if (field.type === 'percentage' && value) {
-                                                    displayValue = `${value}%`;
+                                                    value = `$${parseFloat(value).toFixed(2)}`;
                                                 } else if (field.type === 'date' && value) {
-                                                    displayValue = new Date(value).toLocaleDateString();
+                                                    value = new Date(value).toLocaleDateString();
                                                 } else if (field.type === 'checkbox') {
-                                                    displayValue = value ? '✓' : '✗';
+                                                    value = value ? '✓' : '✗';
                                                 }
                                                 
-                                                return (
-                                                    <td key={field.id}
-                                                        onDoubleClick={() => {
-                                                            // Enable inline editing
-                                                        }}
-                                                    >
-                                                        {displayValue}
-                                                    </td>
-                                                );
+                                                return <td key={field.id}>{value || '-'}</td>;
                                             })}
                                             <td>
-                                                <div className="form-data-actions">
+                                                <div className="flex gap-2">
                                                     <button 
-                                                        className="data-action-btn edit"
-                                                        onClick={() => {
-                                                            setEditingRecord(row);
-                                                            setActiveTab('form');
-                                                        }}
+                                                        className="text-blue-500 hover:text-blue-700"
+                                                        onClick={() => setEditingRecord(row)}
                                                     >
                                                         <i className="fas fa-edit"></i>
                                                     </button>
                                                     <button 
-                                                        className="data-action-btn delete"
-                                                        onClick={() => deleteFormData(row.id)}
+                                                        className="text-red-500 hover:text-red-700"
+                                                        onClick={() => deleteRecord(row.id)}
                                                     >
                                                         <i className="fas fa-trash"></i>
                                                     </button>
@@ -1758,73 +1272,51 @@
                                 </tbody>
                             </table>
                         </div>
-                        
-                        {/* Pivot Table */}
-                        {showPivotTable && (
-                            <div className="pivot-container">
-                                <h3 className="font-bold mb-4">Pivot Table</h3>
-                                <div className="pivot-fields">
-                                    <div className="pivot-field-group">
-                                        <h4>Rows</h4>
-                                        {formFields.map(field => (
-                                            <div key={field.id} className="pivot-field-item" draggable>
-                                                <i className="fas fa-grip-vertical text-gray-400"></i>
-                                                {field.label}
-                                            </div>
-                                        ))}
+                    </div>
+                );
+            };
+
+            // Render summary cards
+            const renderSummaryCards = () => {
+                if (Object.keys(summaryStats).length === 0) return null;
+
+                return (
+                    <div className="summary-cards">
+                        {Object.entries(summaryStats).map(([fieldId, stats]) => {
+                            const field = formFields.find(f => f.id === fieldId);
+                            return (
+                                <React.Fragment key={fieldId}>
+                                    <div className="summary-card total">
+                                        <div className="summary-label">Total {field?.label}</div>
+                                        <div className="summary-value">
+                                            {field?.type === 'currency' ? '$' : ''}{stats.sum.toFixed(2)}
+                                        </div>
+                                        <div className="summary-sub">Sum of all values</div>
                                     </div>
-                                    <div className="pivot-field-group">
-                                        <h4>Columns</h4>
+                                    <div className="summary-card average">
+                                        <div className="summary-label">Average {field?.label}</div>
+                                        <div className="summary-value">
+                                            {field?.type === 'currency' ? '$' : ''}{stats.avg.toFixed(2)}
+                                        </div>
+                                        <div className="summary-sub">Based on {stats.count} records</div>
                                     </div>
-                                    <div className="pivot-field-group">
-                                        <h4>Values</h4>
+                                    <div className="summary-card min">
+                                        <div className="summary-label">Min {field?.label}</div>
+                                        <div className="summary-value">
+                                            {field?.type === 'currency' ? '$' : ''}{stats.min.toFixed(2)}
+                                        </div>
+                                        <div className="summary-sub">Lowest value</div>
                                     </div>
-                                    <div className="pivot-field-group">
-                                        <h4>Filters</h4>
+                                    <div className="summary-card max">
+                                        <div className="summary-label">Max {field?.label}</div>
+                                        <div className="summary-value">
+                                            {field?.type === 'currency' ? '$' : ''}{stats.max.toFixed(2)}
+                                        </div>
+                                        <div className="summary-sub">Highest value</div>
                                     </div>
-                                </div>
-                                <p className="text-gray-500 text-center py-4">
-                                    Drag fields to create pivot table (demo feature)
-                                </p>
-                            </div>
-                        )}
-                        
-                        {/* Chart */}
-                        {showChart && (
-                            <div className="chart-container">
-                                <h3 className="font-bold mb-4">Chart Visualization</h3>
-                                <div className="chart-controls">
-                                    <select 
-                                        className="p-2 border rounded"
-                                        value={chartType}
-                                        onChange={(e) => setChartType(e.target.value)}
-                                    >
-                                        <option value="bar">Bar Chart</option>
-                                        <option value="line">Line Chart</option>
-                                        <option value="pie">Pie Chart</option>
-                                        <option value="doughnut">Doughnut Chart</option>
-                                    </select>
-                                    <select className="p-2 border rounded">
-                                        <option>Select X Axis</option>
-                                        {formFields.map(f => (
-                                            <option key={f.id}>{f.label}</option>
-                                        ))}
-                                    </select>
-                                    <select className="p-2 border rounded">
-                                        <option>Select Y Axis</option>
-                                        {formFields.filter(f => f.type === 'number' || f.type === 'currency').map(f => (
-                                            <option key={f.id}>{f.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="h-64 bg-gray-100 rounded flex items-center justify-center">
-                                    <p className="text-gray-500">
-                                        <i className="fas fa-chart-bar text-4xl mb-2 block"></i>
-                                        Chart preview (demo)
-                                    </p>
-                                </div>
-                            </div>
-                        )}
+                                </React.Fragment>
+                            );
+                        })}
                     </div>
                 );
             };
@@ -1832,11 +1324,8 @@
             // Loading state
             if (loading) {
                 return (
-                    <div className="flex items-center justify-center min-h-screen">
-                        <div className="text-center">
-                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
-                            <p className="text-gray-600">Loading...</p>
-                        </div>
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="spinner"></div>
                     </div>
                 );
             }
@@ -1844,62 +1333,49 @@
             // Login screen
             if (!user) {
                 return (
-                    <div className="login-container">
-                        <h2 className="text-2xl font-bold mb-6">Welcome to Excel-Style Data Manager</h2>
-                        <p className="text-gray-600 mb-6">Please sign in to access your spreadsheets</p>
-                        
-                        <button 
-                            onClick={() => auth.signInAnonymously()}
-                            className="login-btn mb-4"
-                        >
-                            <i className="fas fa-user-secret mr-2"></i>
-                            Sign in Anonymously (Demo)
-                        </button>
-                        
-                        <div className="relative my-6">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-gray-300"></div>
+                    <div className="min-h-screen flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
+                            <div className="text-center mb-8">
+                                <i className="fas fa-file-excel text-5xl text-green-500 mb-4"></i>
+                                <h2 className="text-2xl font-bold text-gray-800">Welcome to Smart Data Manager</h2>
+                                <p className="text-gray-600 mt-2">Sign in to manage your spreadsheets</p>
                             </div>
-                            <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-white text-gray-500">Or test with demo account</span>
-                            </div>
+                            
+                            <button 
+                                onClick={() => auth.signInAnonymously()}
+                                className="w-full bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 transition mb-4"
+                            >
+                                <i className="fas fa-user-secret mr-2"></i>
+                                Continue as Guest
+                            </button>
+                            
+                            <p className="text-xs text-gray-400 text-center">
+                                Demo: Your data will be saved anonymously
+                            </p>
                         </div>
-                        
-                        <button 
-                            onClick={() => auth.signInWithEmailAndPassword('demo@gmail.com', 'password123')}
-                            className="login-btn bg-purple-600 hover:bg-purple-700"
-                        >
-                            <i className="fas fa-user mr-2"></i>
-                            Sign in as demo@gmail.com
-                        </button>
                     </div>
                 );
             }
 
             // Main app
             return (
-                <div className="container mx-auto p-4 max-w-7xl">
+                <div className="min-h-screen bg-gray-50">
                     {/* Header */}
-                    <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h1 className="text-3xl font-bold flex items-center gap-3">
-                                    <i className="fas fa-file-excel"></i>
-                                    Excel-Style Form Builder & Data Manager
-                                </h1>
-                                <p className="mt-2 opacity-90">Create forms, analyze data with Excel-like features</p>
+                    <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4">
+                        <div className="max-w-7xl mx-auto flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <i className="fas fa-file-excel text-2xl"></i>
+                                <h1 className="text-xl font-bold">Smart Data Manager</h1>
                             </div>
-                            
-                            <div className="user-info">
-                                <div className="text-right">
-                                    <div className="font-medium">
-                                        {user.email || (user.isAnonymous ? 'Anonymous User' : user.uid)}
-                                    </div>
-                                    <div className="user-email">
-                                        {isAdmin && <span className="ml-2 bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs">Admin</span>}
-                                    </div>
-                                </div>
-                                <button onClick={() => auth.signOut()} className="logout-btn">
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm opacity-90">
+                                    <i className="fas fa-user mr-2"></i>
+                                    {user.isAnonymous ? 'Guest User' : user.email}
+                                </span>
+                                <button 
+                                    onClick={() => auth.signOut()}
+                                    className="px-3 py-1 bg-white/20 rounded-lg hover:bg-white/30 transition"
+                                >
                                     <i className="fas fa-sign-out-alt mr-1"></i>
                                     Sign Out
                                 </button>
@@ -1907,75 +1383,86 @@
                         </div>
                     </div>
 
-                    {/* File Explorer */}
-                    <div className="file-explorer">
-                        <div className="file-explorer-header">
-                            <div className="file-explorer-breadcrumb">
-                                {currentPath.map((item, index) => (
-                                    <React.Fragment key={index}>
-                                        {index > 0 && <i className="fas fa-chevron-right text-gray-400 text-sm"></i>}
-                                        <span 
-                                            className={`breadcrumb-item ${index === currentPath.length - 1 ? 'active' : ''}`}
-                                            onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}
-                                        >
-                                            <i className={`fas ${index === 0 ? 'fa-home' : 'fa-folder'}`}></i>
-                                            {item}
-                                        </span>
-                                    </React.Fragment>
-                                ))}
+                    {/* Main Content */}
+                    <div className="max-w-7xl mx-auto p-4">
+                        {/* Breadcrumb */}
+                        <div className="breadcrumb-nav">
+                            <button onClick={navigateUp} className="breadcrumb-item">
+                                <i className="fas fa-arrow-up"></i>
+                            </button>
+                            {currentPath.map((item, index) => (
+                                <React.Fragment key={index}>
+                                    <i className="fas fa-chevron-right text-gray-400 text-sm"></i>
+                                    <span 
+                                        className={`breadcrumb-item ${index === currentPath.length - 1 ? 'active' : ''}`}
+                                        onClick={() => navigateToPath(index)}
+                                    >
+                                        <i className={`fas ${index === 0 ? 'fa-home' : 'fa-folder'}`}></i>
+                                        {item}
+                                    </span>
+                                </React.Fragment>
+                            ))}
+                        </div>
+
+                        {/* Toolbar */}
+                        <div className="toolbar">
+                            <div className="toolbar-actions">
+                                <button className="toolbar-btn primary" onClick={() => setShowNewFileModal(true)}>
+                                    <i className="fas fa-plus"></i>
+                                    New Spreadsheet
+                                </button>
                             </div>
                             
-                            <div className="flex gap-2">
-                                {currentPath.length > 1 && (
-                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
-                                        <i className="fas fa-arrow-up mr-1"></i>Up
-                                    </button>
-                                )}
-                                
-                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
-                                    <i className="fas fa-plus mr-1"></i>New
-                                </button>
-                                
-                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
-                                    <i className="fas fa-upload mr-1"></i>Upload
-                                </button>
-                                <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
+                            <div className="search-box">
+                                <i className="fas fa-search"></i>
+                                <input 
+                                    type="text" 
+                                    placeholder="Search files..."
+                                    value={searchText}
+                                    onChange={(e) => setSearchText(e.target.value)}
+                                />
                             </div>
                         </div>
-                        
+
                         {/* File Grid */}
                         <div className="file-grid">
                             {files.map(file => (
-                                <div key={file.id} className="file-item" onClick={() => openFile(file)}>
+                                <div 
+                                    key={file.id} 
+                                    className={`file-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
+                                    onClick={() => openFile(file)}
+                                >
                                     <div className="file-actions">
-                                        <button className="file-action-btn delete" onClick={(e) => deleteFile(file, e)}>
+                                        <button className="file-action" onClick={(e) => deleteFile(file, e)}>
                                             <i className="fas fa-trash"></i>
                                         </button>
                                     </div>
                                     
                                     <div className={`file-icon ${file.type}`}>
-                                        <i className={`fas ${
-                                            file.type === 'folder' ? 'fa-folder' :
-                                            file.type === 'form' ? 'fa-file-excel' :
-                                            'fa-file'
-                                        }`}></i>
+                                        <i className="fas fa-file-excel"></i>
                                     </div>
                                     
                                     <div className="file-name">{file.name}</div>
                                     
-                                    {file.type === 'form' && file.fields && (
-                                        <div className="text-xs text-gray-500 text-center mt-2">
-                                            {file.fields.length} fields • {file.data?.length || 0} records
-                                        </div>
-                                    )}
+                                    <div className="file-meta">
+                                        <span>{file.fields?.length || 0} fields</span>
+                                        <span>•</span>
+                                        <span>{file.data?.length || 0} records</span>
+                                    </div>
+                                    
+                                    <div className="mt-2 text-center">
+                                        <span className="file-badge">
+                                            Updated {file.updatedAt ? 'recently' : 'now'}
+                                        </span>
+                                    </div>
                                 </div>
                             ))}
                             
                             {files.length === 0 && (
-                                <div className="col-span-full text-center py-12 text-gray-500">
-                                    <i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i>
-                                    <p>This folder is empty</p>
-                                    <p className="text-sm mt-2">Create a new spreadsheet to get started</p>
+                                <div className="col-span-full empty-state">
+                                    <i className="fas fa-folder-open"></i>
+                                    <h3>No files found</h3>
+                                    <p>Create your first spreadsheet to get started</p>
                                 </div>
                             )}
                         </div>
@@ -1983,243 +1470,129 @@
 
                     {/* New File Modal */}
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
-                        <div className="modal-content" style={{ maxWidth: '500px' }}>
+                        <div className="modal-content">
                             <div className="modal-header">
-                                <h2 className="text-xl font-bold">Create New Spreadsheet</h2>
+                                <h2>Create New Spreadsheet</h2>
                                 <button className="modal-close" onClick={() => setShowNewFileModal(false)}>
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
-                            
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
-                                <div className="flex gap-4">
-                                    <label className="flex items-center gap-2">
-                                        <input type="radio" value="folder" checked={newFileType === 'folder'} onChange={(e) => setNewFileType(e.target.value)} />
-                                        <i className="fas fa-folder text-yellow-500"></i> Folder
-                                    </label>
-                                    <label className="flex items-center gap-2">
-                                        <input type="radio" value="form" checked={newFileType === 'form'} onChange={(e) => setNewFileType(e.target.value)} />
-                                        <i className="fas fa-file-excel text-green-500"></i> Spreadsheet
-                                    </label>
+                            <div className="modal-body">
+                                <div className="form-field">
+                                    <label className="form-label">Spreadsheet Name</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        value={newFileName}
+                                        onChange={(e) => setNewFileName(e.target.value)}
+                                        placeholder="Enter name"
+                                    />
                                 </div>
-                            </div>
-                            
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                                <input type="text" value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
-                                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                    placeholder={`Enter ${newFileType} name`} />
-                            </div>
-                            
-                            <div className="flex justify-end gap-2">
-                                <button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded hover:bg-gray-100">
-                                    Cancel
-                                </button>
-                                <button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                                    Create
-                                </button>
+                                
+                                <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                                    <p className="text-sm text-blue-700">
+                                        <i className="fas fa-info-circle mr-2"></i>
+                                        A sample spreadsheet with default fields will be created
+                                    </p>
+                                </div>
+                                
+                                <div className="flex justify-end gap-3">
+                                    <button 
+                                        className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                                        onClick={() => setShowNewFileModal(false)}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                        onClick={createNewFile}
+                                    >
+                                        Create
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Form Builder/Viewer Modal */}
-                    <div className={`modal ${showFormBuilder ? 'active' : ''}`}>
+                    {/* Data View Modal */}
+                    <div className={`modal ${showDataModal ? 'active' : ''}`}>
                         <div className="modal-content" style={{ maxWidth: '1200px' }}>
                             <div className="modal-header">
-                                <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <i className="fas fa-file-excel text-green-500"></i>
+                                <h2>
+                                    <i className="fas fa-file-excel text-green-500 mr-2"></i>
                                     {selectedFile?.name}
-                                    {formMode === 'edit' && <span className="edit-badge">Edit Mode</span>}
                                 </h2>
-                                <button className="modal-close" onClick={() => {
-                                    setShowFormBuilder(false);
-                                    setSelectedFile(null);
-                                    setFormFields([]);
-                                    setFormData([]);
-                                    setFormMode('view');
-                                    setFilters({});
-                                    setShowPivotTable(false);
-                                    setShowChart(false);
-                                }}>
+                                <button className="modal-close" onClick={() => setShowDataModal(false)}>
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
-                            
-                            {/* Mode Toggle */}
-                            <div className="mode-toggle">
-                                <button className={`mode-btn ${formMode === 'view' ? 'active' : ''}`} onClick={() => setFormMode('view')}>
-                                    <i className="fas fa-eye mr-1"></i>View Data
-                                </button>
-                                <button className={`mode-btn ${formMode === 'edit' ? 'active' : ''}`} onClick={() => setFormMode('edit')}>
-                                    <i className="fas fa-edit mr-1"></i>Edit Structure
+                            <div className="modal-body">
+                                {/* Summary Cards */}
+                                {renderSummaryCards()}
+                                
+                                {/* Data Table */}
+                                {renderDataTable()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Create Record Modal */}
+                    <div className={`modal ${isCreatingNew ? 'active' : ''}`}>
+                        <div className="modal-content" style={{ maxWidth: '600px' }}>
+                            <div className="modal-header">
+                                <h2>Add New Record</h2>
+                                <button className="modal-close" onClick={() => setIsCreatingNew(false)}>
+                                    <i className="fas fa-times"></i>
                                 </button>
                             </div>
-                            
-                            {/* Tabs */}
-                            <div className="tab-buttons">
-                                <button className={`tab-button ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>
-                                    <i className="fas fa-table mr-1"></i>Data Table ({filteredData.length})
-                                </button>
-                                <button className={`tab-button ${activeTab === 'form' ? 'active' : ''}`} onClick={() => setActiveTab('form')}>
-                                    <i className="fas fa-wpforms mr-1"></i>Form Entry
-                                </button>
-                                <button className={`tab-button ${activeTab === 'structure' ? 'active' : ''}`} onClick={() => setActiveTab('structure')}>
-                                    <i className="fas fa-cog mr-1"></i>Structure
-                                </button>
+                            <div className="modal-body">
+                                <DataEntryForm 
+                                    fields={formFields}
+                                    onSave={saveNewRecord}
+                                    onCancel={() => setIsCreatingNew(false)}
+                                />
                             </div>
-                            
-                            {activeTab === 'data' && renderDataTable()}
-                            
-                            {activeTab === 'form' && (
-                                <div className="form-view">
-                                    {formMode === 'edit' ? (
-                                        <div className="text-center py-10 text-gray-500">
-                                            <i className="fas fa-edit text-4xl mb-3"></i>
-                                            <p>Switch to View Data mode to enter records</p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <h3 className="text-lg font-bold mb-4">Enter New Record</h3>
-                                            <FormDataEntry 
-                                                fields={formFields}
-                                                onSave={saveFormData}
-                                                renderInputField={renderInputField}
-                                            />
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                            
-                            {activeTab === 'structure' && formMode === 'edit' && (
-                                <div>
-                                    {/* Field Types Palette */}
-                                    <div className="mb-6">
-                                        <h3 className="text-sm font-medium text-gray-700 mb-2">
-                                            Drag & Drop Fields
-                                        </h3>
-                                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                                            {fieldTypes.map(type => (
-                                                <div key={type.value}
-                                                    draggable
-                                                    onDragStart={(e) => handleDragStart(e, type.value)}
-                                                    className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200">
-                                                    <i className={`fas fa-${type.icon} block text-lg mb-1`}></i>
-                                                    <span className="text-xs">{type.label}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Form Builder Dropzone */}
-                                    <div className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`}
-                                        onDragOver={handleDragOver}
-                                        onDragLeave={() => setIsDraggingOver(false)}
-                                        onDrop={handleDrop}>
-                                        
-                                        {formFields.length === 0 ? (
-                                            <>
-                                                <i className="fas fa-cloud-upload-alt"></i>
-                                                <p className="text-gray-600">Drag and drop fields here to build your spreadsheet structure</p>
-                                            </>
-                                        ) : (
-                                            formFields.map((field, index) => (
-                                                <div key={field.id} className="form-field">
-                                                    <div className="field-actions">
-                                                        <button className="field-action-btn delete" onClick={() => deleteField(index)}>
-                                                            <i className="fas fa-trash"></i>
-                                                        </button>
-                                                    </div>
-                                                    
-                                                    <div className="field-label">
-                                                        <input type="text" value={field.label}
-                                                            onChange={(e) => updateField(index, { label: e.target.value })}
-                                                            placeholder="Field Label" />
-                                                        <label className="flex items-center gap-1 text-sm">
-                                                            <input type="checkbox" checked={field.required}
-                                                                onChange={(e) => updateField(index, { required: e.target.checked })} />
-                                                            Required
-                                                        </label>
-                                                    </div>
-                                                    
-                                                    <div className="field-type-selector">
-                                                        <select value={field.type} onChange={(e) => updateField(index, { type: e.target.value })}>
-                                                            {fieldTypes.map(ft => (
-                                                                <option key={ft.value} value={ft.value}>{ft.label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    
-                                                    {field.type === 'select' && (
-                                                        <div className="mt-2">
-                                                            <label className="text-sm text-gray-600">Options (comma-separated)</label>
-                                                            <input type="text" value={field.options?.join(', ') || ''}
-                                                                onChange={(e) => updateField(index, { 
-                                                                    options: e.target.value.split(',').map(opt => opt.trim()) 
-                                                                })}
-                                                                className="w-full p-2 border rounded mt-1"
-                                                                placeholder="Option 1, Option 2, Option 3" />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                    
-                                    {/* Form Actions */}
-                                    <div className="flex justify-between mt-4">
-                                        <button onClick={() => setFormFields([])} className="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50">
-                                            Clear All Fields
-                                        </button>
-                                        <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
-                                            <i className="fas fa-save mr-1"></i>Save Structure
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
 
                     {/* Edit Record Modal */}
-                    {editingRecord && (
-                        <div className="modal active">
-                            <div className="modal-content" style={{ maxWidth: '600px' }}>
-                                <div className="modal-header">
-                                    <h2 className="text-xl font-bold">Edit Record</h2>
-                                    <button className="modal-close" onClick={() => setEditingRecord(null)}>
-                                        <i className="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                
-                                <FormDataEntry 
+                    <div className={`modal ${editingRecord ? 'active' : ''}`}>
+                        <div className="modal-content" style={{ maxWidth: '600px' }}>
+                            <div className="modal-header">
+                                <h2>Edit Record</h2>
+                                <button className="modal-close" onClick={() => setEditingRecord(null)}>
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div className="modal-body">
+                                <DataEntryForm 
                                     fields={formFields}
                                     initialData={editingRecord}
-                                    onSave={updateFormData}
-                                    renderInputField={renderInputField}
-                                    isEditing
+                                    onSave={updateRecord}
+                                    onCancel={() => setEditingRecord(null)}
                                 />
                             </div>
                         </div>
-                    )}
+                    </div>
 
                     {/* Toast Notifications */}
                     <div className="toast-container">
                         {toasts.map(toast => (
-                            <Toast key={toast.id} message={toast.message} type={toast.type}
-                                onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))} />
+                            <Toast
+                                key={toast.id}
+                                message={toast.message}
+                                type={toast.type}
+                                onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                            />
                         ))}
                     </div>
                 </div>
             );
         }
 
-        // Form Data Entry Component
-        const FormDataEntry = ({ fields, initialData = {}, onSave, renderInputField, isEditing = false }) => {
+        // Data Entry Form Component
+        const DataEntryForm = ({ fields, initialData = {}, onSave, onCancel }) => {
             const [formData, setFormData] = useState(initialData);
-
-            const handleFieldChange = (fieldId, value) => {
-                setFormData({ ...formData, [fieldId]: value });
-            };
 
             const handleSubmit = (e) => {
                 e.preventDefault();
@@ -2235,37 +1608,117 @@
                 
                 if (isValid) {
                     onSave(formData);
-                    if (!isEditing) {
-                        setFormData({});
-                    }
+                }
+            };
+
+            const renderInput = (field) => {
+                const value = formData[field.id] || '';
+                
+                switch (field.type) {
+                    case 'text':
+                    case 'email':
+                    case 'tel':
+                        return (
+                            <input
+                                type={field.type}
+                                value={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                                className="form-input"
+                                required={field.required}
+                            />
+                        );
+                    
+                    case 'number':
+                    case 'currency':
+                        return (
+                            <input
+                                type="number"
+                                value={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                                className="form-input"
+                                step="0.01"
+                                required={field.required}
+                            />
+                        );
+                    
+                    case 'date':
+                        return (
+                            <input
+                                type="date"
+                                value={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                                className="form-input"
+                                required={field.required}
+                            />
+                        );
+                    
+                    case 'select':
+                        return (
+                            <select
+                                value={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                                className="form-input"
+                                required={field.required}
+                            >
+                                <option value="">Select...</option>
+                                {field.options?.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
+                        );
+                    
+                    case 'checkbox':
+                        return (
+                            <input
+                                type="checkbox"
+                                checked={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.checked })}
+                                className="form-checkbox"
+                            />
+                        );
+                    
+                    default:
+                        return (
+                            <input
+                                type="text"
+                                value={value}
+                                onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                                className="form-input"
+                                required={field.required}
+                            />
+                        );
                 }
             };
 
             return (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {fields.map(field => (
-                        <div key={field.id} className="form-field-view">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                {field.label}
-                                {field.required && <span className="text-red-500 ml-1">*</span>}
-                                {field.type === 'formula' && <span className="macro-badge">Formula</span>}
-                            </label>
-                            {renderInputField(field, formData[field.id], handleFieldChange, false)}
-                            {field.type === 'formula' && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Use =SUM([Field1], [Field2]) or =AVERAGE([Field])
-                                </p>
-                            )}
-                        </div>
-                    ))}
+                <form onSubmit={handleSubmit}>
+                    <div className="form-grid">
+                        {fields.map(field => (
+                            <div key={field.id} className="form-field">
+                                <label className="form-label">
+                                    {field.label}
+                                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                                </label>
+                                {renderInput(field)}
+                            </div>
+                        ))}
+                    </div>
                     
-                    {fields.length > 0 && (
-                        <div className="flex justify-end gap-2 pt-4">
-                            <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                                {isEditing ? 'Update' : 'Save'} Record
-                            </button>
-                        </div>
-                    )}
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button 
+                            type="button"
+                            className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                            onClick={onCancel}
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            type="submit"
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                            {initialData.id ? 'Update' : 'Save'} Record
+                        </button>
+                    </div>
                 </form>
             );
         };
