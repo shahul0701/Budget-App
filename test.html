@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer & Form Builder with Firebase</title>
+    <title>File Explorer & Form Builder with Firebase Rules</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
-        /* File Explorer Styles */
+        /* [Previous styles remain the same] */
         .file-explorer {
             border: 1px solid #e5e7eb;
             border-radius: 8px;
@@ -141,7 +141,6 @@
             border-color: #ef4444;
         }
         
-        /* Dropzone Styles */
         .dropzone {
             border: 2px dashed #d1d5db;
             border-radius: 8px;
@@ -163,7 +162,6 @@
             margin-bottom: 16px;
         }
         
-        /* Form Builder Styles */
         .form-field {
             background: white;
             border: 1px solid #e5e7eb;
@@ -229,7 +227,6 @@
             color: white;
         }
         
-        /* Modal Styles */
         .modal {
             display: none;
             position: fixed;
@@ -274,7 +271,6 @@
             color: #4b5563;
         }
         
-        /* Toast Notifications */
         .toast-container {
             position: fixed;
             bottom: 20px;
@@ -317,7 +313,6 @@
             }
         }
         
-        /* Form Data Table */
         .form-data-table {
             width: 100%;
             border-collapse: collapse;
@@ -361,6 +356,62 @@
             background: #ef4444;
             color: white;
         }
+        
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 40px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .login-container h2 {
+            margin-bottom: 20px;
+            color: #1f2937;
+        }
+        
+        .login-btn {
+            background: #3b82f6;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
+        }
+        
+        .login-btn:hover {
+            background: #2563eb;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .user-email {
+            color: #4b5563;
+            font-size: 14px;
+        }
+        
+        .logout-btn {
+            background: #ef4444;
+            color: white;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .logout-btn:hover {
+            background: #dc2626;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -387,6 +438,7 @@
         
         const db = firebase.firestore();
         const storage = firebase.storage();
+        const auth = firebase.auth();
 
         // Toast Component
         const Toast = ({ message, type, onClose }) => (
@@ -405,6 +457,8 @@
 
         // Main App Component
         function App() {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
             const [currentPath, setCurrentPath] = useState(['My Files']);
             const [files, setFiles] = useState([]);
             const [selectedFile, setSelectedFile] = useState(null);
@@ -417,7 +471,12 @@
             const [isDraggingOver, setIsDraggingOver] = useState(false);
             const [newFileType, setNewFileType] = useState('form');
             const [newFileName, setNewFileName] = useState('');
-            const [fieldTypes] = useState([
+            const [isAdmin, setIsAdmin] = useState(false);
+            
+            const dragField = useRef(null);
+            const fileInputRef = useRef(null);
+
+            const fieldTypes = [
                 { value: 'text', label: 'Text', icon: 'font' },
                 { value: 'number', label: 'Number', icon: 'hashtag' },
                 { value: 'email', label: 'Email', icon: 'envelope' },
@@ -430,23 +489,127 @@
                 { value: 'yesno', label: 'Yes/No', icon: 'circle-question' },
                 { value: 'color', label: 'Color', icon: 'palette' },
                 { value: 'range', label: 'Range', icon: 'sliders' }
-            ]);
-            
-            const dragField = useRef(null);
-            const fileInputRef = useRef(null);
+            ];
 
-            // Load files on path change
+            // Monitor auth state
             useEffect(() => {
-                loadFiles();
-            }, [currentPath]);
+                const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                    if (user) {
+                        setUser(user);
+                        
+                        // Check if user is admin
+                        const token = await user.getIdTokenResult();
+                        setIsAdmin(
+                            token.claims.admin === true || 
+                            token.claims.isAdmin === true || 
+                            user.email === 'shahulsha254@gmail.com'
+                        );
+                        
+                        // Record login session (for loginSessions collection)
+                        try {
+                            await db.collection('loginSessions').add({
+                                uid: user.uid,
+                                email: user.email,
+                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                userAgent: navigator.userAgent
+                            });
+                        } catch (error) {
+                            console.error('Error recording login session:', error);
+                        }
+                        
+                        // Record login history
+                        try {
+                            await db.collection('loginHistory').add({
+                                uid: user.uid,
+                                email: user.email,
+                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                action: 'login'
+                            });
+                        } catch (error) {
+                            console.error('Error recording login history:', error);
+                        }
+                    } else {
+                        setUser(null);
+                        setIsAdmin(false);
+                    }
+                    setLoading(false);
+                });
 
-            // Load files from Firebase
+                return () => unsubscribe();
+            }, []);
+
+            // Load files when user and path change
+            useEffect(() => {
+                if (user) {
+                    loadFiles();
+                }
+            }, [user, currentPath]);
+
+            // Anonymous sign in (for demo purposes)
+            const signInAnonymously = async () => {
+                try {
+                    setLoading(true);
+                    await auth.signInAnonymously();
+                    showToast('success', 'Signed in successfully!');
+                } catch (error) {
+                    showToast('error', 'Sign in failed: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Sign in with email (for testing)
+            const signInWithEmail = async (email, password) => {
+                try {
+                    setLoading(true);
+                    await auth.signInWithEmailAndPassword(email, password);
+                    showToast('success', 'Signed in successfully!');
+                } catch (error) {
+                    showToast('error', 'Sign in failed: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Sign out
+            const signOut = async () => {
+                try {
+                    if (user) {
+                        // Record logout in history
+                        await db.collection('loginHistory').add({
+                            uid: user.uid,
+                            email: user.email,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                            action: 'logout'
+                        });
+                    }
+                    
+                    await auth.signOut();
+                    setCurrentPath(['My Files']);
+                    setFiles([]);
+                    setSelectedFile(null);
+                    setShowFormBuilder(false);
+                    showToast('success', 'Signed out successfully!');
+                } catch (error) {
+                    showToast('error', 'Sign out failed: ' + error.message);
+                }
+            };
+
+            // Get user-specific collection reference
+            const getUserCollection = (collectionName) => {
+                if (!user) throw new Error('User not authenticated');
+                return db.collection('users').doc(user.uid).collection(collectionName);
+            };
+
+            // Load files from Firebase (now under user's subcollection)
             const loadFiles = async () => {
+                if (!user) return;
+
                 try {
                     const path = currentPath.join('/');
-                    const snapshot = await db.collection('files')
+                    const filesRef = getUserCollection('tables'); // Using 'tables' collection for file explorer
+                    const snapshot = await filesRef
                         .where('path', '==', path)
-                        .where('type', 'in', ['folder', 'form', 'file'])
                         .get();
                     
                     const fileList = snapshot.docs.map(doc => ({
@@ -456,7 +619,11 @@
                     
                     setFiles(fileList);
                 } catch (error) {
-                    showToast('error', 'Error loading files: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Check your Firebase rules.');
+                    } else {
+                        showToast('error', 'Error loading files: ' + error.message);
+                    }
                 }
             };
 
@@ -469,8 +636,13 @@
                 }, 5000);
             };
 
-            // Create new file/folder
+            // Create new file/folder (now under user's subcollection)
             const createNewFile = async () => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!newFileName.trim()) {
                     showToast('error', 'Please enter a name');
                     return;
@@ -478,10 +650,13 @@
 
                 try {
                     const path = currentPath.join('/');
+                    const filesRef = getUserCollection('tables');
+                    
                     const fileData = {
                         name: newFileName,
                         path: path,
                         type: newFileType,
+                        uid: user.uid,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
@@ -491,32 +666,42 @@
                         fileData.data = [];
                     }
 
-                    const docRef = await db.collection('files').add(fileData);
+                    await filesRef.add(fileData);
                     
                     setShowNewFileModal(false);
                     setNewFileName('');
                     loadFiles();
                     showToast('success', `${newFileType === 'folder' ? 'Folder' : 'Form'} created successfully!`);
                 } catch (error) {
-                    showToast('error', 'Error creating: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Check your Firebase rules.');
+                    } else {
+                        showToast('error', 'Error creating: ' + error.message);
+                    }
                 }
             };
 
-            // Delete file/folder
+            // Delete file/folder (now under user's subcollection)
             const deleteFile = async (file, e) => {
                 e.stopPropagation();
                 
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!window.confirm(`Are you sure you want to delete "${file.name}"?`)) {
                     return;
                 }
 
                 try {
-                    await db.collection('files').doc(file.id).delete();
+                    const filesRef = getUserCollection('tables');
+                    await filesRef.doc(file.id).delete();
                     
-                    // If it's a folder, also delete all contents
+                    // If it's a folder, also delete all contents (handled by security rules)
                     if (file.type === 'folder') {
                         const folderPath = [...currentPath, file.name].join('/');
-                        const contents = await db.collection('files')
+                        const contents = await filesRef
                             .where('path', '>=', folderPath)
                             .where('path', '<', folderPath + '\uf8ff')
                             .get();
@@ -529,7 +714,11 @@
                     loadFiles();
                     showToast('success', 'Deleted successfully!');
                 } catch (error) {
-                    showToast('error', 'Error deleting: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can delete files.');
+                    } else {
+                        showToast('error', 'Error deleting: ' + error.message);
+                    }
                 }
             };
 
@@ -604,35 +793,52 @@
                 }
             };
 
-            // Save form structure
+            // Save form structure (now under user's subcollection)
             const saveFormStructure = async () => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!selectedFile) return;
 
                 try {
-                    await db.collection('files').doc(selectedFile.id).update({
+                    const filesRef = getUserCollection('tables');
+                    await filesRef.doc(selectedFile.id).update({
                         fields: formFields,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     showToast('success', 'Form structure saved!');
                 } catch (error) {
-                    showToast('error', 'Error saving form: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can modify this form.');
+                    } else {
+                        showToast('error', 'Error saving form: ' + error.message);
+                    }
                 }
             };
 
-            // Save form data
+            // Save form data (now under user's subcollection)
             const saveFormData = async (formData) => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!selectedFile) return;
 
                 try {
+                    const filesRef = getUserCollection('tables');
                     const currentData = selectedFile.data || [];
                     const newData = [...currentData, { 
                         ...formData, 
                         id: Date.now(),
-                        createdAt: new Date().toISOString() 
+                        uid: user.uid,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     }];
                     
-                    await db.collection('files').doc(selectedFile.id).update({
+                    await filesRef.doc(selectedFile.id).update({
                         data: newData,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
@@ -641,20 +847,30 @@
                     setSelectedFile({ ...selectedFile, data: newData });
                     showToast('success', 'Data saved!');
                 } catch (error) {
-                    showToast('error', 'Error saving data: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can add data.');
+                    } else {
+                        showToast('error', 'Error saving data: ' + error.message);
+                    }
                 }
             };
 
-            // Update form data
+            // Update form data (now under user's subcollection)
             const updateFormData = async (updatedRecord) => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!selectedFile) return;
 
                 try {
+                    const filesRef = getUserCollection('tables');
                     const newData = formData.map(record => 
                         record.id === updatedRecord.id ? updatedRecord : record
                     );
                     
-                    await db.collection('files').doc(selectedFile.id).update({
+                    await filesRef.doc(selectedFile.id).update({
                         data: newData,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
@@ -664,18 +880,28 @@
                     setEditingRecord(null);
                     showToast('success', 'Data updated!');
                 } catch (error) {
-                    showToast('error', 'Error updating data: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can update data.');
+                    } else {
+                        showToast('error', 'Error updating data: ' + error.message);
+                    }
                 }
             };
 
-            // Delete form data
+            // Delete form data (now under user's subcollection)
             const deleteFormData = async (recordId) => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 if (!window.confirm('Delete this record?')) return;
 
                 try {
+                    const filesRef = getUserCollection('tables');
                     const newData = formData.filter(record => record.id !== recordId);
                     
-                    await db.collection('files').doc(selectedFile.id).update({
+                    await filesRef.doc(selectedFile.id).update({
                         data: newData,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
@@ -684,31 +910,48 @@
                     setSelectedFile({ ...selectedFile, data: newData });
                     showToast('success', 'Data deleted!');
                 } catch (error) {
-                    showToast('error', 'Error deleting data: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can delete data.');
+                    } else {
+                        showToast('error', 'Error deleting data: ' + error.message);
+                    }
                 }
             };
 
-            // Upload file
+            // Upload file (now under user's subcollection with proper path)
             const uploadFile = async (file) => {
+                if (!user) {
+                    showToast('error', 'Please sign in first');
+                    return;
+                }
+
                 try {
                     const path = currentPath.join('/');
-                    const storageRef = storage.ref().child(`${path}/${file.name}`);
+                    // Use user-specific storage path
+                    const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
                     await storageRef.put(file);
                     
+                    const filesRef = getUserCollection('tables');
                     const fileData = {
                         name: file.name,
                         path: path,
                         type: 'file',
                         size: file.size,
                         contentType: file.type,
+                        uid: user.uid,
+                        storagePath: `users/${user.uid}/${path}/${file.name}`,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     
-                    await db.collection('files').add(fileData);
+                    await filesRef.add(fileData);
                     loadFiles();
                     showToast('success', 'File uploaded!');
                 } catch (error) {
-                    showToast('error', 'Error uploading: ' + error.message);
+                    if (error.code === 'permission-denied') {
+                        showToast('error', 'Permission denied. Only the owner can upload files.');
+                    } else {
+                        showToast('error', 'Error uploading: ' + error.message);
+                    }
                 }
             };
 
@@ -846,15 +1089,87 @@
                 }
             };
 
+            // Loading state
+            if (loading) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-gray-600">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Login screen
+            if (!user) {
+                return (
+                    <div className="login-container">
+                        <h2 className="text-2xl font-bold mb-6">Welcome to File Explorer</h2>
+                        <p className="text-gray-600 mb-6">Please sign in to access your files</p>
+                        
+                        <button 
+                            onClick={signInAnonymously}
+                            className="login-btn mb-4"
+                        >
+                            <i className="fas fa-user-secret mr-2"></i>
+                            Sign in Anonymously (Demo)
+                        </button>
+                        
+                        <div className="relative my-6">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-gray-300"></div>
+                            </div>
+                            <div className="relative flex justify-center text-sm">
+                                <span className="px-2 bg-white text-gray-500">Or test with admin</span>
+                            </div>
+                        </div>
+                        
+                        <button 
+                            onClick={() => signInWithEmail('shahulsha254@gmail.com', 'password123')}
+                            className="login-btn bg-purple-600 hover:bg-purple-700"
+                        >
+                            <i className="fas fa-crown mr-2"></i>
+                            Sign in as Admin (Demo)
+                        </button>
+                        
+                        <p className="text-xs text-gray-400 mt-6">
+                            Note: For demo purposes only. In production, use proper authentication.
+                        </p>
+                    </div>
+                );
+            }
+
+            // Main app
             return (
                 <div className="container mx-auto p-4 max-w-6xl">
-                    {/* Header */}
+                    {/* Header with user info */}
                     <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
-                        <h1 className="text-3xl font-bold flex items-center gap-3">
-                            <i className="fas fa-folder-open"></i>
-                            File Explorer & Form Builder
-                        </h1>
-                        <p className="mt-2 opacity-90">Create forms, manage data, and organize your files</p>
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h1 className="text-3xl font-bold flex items-center gap-3">
+                                    <i className="fas fa-folder-open"></i>
+                                    File Explorer & Form Builder
+                                </h1>
+                                <p className="mt-2 opacity-90">Create forms, manage data, and organize your files</p>
+                            </div>
+                            
+                            <div className="user-info">
+                                <div className="text-right">
+                                    <div className="font-medium">
+                                        {user.email || user.isAnonymous ? 'Anonymous User' : user.uid}
+                                    </div>
+                                    <div className="user-email">
+                                        {user.email && <span>{user.email}</span>}
+                                        {isAdmin && <span className="ml-2 bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs">Admin</span>}
+                                    </div>
+                                </div>
+                                <button onClick={signOut} className="logout-btn">
+                                    <i className="fas fa-sign-out-alt mr-1"></i>
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* File Explorer */}
