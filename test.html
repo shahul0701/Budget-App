@@ -149,6 +149,7 @@
             background: #f9fafb;
             transition: all 0.2s;
             cursor: pointer;
+            min-height: 200px;
         }
         
         .dropzone.drag-over {
@@ -249,8 +250,8 @@
             border-radius: 12px;
             padding: 24px;
             width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
+            max-width: 900px;
+            max-height: 90vh;
             overflow-y: auto;
         }
         
@@ -259,6 +260,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e5e7eb;
         }
         
         .modal-close {
@@ -412,6 +415,103 @@
         .logout-btn:hover {
             background: #dc2626;
         }
+        
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+        
+        .tab-button {
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .tab-button.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .tab-button:not(.active) {
+            background: #f3f4f6;
+            color: #4b5563;
+        }
+        
+        .tab-button:not(.active):hover {
+            background: #e5e7eb;
+        }
+        
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 4px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            width: fit-content;
+        }
+        
+        .mode-btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .mode-btn:not(.active) {
+            color: #4b5563;
+        }
+        
+        .form-view {
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+        
+        .form-field-view {
+            margin-bottom: 20px;
+        }
+        
+        .form-field-view label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #374151;
+        }
+        
+        .form-field-view input,
+        .form-field-view select,
+        .form-field-view textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: white;
+        }
+        
+        .form-field-view input[type="checkbox"] {
+            width: auto;
+        }
+        
+        .edit-badge {
+            background: #10b981;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -472,6 +572,8 @@
             const [newFileType, setNewFileType] = useState('form');
             const [newFileName, setNewFileName] = useState('');
             const [isAdmin, setIsAdmin] = useState(false);
+            const [formMode, setFormMode] = useState('view'); // 'view' or 'edit'
+            const [activeTab, setActiveTab] = useState('form'); // 'form' or 'data'
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
@@ -505,7 +607,7 @@
                             user.email === 'shahulsha254@gmail.com'
                         );
                         
-                        // Record login session (for loginSessions collection)
+                        // Record login session
                         try {
                             await db.collection('loginSessions').add({
                                 uid: user.uid,
@@ -545,7 +647,7 @@
                 }
             }, [user, currentPath]);
 
-            // Anonymous sign in (for demo purposes)
+            // Anonymous sign in
             const signInAnonymously = async () => {
                 try {
                     setLoading(true);
@@ -558,7 +660,7 @@
                 }
             };
 
-            // Sign in with email (for testing)
+            // Sign in with email
             const signInWithEmail = async (email, password) => {
                 try {
                     setLoading(true);
@@ -575,7 +677,6 @@
             const signOut = async () => {
                 try {
                     if (user) {
-                        // Record logout in history
                         await db.collection('loginHistory').add({
                             uid: user.uid,
                             email: user.email,
@@ -601,13 +702,13 @@
                 return db.collection('users').doc(user.uid).collection(collectionName);
             };
 
-            // Load files from Firebase (now under user's subcollection)
+            // Load files from Firebase
             const loadFiles = async () => {
                 if (!user) return;
 
                 try {
                     const path = currentPath.join('/');
-                    const filesRef = getUserCollection('tables'); // Using 'tables' collection for file explorer
+                    const filesRef = getUserCollection('tables');
                     const snapshot = await filesRef
                         .where('path', '==', path)
                         .get();
@@ -636,7 +737,7 @@
                 }, 5000);
             };
 
-            // Create new file/folder (now under user's subcollection)
+            // Create new file/folder
             const createNewFile = async () => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
@@ -681,7 +782,7 @@
                 }
             };
 
-            // Delete file/folder (now under user's subcollection)
+            // Delete file/folder
             const deleteFile = async (file, e) => {
                 e.stopPropagation();
                 
@@ -698,7 +799,6 @@
                     const filesRef = getUserCollection('tables');
                     await filesRef.doc(file.id).delete();
                     
-                    // If it's a folder, also delete all contents (handled by security rules)
                     if (file.type === 'folder') {
                         const folderPath = [...currentPath, file.name].join('/');
                         const contents = await filesRef
@@ -730,6 +830,8 @@
                     setSelectedFile(file);
                     setFormFields(file.fields || []);
                     setFormData(file.data || []);
+                    setFormMode('view'); // Start in view mode
+                    setActiveTab('form');
                     setShowFormBuilder(true);
                 }
             };
@@ -743,14 +845,21 @@
 
             // Handle drag start for field types
             const handleDragStart = (e, fieldType) => {
-                dragField.current = fieldType;
-                e.dataTransfer.setData('text/plain', fieldType);
+                if (formMode === 'edit') {
+                    dragField.current = fieldType;
+                    e.dataTransfer.setData('text/plain', fieldType);
+                } else {
+                    e.preventDefault();
+                    showToast('info', 'Switch to Edit Mode to modify the form');
+                }
             };
 
             // Handle drag over for dropzone
             const handleDragOver = (e) => {
-                e.preventDefault();
-                setIsDraggingOver(true);
+                if (formMode === 'edit') {
+                    e.preventDefault();
+                    setIsDraggingOver(true);
+                }
             };
 
             // Handle drag leave for dropzone
@@ -764,7 +873,7 @@
                 e.preventDefault();
                 setIsDraggingOver(false);
                 
-                if (dragField.current) {
+                if (formMode === 'edit' && dragField.current) {
                     const newField = {
                         id: Date.now() + Math.random(),
                         type: dragField.current,
@@ -793,7 +902,7 @@
                 }
             };
 
-            // Save form structure (now under user's subcollection)
+            // Save form structure
             const saveFormStructure = async () => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
@@ -809,7 +918,11 @@
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
+                    // Update selected file with new fields
+                    setSelectedFile({ ...selectedFile, fields: formFields });
+                    
                     showToast('success', 'Form structure saved!');
+                    setFormMode('view'); // Switch back to view mode after saving
                 } catch (error) {
                     if (error.code === 'permission-denied') {
                         showToast('error', 'Permission denied. Only the owner can modify this form.');
@@ -819,8 +932,8 @@
                 }
             };
 
-            // Save form data (now under user's subcollection)
-            const saveFormData = async (formData) => {
+            // Save form data - FIXED: Removed serverTimestamp from array
+            const saveFormData = async (formDataToSave) => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
                     return;
@@ -830,32 +943,38 @@
 
                 try {
                     const filesRef = getUserCollection('tables');
+                    
+                    // Get current data
                     const currentData = selectedFile.data || [];
-                    const newData = [...currentData, { 
-                        ...formData, 
+                    
+                    // Create new record with ISO string instead of serverTimestamp
+                    const newRecord = { 
+                        ...formDataToSave, 
                         id: Date.now(),
                         uid: user.uid,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    }];
+                        createdAt: new Date().toISOString() // Use ISO string instead of serverTimestamp
+                    };
                     
+                    const newData = [...currentData, newRecord];
+                    
+                    // Update the document
                     await filesRef.doc(selectedFile.id).update({
                         data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() // This is fine - it's not in an array
                     });
                     
+                    // Update local state
                     setFormData(newData);
                     setSelectedFile({ ...selectedFile, data: newData });
+                    
                     showToast('success', 'Data saved!');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can add data.');
-                    } else {
-                        showToast('error', 'Error saving data: ' + error.message);
-                    }
+                    console.error('Error saving data:', error);
+                    showToast('error', 'Error saving data: ' + error.message);
                 }
             };
 
-            // Update form data (now under user's subcollection)
+            // Update form data - FIXED: Removed serverTimestamp from array
             const updateFormData = async (updatedRecord) => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
@@ -866,29 +985,34 @@
 
                 try {
                     const filesRef = getUserCollection('tables');
+                    
+                    // Update the record in the array
                     const newData = formData.map(record => 
-                        record.id === updatedRecord.id ? updatedRecord : record
+                        record.id === updatedRecord.id ? { 
+                            ...updatedRecord,
+                            updatedAt: new Date().toISOString() // Use ISO string
+                        } : record
                     );
                     
+                    // Update the document
                     await filesRef.doc(selectedFile.id).update({
                         data: newData,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() // This is fine - it's not in an array
                     });
                     
+                    // Update local state
                     setFormData(newData);
                     setSelectedFile({ ...selectedFile, data: newData });
                     setEditingRecord(null);
+                    
                     showToast('success', 'Data updated!');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can update data.');
-                    } else {
-                        showToast('error', 'Error updating data: ' + error.message);
-                    }
+                    console.error('Error updating data:', error);
+                    showToast('error', 'Error updating data: ' + error.message);
                 }
             };
 
-            // Delete form data (now under user's subcollection)
+            // Delete form data
             const deleteFormData = async (recordId) => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
@@ -910,15 +1034,11 @@
                     setSelectedFile({ ...selectedFile, data: newData });
                     showToast('success', 'Data deleted!');
                 } catch (error) {
-                    if (error.code === 'permission-denied') {
-                        showToast('error', 'Permission denied. Only the owner can delete data.');
-                    } else {
-                        showToast('error', 'Error deleting data: ' + error.message);
-                    }
+                    showToast('error', 'Error deleting data: ' + error.message);
                 }
             };
 
-            // Upload file (now under user's subcollection with proper path)
+            // Upload file
             const uploadFile = async (file) => {
                 if (!user) {
                     showToast('error', 'Please sign in first');
@@ -927,7 +1047,6 @@
 
                 try {
                     const path = currentPath.join('/');
-                    // Use user-specific storage path
                     const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
                     await storageRef.put(file);
                     
@@ -964,72 +1083,44 @@
             };
 
             // Render input field based on type
-            const renderInputField = (field, value, onChange) => {
+            const renderInputField = (field, value, onChange, disabled = false) => {
+                const commonProps = {
+                    value: value || '',
+                    onChange: (e) => onChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value),
+                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500",
+                    disabled: disabled,
+                    required: field.required && !disabled
+                };
+
                 switch (field.type) {
                     case 'text':
                     case 'email':
                     case 'tel':
-                        return (
-                            <input
-                                type={field.type}
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            />
-                        );
+                        return <input type={field.type} {...commonProps} />;
                     
                     case 'number':
-                        return (
-                            <input
-                                type="number"
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            />
-                        );
+                        return <input type="number" {...commonProps} />;
                     
                     case 'date':
-                        return (
-                            <input
-                                type="date"
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            />
-                        );
+                        return <input type="date" {...commonProps} />;
                     
                     case 'time':
-                        return (
-                            <input
-                                type="time"
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            />
-                        );
+                        return <input type="time" {...commonProps} />;
                     
                     case 'checkbox':
                         return (
                             <input
                                 type="checkbox"
                                 checked={value || false}
-                                onChange={(e) => onChange(e.target.checked)}
+                                onChange={(e) => onChange(field.id, e.target.checked)}
                                 className="h-5 w-5"
+                                disabled={disabled}
                             />
                         );
                     
                     case 'select':
                         return (
-                            <select
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            >
+                            <select {...commonProps}>
                                 <option value="">Select...</option>
                                 {(field.options || []).map((opt, i) => (
                                     <option key={i} value={opt}>{opt}</option>
@@ -1039,12 +1130,7 @@
                     
                     case 'yesno':
                         return (
-                            <select
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                required={field.required}
-                            >
+                            <select {...commonProps}>
                                 <option value="">Select...</option>
                                 <option value="Yes">Yes</option>
                                 <option value="No">No</option>
@@ -1052,41 +1138,65 @@
                         );
                     
                     case 'textarea':
-                        return (
-                            <textarea
-                                value={value || ''}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                                rows="4"
-                                required={field.required}
-                            />
-                        );
+                        return <textarea {...commonProps} rows="4" />;
                     
                     case 'color':
-                        return (
-                            <input
-                                type="color"
-                                value={value || '#3b82f6'}
-                                onChange={(e) => onChange(e.target.value)}
-                                className="w-full p-2 border rounded h-10"
-                            />
-                        );
+                        return <input type="color" {...commonProps} className="w-full p-2 border rounded h-10" />;
                     
                     case 'range':
                         return (
                             <input
                                 type="range"
                                 value={value || 50}
-                                onChange={(e) => onChange(e.target.value)}
+                                onChange={(e) => onChange(field.id, e.target.value)}
                                 className="w-full"
                                 min="0"
                                 max="100"
+                                disabled={disabled}
                             />
                         );
                     
                     default:
                         return null;
                 }
+            };
+
+            // Render form in view mode
+            const renderFormView = () => {
+                const [formData, setFormData] = useState({});
+
+                const handleFieldChange = (fieldId, value) => {
+                    setFormData({ ...formData, [fieldId]: value });
+                };
+
+                const handleSubmit = (e) => {
+                    e.preventDefault();
+                    saveFormData(formData);
+                    setFormData({});
+                };
+
+                return (
+                    <form onSubmit={handleSubmit} className="form-view">
+                        {formFields.map(field => (
+                            <div key={field.id} className="form-field-view">
+                                <label>
+                                    {field.label}
+                                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                                </label>
+                                {renderInputField(field, formData[field.id], handleFieldChange, false)}
+                            </div>
+                        ))}
+                        
+                        {formFields.length > 0 && (
+                            <button
+                                type="submit"
+                                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                            >
+                                Save Record
+                            </button>
+                        )}
+                    </form>
+                );
             };
 
             // Loading state
@@ -1121,20 +1231,20 @@
                                 <div className="w-full border-t border-gray-300"></div>
                             </div>
                             <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-white text-gray-500">Or test with admin</span>
+                                <span className="px-2 bg-white text-gray-500">Or test with demo account</span>
                             </div>
                         </div>
                         
                         <button 
-                            onClick={() => signInWithEmail('shahulsha254@gmail.com', 'password123')}
+                            onClick={() => signInWithEmail('demo@gmail.com', 'password123')}
                             className="login-btn bg-purple-600 hover:bg-purple-700"
                         >
-                            <i className="fas fa-crown mr-2"></i>
-                            Sign in as Admin (Demo)
+                            <i className="fas fa-user mr-2"></i>
+                            Sign in as demo@gmail.com
                         </button>
                         
                         <p className="text-xs text-gray-400 mt-6">
-                            Note: For demo purposes only. In production, use proper authentication.
+                            Note: For demo purposes only.
                         </p>
                     </div>
                 );
@@ -1157,7 +1267,7 @@
                             <div className="user-info">
                                 <div className="text-right">
                                     <div className="font-medium">
-                                        {user.email || user.isAnonymous ? 'Anonymous User' : user.uid}
+                                        {user.email || (user.isAnonymous ? 'Anonymous User' : user.uid)}
                                     </div>
                                     <div className="user-email">
                                         {user.email && <span>{user.email}</span>}
@@ -1275,7 +1385,7 @@
 
                     {/* New File Modal */}
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
-                        <div className="modal-content">
+                        <div className="modal-content" style={{ maxWidth: '500px' }}>
                             <div className="modal-header">
                                 <h2 className="text-xl font-bold">Create New</h2>
                                 <button 
@@ -1344,13 +1454,14 @@
                         </div>
                     </div>
 
-                    {/* Form Builder Modal */}
+                    {/* Form Builder/Viewer Modal */}
                     <div className={`modal ${showFormBuilder ? 'active' : ''}`}>
                         <div className="modal-content" style={{ maxWidth: '900px' }}>
                             <div className="modal-header">
                                 <h2 className="text-xl font-bold flex items-center gap-2">
                                     <i className="fas fa-wpforms text-blue-500"></i>
                                     {selectedFile?.name}
+                                    {formMode === 'edit' && <span className="edit-badge">Edit Mode</span>}
                                 </h2>
                                 <button 
                                     className="modal-close"
@@ -1359,204 +1470,254 @@
                                         setSelectedFile(null);
                                         setFormFields([]);
                                         setFormData([]);
+                                        setFormMode('view');
                                     }}
                                 >
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
                             
+                            {/* Mode Toggle */}
+                            <div className="mode-toggle">
+                                <button
+                                    className={`mode-btn ${formMode === 'view' ? 'active' : ''}`}
+                                    onClick={() => setFormMode('view')}
+                                >
+                                    <i className="fas fa-eye mr-1"></i>View Form
+                                </button>
+                                <button
+                                    className={`mode-btn ${formMode === 'edit' ? 'active' : ''}`}
+                                    onClick={() => setFormMode('edit')}
+                                >
+                                    <i className="fas fa-edit mr-1"></i>Edit Form
+                                </button>
+                            </div>
+                            
                             {/* Tabs */}
-                            <div className="flex border-b mb-4">
+                            <div className="tab-buttons">
                                 <button
-                                    className="px-4 py-2 font-medium text-blue-600 border-b-2 border-blue-600"
+                                    className={`tab-button ${activeTab === 'form' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('form')}
                                 >
-                                    Form Builder
+                                    <i className="fas fa-wpforms mr-1"></i>Form
                                 </button>
                                 <button
-                                    className="px-4 py-2 font-medium text-gray-600 hover:text-blue-600"
-                                    onClick={() => {
-                                        // Switch to data view
-                                    }}
+                                    className={`tab-button ${activeTab === 'data' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('data')}
                                 >
-                                    Data ({formData.length})
+                                    <i className="fas fa-table mr-1"></i>Data ({formData.length})
                                 </button>
                             </div>
                             
-                            {/* Field Types */}
-                            <div className="mb-6">
-                                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                                    Drag & Drop Fields
-                                </h3>
-                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                    {fieldTypes.map(type => (
-                                        <div
-                                            key={type.value}
-                                            draggable
-                                            onDragStart={(e) => handleDragStart(e, type.value)}
-                                            className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
-                                        >
-                                            <i className={`fas fa-${type.icon} block text-lg mb-1`}></i>
-                                            <span className="text-xs">{type.label}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                            
-                            {/* Form Builder Dropzone */}
-                            <div 
-                                className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`}
-                                onDragOver={handleDragOver}
-                                onDragLeave={handleDragLeave}
-                                onDrop={handleDrop}
-                            >
-                                {formFields.length === 0 ? (
-                                    <>
-                                        <i className="fas fa-cloud-upload-alt"></i>
-                                        <p className="text-gray-600">Drag and drop fields here to build your form</p>
-                                    </>
-                                ) : (
-                                    formFields.map((field, index) => (
-                                        <div key={field.id} className="form-field">
-                                            <div className="field-actions">
-                                                <button 
-                                                    className="field-action-btn delete"
-                                                    onClick={() => deleteField(index)}
-                                                >
-                                                    <i className="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                            
-                                            <div className="field-label">
-                                                <input
-                                                    type="text"
-                                                    value={field.label}
-                                                    onChange={(e) => updateField(index, { label: e.target.value })}
-                                                    placeholder="Field Label"
-                                                />
-                                                <label className="flex items-center gap-1 text-sm">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={field.required}
-                                                        onChange={(e) => updateField(index, { required: e.target.checked })}
-                                                    />
-                                                    Required
-                                                </label>
-                                            </div>
-                                            
-                                            <div className="field-type-selector">
-                                                <select
-                                                    value={field.type}
-                                                    onChange={(e) => updateField(index, { type: e.target.value })}
-                                                >
-                                                    {fieldTypes.map(ft => (
-                                                        <option key={ft.value} value={ft.value}>
-                                                            {ft.label}
-                                                        </option>
+                            {activeTab === 'form' && (
+                                <>
+                                    {/* Edit Mode - Show field palette and dropzone */}
+                                    {formMode === 'edit' && (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className="text-sm font-medium text-gray-700 mb-2">
+                                                    Drag & Drop Fields (Drag to add to form)
+                                                </h3>
+                                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                                    {fieldTypes.map(type => (
+                                                        <div
+                                                            key={type.value}
+                                                            draggable
+                                                            onDragStart={(e) => handleDragStart(e, type.value)}
+                                                            className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
+                                                        >
+                                                            <i className={`fas fa-${type.icon} block text-lg mb-1`}></i>
+                                                            <span className="text-xs">{type.label}</span>
+                                                        </div>
                                                     ))}
-                                                </select>
-                                            </div>
-                                            
-                                            {field.type === 'select' && (
-                                                <div className="mt-2">
-                                                    <label className="text-sm text-gray-600">Options (comma-separated)</label>
-                                                    <input
-                                                        type="text"
-                                                        value={field.options?.join(', ') || ''}
-                                                        onChange={(e) => updateField(index, { 
-                                                            options: e.target.value.split(',').map(opt => opt.trim()) 
-                                                        })}
-                                                        className="w-full p-2 border rounded mt-1"
-                                                        placeholder="Option 1, Option 2, Option 3"
-                                                    />
                                                 </div>
-                                            )}
+                                            </div>
                                             
-                                            {/* Field Preview */}
-                                            <div className="mt-3 pt-3 border-t">
-                                                <div className="text-sm text-gray-500 mb-2">Preview:</div>
-                                                {renderInputField(field, '', () => {})}
+                                            {/* Form Builder Dropzone */}
+                                            <div 
+                                                className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`}
+                                                onDragOver={handleDragOver}
+                                                onDragLeave={handleDragLeave}
+                                                onDrop={handleDrop}
+                                            >
+                                                {formFields.length === 0 ? (
+                                                    <>
+                                                        <i className="fas fa-cloud-upload-alt"></i>
+                                                        <p className="text-gray-600">Drag and drop fields here to build your form</p>
+                                                    </>
+                                                ) : (
+                                                    formFields.map((field, index) => (
+                                                        <div key={field.id} className="form-field">
+                                                            <div className="field-actions">
+                                                                <button 
+                                                                    className="field-action-btn delete"
+                                                                    onClick={() => deleteField(index)}
+                                                                >
+                                                                    <i className="fas fa-trash"></i>
+                                                                </button>
+                                                            </div>
+                                                            
+                                                            <div className="field-label">
+                                                                <input
+                                                                    type="text"
+                                                                    value={field.label}
+                                                                    onChange={(e) => updateField(index, { label: e.target.value })}
+                                                                    placeholder="Field Label"
+                                                                />
+                                                                <label className="flex items-center gap-1 text-sm">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={field.required}
+                                                                        onChange={(e) => updateField(index, { required: e.target.checked })}
+                                                                    />
+                                                                    Required
+                                                                </label>
+                                                            </div>
+                                                            
+                                                            <div className="field-type-selector">
+                                                                <select
+                                                                    value={field.type}
+                                                                    onChange={(e) => updateField(index, { type: e.target.value })}
+                                                                >
+                                                                    {fieldTypes.map(ft => (
+                                                                        <option key={ft.value} value={ft.value}>
+                                                                            {ft.label}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                            
+                                                            {field.type === 'select' && (
+                                                                <div className="mt-2">
+                                                                    <label className="text-sm text-gray-600">Options (comma-separated)</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={field.options?.join(', ') || ''}
+                                                                        onChange={(e) => updateField(index, { 
+                                                                            options: e.target.value.split(',').map(opt => opt.trim()) 
+                                                                        })}
+                                                                        className="w-full p-2 border rounded mt-1"
+                                                                        placeholder="Option 1, Option 2, Option 3"
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {/* Field Preview */}
+                                                            <div className="mt-3 pt-3 border-t">
+                                                                <div className="text-sm text-gray-500 mb-2">Preview:</div>
+                                                                {renderInputField(field, '', (id, value) => {}, true)}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
                                             </div>
+                                            
+                                            {/* Form Actions */}
+                                            <div className="flex justify-between mt-4">
+                                                <div>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (window.confirm('Clear all fields?')) {
+                                                                setFormFields([]);
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50"
+                                                    >
+                                                        Clear All Fields
+                                                    </button>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={saveFormStructure}
+                                                        className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                                                    >
+                                                        <i className="fas fa-save mr-1"></i>Save Form
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                    
+                                    {/* View Mode - Show the actual form for data entry */}
+                                    {formMode === 'view' && (
+                                        <div className="form-view">
+                                            {formFields.length === 0 ? (
+                                                <div className="text-center py-10 text-gray-500">
+                                                    <i className="fas fa-wpforms text-4xl mb-3"></i>
+                                                    <p>This form has no fields yet.</p>
+                                                    <p className="text-sm mt-2">Switch to Edit Mode to add fields.</p>
+                                                </div>
+                                            ) : (
+                                                <FormDataEntry 
+                                                    fields={formFields}
+                                                    onSave={saveFormData}
+                                                    renderInputField={renderInputField}
+                                                />
+                                            )}
                                         </div>
-                                    ))
-                                )}
-                            </div>
+                                    )}
+                                </>
+                            )}
                             
-                            {/* Form Actions */}
-                            <div className="flex justify-between mt-4">
+                            {activeTab === 'data' && (
                                 <div>
-                                    <button
-                                        onClick={() => setFormFields([])}
-                                        className="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50"
-                                    >
-                                        Clear All Fields
-                                    </button>
-                                </div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={saveFormStructure}
-                                        className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-                                    >
-                                        <i className="fas fa-save mr-1"></i>Save Form
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            {/* Data Entry Section */}
-                            {formFields.length > 0 && (
-                                <div className="mt-6 pt-6 border-t">
-                                    <h3 className="text-lg font-bold mb-4">Enter Data</h3>
+                                    <h3 className="text-lg font-bold mb-4">Saved Data</h3>
                                     
-                                    <FormDataEntry 
-                                        fields={formFields}
-                                        onSave={saveFormData}
-                                        renderInputField={renderInputField}
-                                    />
-                                    
-                                    {/* Data Table */}
-                                    {formData.length > 0 && (
-                                        <div className="mt-6">
-                                            <h4 className="font-medium mb-3">Saved Data ({formData.length} records)</h4>
-                                            <div className="overflow-x-auto">
-                                                <table className="form-data-table">
-                                                    <thead>
-                                                        <tr>
-                                                            {formFields.map(field => (
-                                                                <th key={field.id}>{field.label}</th>
-                                                            ))}
-                                                            <th>Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {formData.map(record => (
-                                                            <tr key={record.id}>
-                                                                {formFields.map(field => (
-                                                                    <td key={field.id}>
-                                                                        {field.type === 'checkbox' 
-                                                                            ? (record[field.id] ? '✓' : '✗')
-                                                                            : record[field.id] || '-'}
-                                                                    </td>
-                                                                ))}
-                                                                <td>
-                                                                    <div className="form-data-actions">
-                                                                        <button 
-                                                                            className="data-action-btn edit"
-                                                                            onClick={() => setEditingRecord(record)}
-                                                                        >
-                                                                            <i className="fas fa-edit"></i>
-                                                                        </button>
-                                                                        <button 
-                                                                            className="data-action-btn delete"
-                                                                            onClick={() => deleteFormData(record.id)}
-                                                                        >
-                                                                            <i className="fas fa-trash"></i>
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
+                                    {formData.length > 0 ? (
+                                        <div className="overflow-x-auto">
+                                            <table className="form-data-table">
+                                                <thead>
+                                                    <tr>
+                                                        {formFields.map(field => (
+                                                            <th key={field.id}>{field.label}</th>
                                                         ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                                        <th>Created At</th>
+                                                        <th>Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {formData.map(record => (
+                                                        <tr key={record.id}>
+                                                            {formFields.map(field => (
+                                                                <td key={field.id}>
+                                                                    {field.type === 'checkbox' 
+                                                                        ? (record[field.id] ? '✓' : '✗')
+                                                                        : record[field.id] || '-'}
+                                                                </td>
+                                                            ))}
+                                                            <td className="text-sm text-gray-500">
+                                                                {record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}
+                                                            </td>
+                                                            <td>
+                                                                <div className="form-data-actions">
+                                                                    <button 
+                                                                        className="data-action-btn edit"
+                                                                        onClick={() => {
+                                                                            setEditingRecord(record);
+                                                                            setActiveTab('form');
+                                                                            setFormMode('view');
+                                                                        }}
+                                                                    >
+                                                                        <i className="fas fa-edit"></i>
+                                                                    </button>
+                                                                    <button 
+                                                                        className="data-action-btn delete"
+                                                                        onClick={() => deleteFormData(record.id)}
+                                                                    >
+                                                                        <i className="fas fa-trash"></i>
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-10 text-gray-500">
+                                            <i className="fas fa-database text-4xl mb-3"></i>
+                                            <p>No data saved yet.</p>
+                                            <p className="text-sm mt-2">Go to the Form tab to add records.</p>
                                         </div>
                                     )}
                                 </div>
@@ -1567,7 +1728,7 @@
                     {/* Edit Record Modal */}
                     {editingRecord && (
                         <div className="modal active">
-                            <div className="modal-content">
+                            <div className="modal-content" style={{ maxWidth: '600px' }}>
                                 <div className="modal-header">
                                     <h2 className="text-xl font-bold">Edit Record</h2>
                                     <button 
@@ -1608,36 +1769,52 @@
         const FormDataEntry = ({ fields, initialData = {}, onSave, renderInputField, isEditing = false }) => {
             const [formData, setFormData] = useState(initialData);
 
+            const handleFieldChange = (fieldId, value) => {
+                setFormData({ ...formData, [fieldId]: value });
+            };
+
             const handleSubmit = (e) => {
                 e.preventDefault();
-                onSave(formData);
-                if (!isEditing) {
-                    setFormData({});
+                
+                // Validate required fields
+                let isValid = true;
+                fields.forEach(field => {
+                    if (field.required && !formData[field.id]) {
+                        isValid = false;
+                        alert(`${field.label} is required`);
+                    }
+                });
+                
+                if (isValid) {
+                    onSave(formData);
+                    if (!isEditing) {
+                        setFormData({});
+                    }
                 }
             };
 
             return (
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {fields.map(field => (
-                        <div key={field.id}>
+                        <div key={field.id} className="form-field-view">
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 {field.label}
                                 {field.required && <span className="text-red-500 ml-1">*</span>}
                             </label>
-                            {renderInputField(field, formData[field.id], (value) => 
-                                setFormData({ ...formData, [field.id]: value })
-                            )}
+                            {renderInputField(field, formData[field.id], handleFieldChange, false)}
                         </div>
                     ))}
                     
-                    <div className="flex justify-end gap-2 pt-4">
-                        <button
-                            type="submit"
-                            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                        >
-                            {isEditing ? 'Update' : 'Save'} Record
-                        </button>
-                    </div>
+                    {fields.length > 0 && (
+                        <div className="flex justify-end gap-2 pt-4">
+                            <button
+                                type="submit"
+                                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                            >
+                                {isEditing ? 'Update' : 'Save'} Record
+                            </button>
+                        </div>
+                    )}
                 </form>
             );
         };
