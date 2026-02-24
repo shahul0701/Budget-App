@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer + Form Builder with Working Formulas & Data Tables</title>
+    <title>File Explorer - Table View with Working Formulas</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -94,6 +94,10 @@
         .formula-preview { background: #ede9fe; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; margin-top: 4px; color: #4c1d95; }
         .field-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .aggregate-row { background: #f3e8ff; padding: 8px; border-radius: 6px; margin: 8px 0; font-weight: 500; }
+        .add-data-btn { background: #10b981; color: white; padding: 8px 16px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+        .add-data-btn:hover { background: #059669; }
+        .edit-form-btn { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+        .edit-form-btn:hover { background: #2563eb; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -102,7 +106,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Firebase Configuration (unchanged)
+        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
             authDomain: "budget-app-1365f.firebaseapp.com",
@@ -133,62 +137,98 @@
             </div>
         );
 
-        // ** ENHANCED FORMULA EVALUATION **
-        // Supports: sum(..), avg(..), count(..), min(..), max(..), if(condition, then, else)
-        // Also field references by label (sanitized) or by field id
+        // ENHANCED FORMULA EVALUATOR - Supports all formula types
         const evaluateFormula = (formula, record, fields) => {
             if (!formula || !formula.trim()) return '';
+            
             try {
-                // Build context: field values accessible via field.id and sanitized label
+                // Build context with all field values
                 const context = {};
-                const fieldValues = {};
+                const fieldMap = {};
+                
                 fields.forEach(f => {
                     const val = record[f.id] || '';
                     context[f.id] = val;
-                    const sanitized = f.label.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-                    context[sanitized] = val;
-                    fieldValues[f.id] = val;
-                    fieldValues[sanitized] = val;
-                    // numeric versions
+                    
+                    // Create sanitized field name (no spaces, lowercase)
+                    const fieldKey = f.label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                    context[fieldKey] = val;
+                    fieldMap[fieldKey] = f.id;
+                    
+                    // Add numeric version if possible
                     const num = parseFloat(val);
-                    if (!isNaN(num) && isFinite(num)) {
+                    if (!isNaN(num)) {
                         context[f.id + '_num'] = num;
-                        context[sanitized + '_num'] = num;
+                        context[fieldKey + '_num'] = num;
+                    }
+                    
+                    // For yesno fields, add boolean
+                    if (f.type === 'yesno') {
+                        context[f.id + '_bool'] = val === 'Yes';
+                        context[fieldKey + '_bool'] = val === 'Yes';
+                    }
+                    
+                    // For checkbox
+                    if (f.type === 'checkbox') {
+                        context[f.id + '_bool'] = val === true || val === 'true';
+                        context[fieldKey + '_bool'] = val === true || val === 'true';
                     }
                 });
 
-                // Aggregate helpers: work on current record's fields? Usually sum over array, but here we simulate using given record.
-                // We'll define sum, avg, min, max, count that can be used in formulas with explicit field lists.
-                // For "sum(field1, field2)" we'll parse arguments.
-                // But to keep simple: we provide utility functions that accept arrays.
-                // User can write: sum(price_num, tax_num) or sum(field1_num, field2_num, 10)
-                // We'll also add a special: sum_all(...) but we'll just do generic.
-                // For safety, we provide:
-                const sum = (...args) => args.reduce((acc, arg) => {
-                    let v = (typeof arg === 'number') ? arg : parseFloat(arg) || 0;
-                    return acc + v;
-                }, 0);
-                const avg = (...args) => args.length ? sum(...args) / args.length : 0;
-                const count = (...args) => args.length;
-                const min = (...args) => Math.min(...args.map(a => parseFloat(a) || 0));
-                const max = (...args) => Math.max(...args.map(a => parseFloat(a) || 0));
-                const ifFunc = (cond, thenVal, elseVal) => cond ? thenVal : elseVal;
+                // Add TODAY() function
+                const TODAY = () => {
+                    const d = new Date();
+                    return d.toISOString().split('T')[0];
+                };
 
-                // Build function dynamically with context and helpers
-                const paramNames = [...Object.keys(context), 'sum', 'avg', 'count', 'min', 'max', 'if'];
-                const paramValues = [...Object.values(context), sum, avg, count, min, max, ifFunc];
+                // Add NOW() function
+                const NOW = () => {
+                    return new Date().toISOString();
+                };
+
+                // Add mathematical functions
+                const SUM = (...args) => args.reduce((acc, arg) => acc + (parseFloat(arg) || 0), 0);
+                const AVG = (...args) => args.length ? SUM(...args) / args.length : 0;
+                const COUNT = (...args) => args.filter(arg => arg !== undefined && arg !== '' && arg !== null).length;
+                const MIN = (...args) => Math.min(...args.map(a => parseFloat(a) || Infinity));
+                const MAX = (...args) => Math.max(...args.map(a => parseFloat(a) || -Infinity));
                 
-                // Compile formula with these names
+                // IF function
+                const IF = (condition, trueVal, falseVal) => condition ? trueVal : falseVal;
+                
+                // Date functions
+                const DATE = (year, month, day) => new Date(year, month-1, day).toISOString().split('T')[0];
+                const DATEADD = (date, days) => {
+                    const d = new Date(date);
+                    d.setDate(d.getDate() + days);
+                    return d.toISOString().split('T')[0];
+                };
+                
+                // String functions
+                const CONCAT = (...args) => args.join('');
+                const UPPER = (str) => String(str).toUpperCase();
+                const LOWER = (str) => String(str).toLowerCase();
+                
+                // Create function with all helpers
+                const paramNames = [...Object.keys(context), 'TODAY', 'NOW', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'IF', 'DATE', 'DATEADD', 'CONCAT', 'UPPER', 'LOWER'];
+                const paramValues = [...Object.values(context), TODAY, NOW, SUM, AVG, COUNT, MIN, MAX, IF, DATE, DATEADD, CONCAT, UPPER, LOWER];
+                
+                // Handle IF(yesno_bool, TODAY(), '') type formulas
                 const fn = new Function(...paramNames, `return ${formula};`);
-                const result = fn(...paramValues);
-                return (typeof result === 'number') ? result.toFixed(2) : result;
+                let result = fn(...paramValues);
+                
+                // Format result
+                if (result instanceof Date) result = result.toISOString().split('T')[0];
+                if (typeof result === 'number' && !Number.isInteger(result)) result = result.toFixed(2);
+                
+                return result;
             } catch (e) {
-                console.warn('Formula error', e);
-                return '!ERROR';
+                console.warn('Formula error:', e, 'Formula:', formula);
+                return '#ERROR';
             }
         };
 
-        // Main App Component (structure preserved, only formula logic enhanced)
+        // Main App Component
         function App() {
             const [user, setUser] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -206,13 +246,11 @@
             const [newFileName, setNewFileName] = useState('');
             const [isAdmin, setIsAdmin] = useState(false);
             const [formMode, setFormMode] = useState('view');
-            const [activeTab, setActiveTab] = useState('form');
+            const [activeTab, setActiveTab] = useState('data'); // Default to data tab
+            const [showAddDataModal, setShowAddDataModal] = useState(false);
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
-
-            // Formula editing state (not strictly needed, kept for compatibility)
-            const [editingFormulaForField, setEditingFormulaForField] = useState(null);
 
             const fieldTypes = [
                 { value: 'text', label: 'Text', icon: 'font' },
@@ -227,7 +265,7 @@
                 { value: 'yesno', label: 'Yes/No', icon: 'circle-question' },
                 { value: 'color', label: 'Color', icon: 'palette' },
                 { value: 'range', label: 'Range', icon: 'sliders' },
-                { value: 'formula', label: 'Formula', icon: 'square-root-variable' }  // NEW formula field
+                { value: 'formula', label: 'Formula', icon: 'square-root-variable' }
             ];
 
             // Monitor auth state
@@ -241,22 +279,6 @@
                             token.claims.isAdmin === true || 
                             user.email === 'shahulsha254@gmail.com'
                         );
-                        try {
-                            await db.collection('loginSessions').add({
-                                uid: user.uid,
-                                email: user.email,
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                                userAgent: navigator.userAgent
-                            });
-                        } catch (error) { console.error(error); }
-                        try {
-                            await db.collection('loginHistory').add({
-                                uid: user.uid,
-                                email: user.email,
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                                action: 'login'
-                            });
-                        } catch (error) { console.error(error); }
                     } else {
                         setUser(null);
                         setIsAdmin(false);
@@ -274,17 +296,25 @@
                 try { setLoading(true); await auth.signInAnonymously(); showToast('success', 'Signed in!'); } 
                 catch (error) { showToast('error', error.message); } finally { setLoading(false); }
             };
+
             const signInWithEmail = async (email, password) => {
                 try { setLoading(true); await auth.signInWithEmailAndPassword(email, password); showToast('success','Signed in!'); } 
                 catch (error) { showToast('error', error.message); } finally { setLoading(false); }
             };
+
             const signOut = async () => {
                 try {
-                    if (user) await db.collection('loginHistory').add({ uid: user.uid, email: user.email, timestamp: firebase.firestore.FieldValue.serverTimestamp(), action: 'logout' });
-                    await auth.signOut(); setCurrentPath(['My Files']); setFiles([]); setSelectedFile(null); setShowFormBuilder(false); showToast('success','Signed out');
+                    await auth.signOut(); 
+                    setCurrentPath(['My Files']); 
+                    setFiles([]); 
+                    setSelectedFile(null); 
+                    setShowFormBuilder(false); 
+                    showToast('success','Signed out');
                 } catch (error) { showToast('error', error.message); }
             };
+
             const getUserCollection = (collectionName) => db.collection('users').doc(user.uid).collection(collectionName);
+
             const loadFiles = async () => {
                 if (!user) return;
                 try {
@@ -295,23 +325,39 @@
                     setFiles(fileList);
                 } catch (error) { showToast('error', error.message); }
             };
+
             const showToast = (type, message) => {
                 const id = Date.now();
                 setToasts(prev => [...prev, { id, type, message }]);
                 setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
             };
+
             const createNewFile = async () => {
                 if (!user) { showToast('error','Please sign in'); return; }
                 if (!newFileName.trim()) { showToast('error','Enter name'); return; }
                 try {
                     const path = currentPath.join('/');
                     const filesRef = getUserCollection('tables');
-                    const fileData = { name: newFileName, path, type: newFileType, uid: user.uid, createdAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
-                    if (newFileType === 'form') { fileData.fields = []; fileData.data = []; }
+                    const fileData = { 
+                        name: newFileName, 
+                        path, 
+                        type: newFileType, 
+                        uid: user.uid, 
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(), 
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+                    };
+                    if (newFileType === 'form') { 
+                        fileData.fields = []; 
+                        fileData.data = []; 
+                    }
                     await filesRef.add(fileData);
-                    setShowNewFileModal(false); setNewFileName(''); loadFiles(); showToast('success','Created!');
+                    setShowNewFileModal(false); 
+                    setNewFileName(''); 
+                    loadFiles(); 
+                    showToast('success','Created!');
                 } catch (error) { showToast('error', error.message); }
             };
+
             const deleteFile = async (file, e) => {
                 e.stopPropagation();
                 if (!user) { showToast('error','Sign in'); return; }
@@ -322,36 +368,87 @@
                     if (file.type === 'folder') {
                         const folderPath = [...currentPath, file.name].join('/');
                         const contents = await filesRef.where('path', '>=', folderPath).where('path', '<', folderPath + '\uf8ff').get();
-                        const batch = db.batch(); contents.docs.forEach(doc => batch.delete(doc.ref)); await batch.commit();
+                        const batch = db.batch(); 
+                        contents.docs.forEach(doc => batch.delete(doc.ref)); 
+                        await batch.commit();
                     }
-                    loadFiles(); showToast('success','Deleted');
+                    loadFiles(); 
+                    showToast('success','Deleted');
                 } catch (error) { showToast('error', error.message); }
             };
+
             const openFile = (file) => {
-                if (file.type === 'folder') { setCurrentPath([...currentPath, file.name]); }
-                else if (file.type === 'form') { setSelectedFile(file); setFormFields(file.fields || []); setFormData(file.data || []); setFormMode('view'); setActiveTab('form'); setShowFormBuilder(true); }
-            };
-            const navigateUp = () => { if (currentPath.length > 1) setCurrentPath(currentPath.slice(0, -1)); };
-            const handleDragStart = (e, fieldType) => { if (formMode === 'edit') { dragField.current = fieldType; e.dataTransfer.setData('text/plain', fieldType); } else { e.preventDefault(); showToast('info','Switch to Edit Mode'); } };
-            const handleDragOver = (e) => { if (formMode === 'edit') { e.preventDefault(); setIsDraggingOver(true); } };
-            const handleDragLeave = (e) => { e.preventDefault(); setIsDraggingOver(false); };
-            const handleDrop = (e) => {
-                e.preventDefault(); setIsDraggingOver(false);
-                if (formMode === 'edit' && dragField.current) {
-                    const newField = { id: Date.now() + Math.random(), type: dragField.current, label: `${dragField.current} field`, required: false, options: dragField.current === 'select' ? ['Option 1','Option 2','Option 3'] : [], formula: '' };
-                    setFormFields([...formFields, newField]); dragField.current = null;
+                if (file.type === 'folder') { 
+                    setCurrentPath([...currentPath, file.name]); 
+                }
+                else if (file.type === 'form') { 
+                    setSelectedFile(file); 
+                    setFormFields(file.fields || []); 
+                    setFormData(file.data || []); 
+                    setFormMode('view'); 
+                    setActiveTab('data'); // Show data table by default
+                    setShowFormBuilder(true); 
                 }
             };
-            const updateField = (index, updates) => { const newFields = [...formFields]; newFields[index] = { ...newFields[index], ...updates }; setFormFields(newFields); };
-            const deleteField = (index) => { if (window.confirm('Delete field?')) { setFormFields(formFields.filter((_,i)=>i!==index)); } };
+
+            const navigateUp = () => { if (currentPath.length > 1) setCurrentPath(currentPath.slice(0, -1)); };
+
+            const handleDragStart = (e, fieldType) => { 
+                if (formMode === 'edit') { 
+                    dragField.current = fieldType; 
+                    e.dataTransfer.setData('text/plain', fieldType); 
+                } else { 
+                    e.preventDefault(); 
+                    showToast('info','Switch to Edit Mode'); 
+                } 
+            };
+
+            const handleDragOver = (e) => { if (formMode === 'edit') { e.preventDefault(); setIsDraggingOver(true); } };
+            const handleDragLeave = (e) => { e.preventDefault(); setIsDraggingOver(false); };
+
+            const handleDrop = (e) => {
+                e.preventDefault(); 
+                setIsDraggingOver(false);
+                if (formMode === 'edit' && dragField.current) {
+                    const newField = { 
+                        id: Date.now() + Math.random(), 
+                        type: dragField.current, 
+                        label: `${dragField.current} field`, 
+                        required: false, 
+                        options: dragField.current === 'select' ? ['Option 1','Option 2','Option 3'] : [], 
+                        formula: '' 
+                    };
+                    setFormFields([...formFields, newField]); 
+                    dragField.current = null;
+                }
+            };
+
+            const updateField = (index, updates) => { 
+                const newFields = [...formFields]; 
+                newFields[index] = { ...newFields[index], ...updates }; 
+                setFormFields(newFields); 
+            };
+
+            const deleteField = (index) => { 
+                if (window.confirm('Delete field?')) { 
+                    setFormFields(formFields.filter((_,i)=>i!==index)); 
+                } 
+            };
+
             const saveFormStructure = async () => {
                 if (!user || !selectedFile) return;
                 try {
                     const filesRef = getUserCollection('tables');
-                    await filesRef.doc(selectedFile.id).update({ fields: formFields, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setSelectedFile({...selectedFile, fields: formFields}); showToast('success','Form saved'); setFormMode('view');
+                    await filesRef.doc(selectedFile.id).update({ 
+                        fields: formFields, 
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+                    });
+                    setSelectedFile({...selectedFile, fields: formFields}); 
+                    showToast('success','Form saved'); 
+                    setFormMode('view');
                 } catch (error) { showToast('error',error.message); }
             };
+
             const saveFormData = async (data) => {
                 if (!user || !selectedFile) return;
                 try {
@@ -360,27 +457,39 @@
                     const newRecord = { ...data, id: Date.now(), uid: user.uid, createdAt: new Date().toISOString() };
                     const newData = [...currentData, newRecord];
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); setSelectedFile({...selectedFile, data: newData}); showToast('success','Data saved');
+                    setFormData(newData); 
+                    setSelectedFile({...selectedFile, data: newData}); 
+                    setShowAddDataModal(false);
+                    showToast('success','Data saved');
                 } catch (error) { showToast('error',error.message); }
             };
+
             const updateFormData = async (updatedRecord) => {
                 if (!user || !selectedFile) return;
                 try {
                     const filesRef = getUserCollection('tables');
                     const newData = formData.map(r => r.id === updatedRecord.id ? { ...updatedRecord, updatedAt: new Date().toISOString() } : r);
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); setSelectedFile({...selectedFile, data: newData}); setEditingRecord(null); showToast('success','Updated');
+                    setFormData(newData); 
+                    setSelectedFile({...selectedFile, data: newData}); 
+                    setEditingRecord(null); 
+                    setShowAddDataModal(false);
+                    showToast('success','Updated');
                 } catch (error) { showToast('error',error.message); }
             };
+
             const deleteFormData = async (recordId) => {
                 if (!user || !window.confirm('Delete record?')) return;
                 try {
                     const filesRef = getUserCollection('tables');
                     const newData = formData.filter(r => r.id !== recordId);
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); setSelectedFile({...selectedFile, data: newData}); showToast('success','Deleted');
+                    setFormData(newData); 
+                    setSelectedFile({...selectedFile, data: newData}); 
+                    showToast('success','Deleted');
                 } catch (error) { showToast('error',error.message); }
             };
+
             const uploadFile = async (file) => {
                 if (!user) return;
                 try {
@@ -388,77 +497,153 @@
                     const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
                     await storageRef.put(file);
                     const filesRef = getUserCollection('tables');
-                    await filesRef.add({ name: file.name, path, type: 'file', size: file.size, contentType: file.type, uid: user.uid, storagePath: `users/${user.uid}/${path}/${file.name}`, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    loadFiles(); showToast('success','File uploaded');
+                    await filesRef.add({ 
+                        name: file.name, 
+                        path, 
+                        type: 'file', 
+                        size: file.size, 
+                        contentType: file.type, 
+                        uid: user.uid, 
+                        storagePath: `users/${user.uid}/${path}/${file.name}`, 
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+                    });
+                    loadFiles(); 
+                    showToast('success','File uploaded');
                 } catch (error) { showToast('error',error.message); }
             };
+
             const handleFileSelect = (e) => { const file = e.target.files[0]; if (file) uploadFile(file); };
 
-            // Enhanced renderInputField with formula support (uses evaluateFormula)
+            // Enhanced renderInputField with formula support
             const renderInputField = (field, value, onChange, disabled = false) => {
                 if (field.type === 'formula') {
-                    // formula field: display computed value (read-only)
+                    // Formula field: display computed value (read-only)
                     const computed = evaluateFormula(field.formula || '', { ...(editingRecord || {}), ...(value ? { [field.id]: value } : {}) }, formFields);
                     return (
                         <div className="flex items-center gap-2">
-                            <input type="text" value={computed} disabled className="w-full p-2 border rounded bg-gray-100" readOnly />
-                            <span className="text-xs text-purple-600"><i className="fas fa-calculator"></i></span>
+                            <input 
+                                type="text" 
+                                value={computed} 
+                                disabled 
+                                className="w-full p-2 border rounded bg-gray-100 font-mono text-sm" 
+                                readOnly 
+                            />
+                            <span className="text-xs text-purple-600" title="Formula field - auto calculated">
+                                <i className="fas fa-calculator"></i>
+                            </span>
                         </div>
                     );
                 }
-                const commonProps = { value: value || '', onChange: (e) => onChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value), className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500", disabled, required: field.required && !disabled };
+                
+                const commonProps = { 
+                    value: value || '', 
+                    onChange: (e) => onChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value), 
+                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500", 
+                    disabled, 
+                    required: field.required && !disabled 
+                };
+                
                 switch (field.type) {
                     case 'text': case 'email': case 'tel': return <input type={field.type} {...commonProps} />;
                     case 'number': return <input type="number" {...commonProps} />;
                     case 'date': return <input type="date" {...commonProps} />;
                     case 'time': return <input type="time" {...commonProps} />;
                     case 'checkbox': return <input type="checkbox" checked={value||false} onChange={(e)=>onChange(field.id, e.target.checked)} className="h-5 w-5" disabled={disabled} />;
-                    case 'select': return <select {...commonProps}><option value="">Select...</option>{(field.options||[]).map((opt,i)=><option key={i} value={opt}>{opt}</option>)}</select>;
-                    case 'yesno': return <select {...commonProps}><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>;
+                    case 'select': return (
+                        <select {...commonProps}>
+                            <option value="">Select...</option>
+                            {(field.options||[]).map((opt,i)=><option key={i} value={opt}>{opt}</option>)}
+                        </select>
+                    );
+                    case 'yesno': return (
+                        <select {...commonProps}>
+                            <option value="">Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    );
                     case 'textarea': return <textarea {...commonProps} rows="4" />;
-                    case 'color': return <input type="color" {...commonProps} className="w-full p-2 border rounded h-10" />;
+                    case 'color': return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
                     case 'range': return <input type="range" value={value||50} onChange={(e)=>onChange(field.id, e.target.value)} min="0" max="100" disabled={disabled} className="w-full" />;
                     default: return null;
                 }
             };
 
-            // Data table with formula columns (uses enhanced evaluateFormula)
+            // Data table with formula columns
             const renderDataTable = () => {
                 const allFields = formFields;
                 const formulaFields = allFields.filter(f => f.type === 'formula');
+                
+                // Pre-compute all records with formula values
+                const enhancedData = formData.map(record => {
+                    const enhanced = { ...record };
+                    formulaFields.forEach(f => { 
+                        enhanced[f.id] = evaluateFormula(f.formula || '', record, allFields); 
+                    });
+                    return enhanced;
+                });
+
                 return (
                     <div className="overflow-x-auto">
                         <table className="form-data-table">
                             <thead>
                                 <tr>
-                                    {allFields.map(f => <th key={f.id}>{f.label} {f.type==='formula' && <span className="formula-badge">fx</span>}</th>)}
-                                    <th>Created</th><th>Actions</th>
+                                    {allFields.map(f => (
+                                        <th key={f.id}>
+                                            {f.label} 
+                                            {f.type === 'formula' && <span className="formula-badge ml-1">fx</span>}
+                                            {f.required && <span className="text-red-500 ml-1">*</span>}
+                                        </th>
+                                    ))}
+                                    <th>Created</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {formData.map(record => {
-                                    const enhancedRecord = { ...record };
-                                    // precompute formula fields for display
-                                    formulaFields.forEach(f => { enhancedRecord[f.id] = evaluateFormula(f.formula || '', record, allFields); });
-                                    return (
-                                        <tr key={record.id}>
-                                            {allFields.map(f => (
-                                                <td key={f.id}>
-                                                    {f.type === 'checkbox' ? (enhancedRecord[f.id] ? '✓' : '✗')
-                                                     : f.type === 'formula' ? enhancedRecord[f.id] 
-                                                     : enhancedRecord[f.id] ?? '-'}
-                                                </td>
-                                            ))}
-                                            <td className="text-sm text-gray-500">{record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}</td>
-                                            <td>
-                                                <div className="form-data-actions">
-                                                    <button className="data-action-btn edit" onClick={()=>{ setEditingRecord(record); setActiveTab('form'); setFormMode('view'); }}><i className="fas fa-edit"></i></button>
-                                                    <button className="data-action-btn delete" onClick={()=>deleteFormData(record.id)}><i className="fas fa-trash"></i></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                {enhancedData.map(record => (
+                                    <tr key={record.id}>
+                                        {allFields.map(f => {
+                                            let displayValue = record[f.id] ?? '-';
+                                            
+                                            // Format based on type
+                                            if (f.type === 'checkbox') {
+                                                displayValue = record[f.id] ? '✓' : '✗';
+                                            } else if (f.type === 'date' && displayValue !== '-') {
+                                                try {
+                                                    displayValue = new Date(displayValue).toLocaleDateString();
+                                                } catch (e) {}
+                                            } else if (f.type === 'number' && displayValue !== '-') {
+                                                displayValue = Number(displayValue).toLocaleString();
+                                            }
+                                            
+                                            return <td key={f.id}>{displayValue}</td>;
+                                        })}
+                                        <td className="text-sm text-gray-500">
+                                            {record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}
+                                        </td>
+                                        <td>
+                                            <div className="form-data-actions">
+                                                <button 
+                                                    className="data-action-btn edit" 
+                                                    onClick={()=>{ 
+                                                        setEditingRecord(record); 
+                                                        setShowAddDataModal(true);
+                                                    }}
+                                                    title="Edit record"
+                                                >
+                                                    <i className="fas fa-edit"></i>
+                                                </button>
+                                                <button 
+                                                    className="data-action-btn delete" 
+                                                    onClick={()=>deleteFormData(record.id)}
+                                                    title="Delete record"
+                                                >
+                                                    <i className="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
@@ -466,14 +651,26 @@
             };
 
             if (loading) return <div className="flex items-center justify-center min-h-screen"><i className="fas fa-spinner fa-spin text-4xl text-blue-500"></i></div>;
+            
             if (!user) {
                 return (
                     <div className="login-container">
                         <h2 className="text-2xl font-bold">Welcome</h2>
                         <p className="text-gray-600 mb-6">Sign in to access files</p>
-                        <button onClick={signInAnonymously} className="login-btn mb-4"><i className="fas fa-user-secret mr-2"></i>Anonymous</button>
-                        <div className="relative my-6"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300"></div></div><div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">Or</span></div></div>
-                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="login-btn bg-purple-600 hover:bg-purple-700"><i className="fas fa-user mr-2"></i>demo@gmail.com</button>
+                        <button onClick={signInAnonymously} className="login-btn mb-4">
+                            <i className="fas fa-user-secret mr-2"></i>Anonymous
+                        </button>
+                        <div className="relative my-6">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-gray-300"></div>
+                            </div>
+                            <div className="relative flex justify-center text-sm">
+                                <span className="px-2 bg-white text-gray-500">Or</span>
+                            </div>
+                        </div>
+                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="login-btn bg-purple-600 hover:bg-purple-700">
+                            <i className="fas fa-user mr-2"></i>demo@gmail.com
+                        </button>
                     </div>
                 );
             }
@@ -482,10 +679,17 @@
                 <div className="container mx-auto p-4 max-w-6xl">
                     <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
                         <div className="flex justify-between items-center">
-                            <h1 className="text-3xl font-bold flex items-center gap-3"><i className="fas fa-folder-open"></i>File Explorer + Formulas</h1>
+                            <h1 className="text-3xl font-bold flex items-center gap-3">
+                                <i className="fas fa-folder-open"></i>File Explorer
+                            </h1>
                             <div className="user-info">
-                                <div className="text-right"><div className="font-medium">{user.email || (user.isAnonymous?'Anonymous':user.uid)}</div>{isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs ml-2">Admin</span>}</div>
-                                <button onClick={signOut} className="logout-btn"><i className="fas fa-sign-out-alt mr-1"></i>Sign Out</button>
+                                <div className="text-right">
+                                    <div className="font-medium">{user.email || (user.isAnonymous ? 'Anonymous' : user.uid)}</div>
+                                    {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs ml-2">Admin</span>}
+                                </div>
+                                <button onClick={signOut} className="logout-btn">
+                                    <i className="fas fa-sign-out-alt mr-1"></i>Sign Out
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -493,149 +697,436 @@
                     <div className="file-explorer">
                         <div className="file-explorer-header">
                             <div className="file-explorer-breadcrumb">
-                                {currentPath.map((item,idx)=>(
+                                {currentPath.map((item, idx) => (
                                     <React.Fragment key={idx}>
-                                        {idx>0 && <i className="fas fa-chevron-right text-gray-400"></i>}
-                                        <span className={`breadcrumb-item ${idx===currentPath.length-1?'active':''}`} onClick={()=>setCurrentPath(currentPath.slice(0,idx+1))}><i className={`fas ${idx===0?'fa-home':'fa-folder'}`}></i>{item}</span>
+                                        {idx > 0 && <i className="fas fa-chevron-right text-gray-400"></i>}
+                                        <span 
+                                            className={`breadcrumb-item ${idx === currentPath.length-1 ? 'active' : ''}`} 
+                                            onClick={() => setCurrentPath(currentPath.slice(0, idx+1))}
+                                        >
+                                            <i className={`fas ${idx === 0 ? 'fa-home' : 'fa-folder'}`}></i>
+                                            {item}
+                                        </span>
                                     </React.Fragment>
                                 ))}
                             </div>
                             <div className="flex gap-2">
-                                {currentPath.length>1 && <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"><i className="fas fa-arrow-up mr-1"></i>Up</button>}
-                                <button onClick={()=>setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"><i className="fas fa-plus mr-1"></i>New</button>
-                                <button onClick={()=>fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"><i className="fas fa-upload mr-1"></i>Upload</button>
+                                {currentPath.length > 1 && (
+                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
+                                        <i className="fas fa-arrow-up mr-1"></i>Up
+                                    </button>
+                                )}
+                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
+                                    <i className="fas fa-plus mr-1"></i>New
+                                </button>
+                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
+                                    <i className="fas fa-upload mr-1"></i>Upload
+                                </button>
                                 <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                             </div>
                         </div>
+                        
                         <div className="file-grid">
-                            {files.map(f=>(
-                                <div key={f.id} className={`file-item ${selectedFile?.id===f.id?'selected':''}`} onClick={()=>openFile(f)}>
-                                    <div className="file-actions"><button className="file-action-btn delete" onClick={(e)=>deleteFile(f,e)}><i className="fas fa-trash"></i></button></div>
-                                    <div className={`file-icon ${f.type}`}><i className={`fas ${f.type==='folder'?'fa-folder':f.type==='form'?'fa-wpforms':'fa-file'}`}></i></div>
+                            {files.map(f => (
+                                <div key={f.id} className={`file-item ${selectedFile?.id === f.id ? 'selected' : ''}`} onClick={() => openFile(f)}>
+                                    <div className="file-actions">
+                                        <button className="file-action-btn delete" onClick={(e) => deleteFile(f, e)}>
+                                            <i className="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                    <div className={`file-icon ${f.type}`}>
+                                        <i className={`fas ${f.type === 'folder' ? 'fa-folder' : f.type === 'form' ? 'fa-wpforms' : 'fa-file'}`}></i>
+                                    </div>
                                     <div className="file-name">{f.name}</div>
-                                    {f.type==='file' && f.size && <div className="text-xs text-gray-500 text-center mt-2">{(f.size/1024).toFixed(1)} KB</div>}
-                                    {f.type==='form' && f.fields && <div className="text-xs text-gray-500 text-center mt-2">{f.fields.length} fields • {f.data?.length||0} records</div>}
+                                    {f.type === 'file' && f.size && (
+                                        <div className="text-xs text-gray-500 text-center mt-2">
+                                            {(f.size/1024).toFixed(1)} KB
+                                        </div>
+                                    )}
+                                    {f.type === 'form' && f.fields && (
+                                        <div className="text-xs text-gray-500 text-center mt-2">
+                                            {f.fields.length} fields • {f.data?.length || 0} records
+                                        </div>
+                                    )}
                                 </div>
                             ))}
-                            {files.length===0 && <div className="col-span-full text-center py-12 text-gray-500"><i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i><p>Empty folder</p></div>}
+                            {files.length === 0 && (
+                                <div className="col-span-full text-center py-12 text-gray-500">
+                                    <i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i>
+                                    <p>Empty folder</p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
                     {/* New File Modal */}
-                    <div className={`modal ${showNewFileModal?'active':''}`}>
+                    <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-md">
-                            <div className="modal-header"><h2 className="text-xl font-bold">Create New</h2><button onClick={()=>setShowNewFileModal(false)}><i className="fas fa-times"></i></button></div>
-                            <div className="mb-4"><label className="block text-sm font-medium">Type</label>
+                            <div className="modal-header">
+                                <h2 className="text-xl font-bold">Create New</h2>
+                                <button onClick={() => setShowNewFileModal(false)}>
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium">Type</label>
                                 <div className="flex gap-4 mt-1">
-                                    <label><input type="radio" value="folder" checked={newFileType==='folder'} onChange={e=>setNewFileType(e.target.value)} /> <i className="fas fa-folder text-yellow-500"></i> Folder</label>
-                                    <label><input type="radio" value="form" checked={newFileType==='form'} onChange={e=>setNewFileType(e.target.value)} /> <i className="fas fa-wpforms text-blue-500"></i> Form</label>
+                                    <label>
+                                        <input type="radio" value="folder" checked={newFileType === 'folder'} onChange={e => setNewFileType(e.target.value)} /> 
+                                        <i className="fas fa-folder text-yellow-500 ml-1"></i> Folder
+                                    </label>
+                                    <label>
+                                        <input type="radio" value="form" checked={newFileType === 'form'} onChange={e => setNewFileType(e.target.value)} /> 
+                                        <i className="fas fa-wpforms text-blue-500 ml-1"></i> Form
+                                    </label>
                                 </div>
                             </div>
-                            <div className="mb-4"><label className="block text-sm font-medium">Name</label><input type="text" value={newFileName} onChange={e=>setNewFileName(e.target.value)} className="w-full p-2 border rounded" placeholder={`Enter name`} /></div>
-                            <div className="flex justify-end gap-2"><button onClick={()=>setShowNewFileModal(false)} className="px-4 py-2 border rounded">Cancel</button><button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded">Create</button></div>
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium">Name</label>
+                                <input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter name" />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded">Cancel</button>
+                                <button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded">Create</button>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Form Builder Modal */}
-                    <div className={`modal ${showFormBuilder?'active':''}`}>
-                        <div className="modal-content max-w-4xl">
+                    {/* Form Builder/Viewer Modal */}
+                    <div className={`modal ${showFormBuilder ? 'active' : ''}`}>
+                        <div className="modal-content max-w-6xl">
                             <div className="modal-header">
-                                <h2 className="text-xl font-bold"><i className="fas fa-wpforms text-blue-500 mr-2"></i>{selectedFile?.name}{formMode==='edit' && <span className="edit-badge ml-2">Edit Mode</span>}</h2>
-                                <button onClick={()=>{ setShowFormBuilder(false); setSelectedFile(null); setFormFields([]); setFormData([]); setFormMode('view'); }}><i className="fas fa-times"></i></button>
+                                <h2 className="text-xl font-bold flex items-center gap-2">
+                                    <i className="fas fa-wpforms text-blue-500"></i>
+                                    {selectedFile?.name}
+                                    {formMode === 'edit' && <span className="edit-badge">Editing Form</span>}
+                                </h2>
+                                <button onClick={() => { 
+                                    setShowFormBuilder(false); 
+                                    setSelectedFile(null); 
+                                    setFormFields([]); 
+                                    setFormData([]); 
+                                    setFormMode('view'); 
+                                }}>
+                                    <i className="fas fa-times"></i>
+                                </button>
                             </div>
-                            <div className="mode-toggle">
-                                <button className={`mode-btn ${formMode==='view'?'active':''}`} onClick={()=>setFormMode('view')}><i className="fas fa-eye mr-1"></i>View</button>
-                                <button className={`mode-btn ${formMode==='edit'?'active':''}`} onClick={()=>setFormMode('edit')}><i className="fas fa-edit mr-1"></i>Edit</button>
-                            </div>
-                            <div className="tab-buttons">
-                                <button className={`tab-button ${activeTab==='form'?'active':''}`} onClick={()=>setActiveTab('form')}><i className="fas fa-wpforms mr-1"></i>Form</button>
-                                <button className={`tab-button ${activeTab==='data'?'active':''}`} onClick={()=>setActiveTab('data')}><i className="fas fa-table mr-1"></i>Data ({formData.length})</button>
+                            
+                            {/* Top action buttons */}
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex gap-2">
+                                    <button 
+                                        className="add-data-btn"
+                                        onClick={() => {
+                                            setEditingRecord(null);
+                                            setShowAddDataModal(true);
+                                        }}
+                                    >
+                                        <i className="fas fa-plus"></i> Add Data
+                                    </button>
+                                    <button 
+                                        className="edit-form-btn"
+                                        onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}
+                                    >
+                                        <i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i>
+                                        {formMode === 'edit' ? ' View Form' : ' Edit Form'}
+                                    </button>
+                                </div>
                             </div>
 
-                            {activeTab==='form' && (
-                                <>
-                                    {formMode==='edit' && (
-                                        <>
-                                            <div className="mb-6"><h3 className="text-sm font-medium mb-2">Drag fields (Formula now available)</h3>
-                                                <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                                                    {fieldTypes.map(t=>(
-                                                        <div key={t.value} draggable onDragStart={(e)=>handleDragStart(e, t.value)} className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"><i className={`fas fa-${t.icon} block text-lg`}></i><span className="text-xs">{t.label}</span></div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                            <div className={`dropzone ${isDraggingOver?'drag-over':''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-                                                {formFields.length===0 ? <><i className="fas fa-cloud-upload-alt"></i><p>Drop fields here</p></> : formFields.map((field,idx)=>(
-                                                    <div key={field.id} className="form-field">
-                                                        <div className="field-actions"><button className="field-action-btn delete" onClick={()=>deleteField(idx)}><i className="fas fa-trash"></i></button></div>
-                                                        <div className="field-label"><input value={field.label} onChange={e=>updateField(idx,{label:e.target.value})} placeholder="Label" /><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={field.required} onChange={e=>updateField(idx,{required:e.target.checked})} /> Required</label></div>
-                                                        <div className="field-type-selector"><select value={field.type} onChange={e=>updateField(idx,{type:e.target.value})}>{fieldTypes.map(ft=><option key={ft.value} value={ft.value}>{ft.label}</option>)}</select></div>
-                                                        {field.type==='select' && <div className="mt-2"><label className="text-sm">Options (comma)</label><input value={field.options?.join(', ')||''} onChange={e=>updateField(idx,{options:e.target.value.split(',').map(s=>s.trim())})} className="w-full p-2 border rounded mt-1" /></div>}
-                                                        {field.type==='formula' && <div className="mt-2"><label className="text-sm">Formula (e.g., sum(price_num, tax_num) or if(quantity>10, total*0.9, total))</label><input value={field.formula||''} onChange={e=>updateField(idx,{formula:e.target.value})} className="w-full p-2 border rounded mt-1 font-mono" placeholder="price_num * quantity_num" /><div className="formula-preview">Preview: {evaluateFormula(field.formula||'', {}, formFields)||'—'}</div></div>}
-                                                        <div className="mt-3 pt-3 border-t text-sm text-gray-500">Preview:</div>
-                                                        {renderInputField(field, '', (id,val)=>{}, true)}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="flex justify-between mt-4">
-                                                <button onClick={()=>{if(window.confirm('Clear all?')) setFormFields([]);}} className="px-4 py-2 text-red-600 border border-red-600 rounded">Clear Fields</button>
-                                                <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded"><i className="fas fa-save mr-1"></i>Save Form</button>
-                                            </div>
-                                        </>
-                                    )}
-                                    {formMode==='view' && (
-                                        <div className="form-view">
-                                            {formFields.length===0 ? <div className="text-center py-10 text-gray-500"><i className="fas fa-wpforms text-4xl mb-3"></i><p>No fields.</p></div> : 
-                                                <FormDataEntry fields={formFields} initialData={editingRecord||{}} onSave={editingRecord? updateFormData : saveFormData} renderInputField={renderInputField} isEditing={!!editingRecord} />
-                                            }
+                            <div className="tab-buttons">
+                                <button 
+                                    className={`tab-button ${activeTab === 'data' ? 'active' : ''}`} 
+                                    onClick={() => setActiveTab('data')}
+                                >
+                                    <i className="fas fa-table mr-1"></i>Data Table ({formData.length})
+                                </button>
+                                <button 
+                                    className={`tab-button ${activeTab === 'form' ? 'active' : ''}`} 
+                                    onClick={() => setActiveTab('form')}
+                                >
+                                    <i className="fas fa-wpforms mr-1"></i>Form Structure
+                                </button>
+                            </div>
+
+                            {activeTab === 'data' && (
+                                <div>
+                                    {formData.length > 0 ? renderDataTable() : (
+                                        <div className="text-center py-10 text-gray-500">
+                                            <i className="fas fa-database text-4xl mb-3"></i>
+                                            <p>No data yet. Click "Add Data" to add records.</p>
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {activeTab === 'form' && formMode === 'edit' && (
+                                <>
+                                    <div className="mb-6">
+                                        <h3 className="text-sm font-medium mb-2">Drag fields to build form</h3>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                            {fieldTypes.map(t => (
+                                                <div 
+                                                    key={t.value} 
+                                                    draggable 
+                                                    onDragStart={(e) => handleDragStart(e, t.value)} 
+                                                    className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
+                                                >
+                                                    <i className={`fas fa-${t.icon} block text-lg`}></i>
+                                                    <span className="text-xs">{t.label}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div 
+                                        className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} 
+                                        onDragOver={handleDragOver} 
+                                        onDragLeave={handleDragLeave} 
+                                        onDrop={handleDrop}
+                                    >
+                                        {formFields.length === 0 ? (
+                                            <>
+                                                <i className="fas fa-cloud-upload-alt"></i>
+                                                <p>Drop fields here to build your form</p>
+                                            </>
+                                        ) : (
+                                            formFields.map((field, idx) => (
+                                                <div key={field.id} className="form-field">
+                                                    <div className="field-actions">
+                                                        <button className="field-action-btn delete" onClick={() => deleteField(idx)}>
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div className="field-label">
+                                                        <input 
+                                                            value={field.label} 
+                                                            onChange={e => updateField(idx, {label: e.target.value})} 
+                                                            placeholder="Field Label" 
+                                                        />
+                                                        <label className="flex items-center gap-1 text-sm">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={field.required} 
+                                                                onChange={e => updateField(idx, {required: e.target.checked})} 
+                                                            /> Required
+                                                        </label>
+                                                    </div>
+                                                    <div className="field-type-selector">
+                                                        <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})}>
+                                                            {fieldTypes.map(ft => (
+                                                                <option key={ft.value} value={ft.value}>{ft.label}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    
+                                                    {field.type === 'select' && (
+                                                        <div className="mt-2">
+                                                            <label className="text-sm">Options (comma separated)</label>
+                                                            <input 
+                                                                value={field.options?.join(', ') || ''} 
+                                                                onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} 
+                                                                className="w-full p-2 border rounded mt-1" 
+                                                                placeholder="Option 1, Option 2, Option 3"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {field.type === 'formula' && (
+                                                        <div className="mt-2">
+                                                            <label className="text-sm font-medium">Formula</label>
+                                                            <div className="text-xs text-gray-500 mb-1">
+                                                                Examples: SUM(price_num, tax_num), IF(yesno_bool, TODAY(), ''), CONCAT(first_name, ' ', last_name)
+                                                            </div>
+                                                            <input 
+                                                                value={field.formula || ''} 
+                                                                onChange={e => updateField(idx, {formula: e.target.value})} 
+                                                                className="w-full p-2 border rounded mt-1 font-mono text-sm" 
+                                                                placeholder="price_num * quantity_num" 
+                                                            />
+                                                            <div className="formula-preview mt-1">
+                                                                Preview: {evaluateFormula(field.formula || '', {}, formFields) || '—'}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="mt-3 pt-3 border-t text-sm text-gray-500">
+                                                        Preview:
+                                                    </div>
+                                                    {renderInputField(field, '', (id, val) => {}, true)}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                    <div className="flex justify-between mt-4">
+                                        <button 
+                                            onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} 
+                                            className="px-4 py-2 text-red-600 border border-red-600 rounded"
+                                        >
+                                            Clear All
+                                        </button>
+                                        <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded">
+                                            <i className="fas fa-save mr-1"></i>Save Form Structure
+                                        </button>
+                                    </div>
                                 </>
                             )}
-                            {activeTab==='data' && (
-                                <div>
-                                    <h3 className="text-lg font-bold mb-4">Saved Data {formData.length>0 && `(${formData.length} records)`}</h3>
-                                    {formData.length>0 ? renderDataTable() : <div className="text-center py-10 text-gray-500"><i className="fas fa-database text-4xl mb-3"></i><p>No data yet.</p></div>}
+
+                            {activeTab === 'form' && formMode === 'view' && (
+                                <div className="form-view">
+                                    <h3 className="text-lg font-bold mb-4">Form Fields Preview</h3>
+                                    {formFields.length === 0 ? (
+                                        <div className="text-center py-10 text-gray-500">
+                                            <i className="fas fa-wpforms text-4xl mb-3"></i>
+                                            <p>No fields defined. Switch to Edit Mode to add fields.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {formFields.map(f => (
+                                                <div key={f.id} className="form-field-view">
+                                                    <label>
+                                                        {f.label}
+                                                        {f.required && <span className="text-red-500 ml-1">*</span>}
+                                                        {f.type === 'formula' && <span className="formula-badge ml-2">Formula</span>}
+                                                    </label>
+                                                    {renderInputField(f, '', (id, val) => {}, true)}
+                                                    {f.type === 'formula' && (
+                                                        <div className="text-xs text-purple-600 mt-1">
+                                                            Formula: {f.formula || 'Not set'}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    {/* Edit Record Modal */}
-                    {editingRecord && (
-                        <div className="modal active">
-                            <div className="modal-content max-w-lg">
-                                <div className="modal-header"><h2 className="text-xl font-bold">Edit Record</h2><button onClick={()=>setEditingRecord(null)}><i className="fas fa-times"></i></button></div>
-                                <FormDataEntry fields={formFields} initialData={editingRecord} onSave={updateFormData} renderInputField={renderInputField} isEditing={true} />
+                    {/* Add/Edit Data Modal */}
+                    <div className={`modal ${showAddDataModal ? 'active' : ''}`}>
+                        <div className="modal-content max-w-2xl">
+                            <div className="modal-header">
+                                <h2 className="text-xl font-bold">
+                                    {editingRecord ? 'Edit Record' : 'Add New Record'}
+                                </h2>
+                                <button onClick={() => {
+                                    setShowAddDataModal(false);
+                                    setEditingRecord(null);
+                                }}>
+                                    <i className="fas fa-times"></i>
+                                </button>
                             </div>
+                            
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                const formData = new FormData(e.target);
+                                const data = {};
+                                formFields.forEach(f => {
+                                    if (f.type === 'checkbox') {
+                                        data[f.id] = formData.get(f.id) === 'on';
+                                    } else {
+                                        data[f.id] = formData.get(f.id) || '';
+                                    }
+                                });
+                                
+                                if (editingRecord) {
+                                    updateFormData({ ...editingRecord, ...data });
+                                } else {
+                                    saveFormData(data);
+                                }
+                            }}>
+                                {formFields.map(f => (
+                                    <div key={f.id} className="mb-4">
+                                        <label className="block text-sm font-medium mb-1">
+                                            {f.label}
+                                            {f.required && <span className="text-red-500 ml-1">*</span>}
+                                            {f.type === 'formula' && <span className="formula-badge ml-2">Auto</span>}
+                                        </label>
+                                        {f.type === 'formula' ? (
+                                            <div className="p-2 bg-gray-100 rounded">
+                                                {evaluateFormula(f.formula || '', editingRecord || {}, formFields)}
+                                            </div>
+                                        ) : f.type === 'yesno' ? (
+                                            <select 
+                                                name={f.id}
+                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                className="w-full p-2 border rounded"
+                                                required={f.required}
+                                            >
+                                                <option value="">Select...</option>
+                                                <option value="Yes">Yes</option>
+                                                <option value="No">No</option>
+                                            </select>
+                                        ) : f.type === 'select' ? (
+                                            <select 
+                                                name={f.id}
+                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                className="w-full p-2 border rounded"
+                                                required={f.required}
+                                            >
+                                                <option value="">Select...</option>
+                                                {(f.options || []).map((opt, i) => (
+                                                    <option key={i} value={opt}>{opt}</option>
+                                                ))}
+                                            </select>
+                                        ) : f.type === 'checkbox' ? (
+                                            <input 
+                                                type="checkbox"
+                                                name={f.id}
+                                                defaultChecked={editingRecord?.[f.id] || false}
+                                                className="h-5 w-5"
+                                            />
+                                        ) : f.type === 'textarea' ? (
+                                            <textarea 
+                                                name={f.id}
+                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                className="w-full p-2 border rounded"
+                                                rows="4"
+                                                required={f.required}
+                                            />
+                                        ) : (
+                                            <input 
+                                                type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
+                                                name={f.id}
+                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                className="w-full p-2 border rounded"
+                                                required={f.required}
+                                            />
+                                        )}
+                                    </div>
+                                ))}
+                                
+                                <div className="flex justify-end gap-2 mt-6">
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setShowAddDataModal(false);
+                                            setEditingRecord(null);
+                                        }}
+                                        className="px-4 py-2 border rounded"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        type="submit"
+                                        className="px-4 py-2 bg-blue-500 text-white rounded"
+                                    >
+                                        {editingRecord ? 'Update' : 'Save'} Record
+                                    </button>
+                                </div>
+                            </form>
                         </div>
-                    )}
+                    </div>
 
-                    <div className="toast-container">{toasts.map(t=><Toast key={t.id} message={t.message} type={t.type} onClose={()=>setToasts(prev=>prev.filter(tt=>tt.id!==t.id))} />)}</div>
+                    <div className="toast-container">
+                        {toasts.map(t => (
+                            <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />
+                        ))}
+                    </div>
                 </div>
             );
         }
-
-        const FormDataEntry = ({ fields, initialData = {}, onSave, renderInputField, isEditing = false }) => {
-            const [formData, setFormData] = useState(initialData);
-            const handleChange = (fieldId, value) => setFormData({...formData, [fieldId]: value});
-            const handleSubmit = (e) => {
-                e.preventDefault();
-                let valid = true;
-                fields.forEach(f => { if (f.required && !formData[f.id] && f.type!=='formula') { alert(`${f.label} required`); valid = false; } });
-                if (valid) { onSave(formData); if (!isEditing) setFormData({}); }
-            };
-            return (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {fields.map(f => (
-                        <div key={f.id} className="form-field-view">
-                            <label>{f.label}{f.required && <span className="text-red-500 ml-1">*</span>}{f.type==='formula' && <span className="formula-badge ml-2">auto</span>}</label>
-                            {renderInputField(f, formData[f.id], handleChange, false)}
-                        </div>
-                    ))}
-                    <div className="flex justify-end pt-4"><button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">{isEditing ? 'Update' : 'Save'} Record</button></div>
-                </form>
-            );
-        };
 
         ReactDOM.render(<App />, document.getElementById('root'));
     </script>
