@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer - Table View with Working Formulas</title>
+    <title>File Explorer - Direct Table View with Top Form</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -98,6 +98,15 @@
         .add-data-btn:hover { background: #059669; }
         .edit-form-btn { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
         .edit-form-btn:hover { background: #2563eb; }
+        .folder-view { padding: 20px; }
+        .top-form { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 24px; margin-bottom: 30px; }
+        .top-form h3 { color: #1e40af; font-size: 1.25rem; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .submit-btn { background: #3b82f6; color: white; padding: 10px 24px; border-radius: 8px; font-weight: 500; transition: all 0.2s; }
+        .submit-btn:hover { background: #1d4ed8; transform: translateY(-1px); }
+        .table-container { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .folder-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .folder-header h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; }
+        .action-buttons { display: flex; gap: 12px; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -246,8 +255,8 @@
             const [newFileName, setNewFileName] = useState('');
             const [isAdmin, setIsAdmin] = useState(false);
             const [formMode, setFormMode] = useState('view');
-            const [activeTab, setActiveTab] = useState('data'); // Default to data tab
             const [showAddDataModal, setShowAddDataModal] = useState(false);
+            const [newRecordData, setNewRecordData] = useState({});
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
@@ -385,8 +394,8 @@
                     setSelectedFile(file); 
                     setFormFields(file.fields || []); 
                     setFormData(file.data || []); 
-                    setFormMode('view'); 
-                    setActiveTab('data'); // Show data table by default
+                    setFormMode('view');
+                    setNewRecordData({});
                     setShowFormBuilder(true); 
                 }
             };
@@ -459,7 +468,7 @@
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
                     setFormData(newData); 
                     setSelectedFile({...selectedFile, data: newData}); 
-                    setShowAddDataModal(false);
+                    setNewRecordData({});
                     showToast('success','Data saved');
                 } catch (error) { showToast('error',error.message); }
             };
@@ -473,7 +482,7 @@
                     setFormData(newData); 
                     setSelectedFile({...selectedFile, data: newData}); 
                     setEditingRecord(null); 
-                    setShowAddDataModal(false);
+                    setNewRecordData({});
                     showToast('success','Updated');
                 } catch (error) { showToast('error',error.message); }
             };
@@ -514,58 +523,65 @@
 
             const handleFileSelect = (e) => { const file = e.target.files[0]; if (file) uploadFile(file); };
 
-            // Enhanced renderInputField with formula support
-            const renderInputField = (field, value, onChange, disabled = false) => {
+            // Handle new record input change
+            const handleNewRecordChange = (fieldId, value) => {
+                setNewRecordData({ ...newRecordData, [fieldId]: value });
+            };
+
+            // Handle submit new record
+            const handleSubmitNewRecord = (e) => {
+                e.preventDefault();
+                saveFormData(newRecordData);
+            };
+
+            // Render input field for the top form
+            const renderTopFormField = (field) => {
                 if (field.type === 'formula') {
-                    // Formula field: display computed value (read-only)
-                    const computed = evaluateFormula(field.formula || '', { ...(editingRecord || {}), ...(value ? { [field.id]: value } : {}) }, formFields);
+                    const computed = evaluateFormula(field.formula || '', newRecordData, formFields);
                     return (
-                        <div className="flex items-center gap-2">
-                            <input 
-                                type="text" 
-                                value={computed} 
-                                disabled 
-                                className="w-full p-2 border rounded bg-gray-100 font-mono text-sm" 
-                                readOnly 
-                            />
-                            <span className="text-xs text-purple-600" title="Formula field - auto calculated">
-                                <i className="fas fa-calculator"></i>
-                            </span>
+                        <div className="p-2 bg-gray-100 rounded font-mono text-sm">
+                            {computed || '—'}
                         </div>
                     );
                 }
                 
-                const commonProps = { 
-                    value: value || '', 
-                    onChange: (e) => onChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value), 
-                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500", 
-                    disabled, 
-                    required: field.required && !disabled 
+                const commonProps = {
+                    id: field.id,
+                    name: field.id,
+                    value: newRecordData[field.id] || '',
+                    onChange: (e) => handleNewRecordChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value),
+                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500",
+                    required: field.required
                 };
                 
                 switch (field.type) {
-                    case 'text': case 'email': case 'tel': return <input type={field.type} {...commonProps} />;
-                    case 'number': return <input type="number" {...commonProps} />;
-                    case 'date': return <input type="date" {...commonProps} />;
-                    case 'time': return <input type="time" {...commonProps} />;
-                    case 'checkbox': return <input type="checkbox" checked={value||false} onChange={(e)=>onChange(field.id, e.target.checked)} className="h-5 w-5" disabled={disabled} />;
-                    case 'select': return (
-                        <select {...commonProps}>
-                            <option value="">Select...</option>
-                            {(field.options||[]).map((opt,i)=><option key={i} value={opt}>{opt}</option>)}
-                        </select>
-                    );
-                    case 'yesno': return (
-                        <select {...commonProps}>
-                            <option value="">Select...</option>
-                            <option value="Yes">Yes</option>
-                            <option value="No">No</option>
-                        </select>
-                    );
-                    case 'textarea': return <textarea {...commonProps} rows="4" />;
-                    case 'color': return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
-                    case 'range': return <input type="range" value={value||50} onChange={(e)=>onChange(field.id, e.target.value)} min="0" max="100" disabled={disabled} className="w-full" />;
-                    default: return null;
+                    case 'text': case 'email': case 'tel': case 'number': case 'date': case 'time':
+                        return <input type={field.type} {...commonProps} />;
+                    case 'checkbox':
+                        return <input type="checkbox" checked={newRecordData[field.id] || false} onChange={(e) => handleNewRecordChange(field.id, e.target.checked)} className="h-5 w-5" />;
+                    case 'select':
+                        return (
+                            <select {...commonProps}>
+                                <option value="">Select...</option>
+                                {(field.options || []).map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+                            </select>
+                        );
+                    case 'yesno':
+                        return (
+                            <select {...commonProps}>
+                                <option value="">Select...</option>
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                            </select>
+                        );
+                    case 'textarea':
+                        return <textarea {...commonProps} rows="3" />;
+                    case 'color':
+                        return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
+                    case 'range':
+                        return <input type="range" {...commonProps} min="0" max="100" />;
+                    default:
+                        return <input type="text" {...commonProps} />;
                 }
             };
 
@@ -627,6 +643,7 @@
                                                     className="data-action-btn edit" 
                                                     onClick={()=>{ 
                                                         setEditingRecord(record); 
+                                                        setNewRecordData(record);
                                                         setShowAddDataModal(true);
                                                     }}
                                                     title="Edit record"
@@ -676,7 +693,7 @@
             }
 
             return (
-                <div className="container mx-auto p-4 max-w-6xl">
+                <div className="container mx-auto p-4 max-w-7xl">
                     <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
                         <div className="flex justify-between items-center">
                             <h1 className="text-3xl font-bold flex items-center gap-3">
@@ -694,7 +711,8 @@
                         </div>
                     </div>
 
-                    <div className="file-explorer">
+                    {/* File Explorer - Always visible on left/center */}
+                    <div className="file-explorer mb-8">
                         <div className="file-explorer-header">
                             <div className="file-explorer-breadcrumb">
                                 {currentPath.map((item, idx) => (
@@ -759,6 +777,194 @@
                         </div>
                     </div>
 
+                    {/* When a form is opened, show its data table with top form */}
+                    {selectedFile && showFormBuilder && (
+                        <div className="folder-view">
+                            <div className="folder-header">
+                                <h2>
+                                    <i className="fas fa-wpforms text-blue-500 mr-2"></i>
+                                    {selectedFile.name}
+                                </h2>
+                                <div className="action-buttons">
+                                    <button 
+                                        className="edit-form-btn"
+                                        onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}
+                                    >
+                                        <i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i>
+                                        {formMode === 'edit' ? ' View Form Structure' : ' Edit Form Structure'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Top Form for Adding Data */}
+                            {formFields.length > 0 && (
+                                <div className="top-form">
+                                    <h3>
+                                        <i className="fas fa-plus-circle"></i>
+                                        Add New Record
+                                    </h3>
+                                    <form onSubmit={handleSubmitNewRecord} className="grid grid-cols-2 gap-4">
+                                        {formFields.map(field => (
+                                            <div key={field.id} className="form-field-view">
+                                                <label>
+                                                    {field.label}
+                                                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                                                    {field.type === 'formula' && <span className="formula-badge ml-2">Auto</span>}
+                                                </label>
+                                                {renderTopFormField(field)}
+                                            </div>
+                                        ))}
+                                        <div className="col-span-2 flex justify-end mt-4">
+                                            <button type="submit" className="submit-btn">
+                                                <i className="fas fa-save mr-2"></i>
+                                                Save Record
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
+
+                            {/* Data Table */}
+                            <div className="table-container">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-lg font-semibold">
+                                        <i className="fas fa-table mr-2 text-blue-500"></i>
+                                        Records ({formData.length})
+                                    </h3>
+                                </div>
+                                {formData.length > 0 ? renderDataTable() : (
+                                    <div className="text-center py-10 text-gray-500">
+                                        <i className="fas fa-database text-4xl mb-3"></i>
+                                        <p>No records yet. Use the form above to add data.</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Form Structure Editor Modal (hidden by default) */}
+                            {formMode === 'edit' && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                                    <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h3 className="text-xl font-bold">Edit Form Structure</h3>
+                                            <button onClick={() => setFormMode('view')} className="text-gray-500 hover:text-gray-700">
+                                                <i className="fas fa-times text-2xl"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div className="mb-6">
+                                            <h4 className="text-sm font-medium mb-2">Drag fields to build form</h4>
+                                            <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                                {fieldTypes.map(t => (
+                                                    <div 
+                                                        key={t.value} 
+                                                        draggable 
+                                                        onDragStart={(e) => handleDragStart(e, t.value)} 
+                                                        className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
+                                                    >
+                                                        <i className={`fas fa-${t.icon} block text-lg`}></i>
+                                                        <span className="text-xs">{t.label}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        
+                                        <div 
+                                            className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} 
+                                            onDragOver={handleDragOver} 
+                                            onDragLeave={handleDragLeave} 
+                                            onDrop={handleDrop}
+                                        >
+                                            {formFields.length === 0 ? (
+                                                <>
+                                                    <i className="fas fa-cloud-upload-alt"></i>
+                                                    <p>Drop fields here to build your form</p>
+                                                </>
+                                            ) : (
+                                                formFields.map((field, idx) => (
+                                                    <div key={field.id} className="form-field">
+                                                        <div className="field-actions">
+                                                            <button className="field-action-btn delete" onClick={() => deleteField(idx)}>
+                                                                <i className="fas fa-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                        <div className="field-label">
+                                                            <input 
+                                                                value={field.label} 
+                                                                onChange={e => updateField(idx, {label: e.target.value})} 
+                                                                placeholder="Field Label" 
+                                                            />
+                                                            <label className="flex items-center gap-1 text-sm">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    checked={field.required} 
+                                                                    onChange={e => updateField(idx, {required: e.target.checked})} 
+                                                                /> Required
+                                                            </label>
+                                                        </div>
+                                                        <div className="field-type-selector">
+                                                            <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})}>
+                                                                {fieldTypes.map(ft => (
+                                                                    <option key={ft.value} value={ft.value}>{ft.label}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        
+                                                        {field.type === 'select' && (
+                                                            <div className="mt-2">
+                                                                <label className="text-sm">Options (comma separated)</label>
+                                                                <input 
+                                                                    value={field.options?.join(', ') || ''} 
+                                                                    onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} 
+                                                                    className="w-full p-2 border rounded mt-1" 
+                                                                    placeholder="Option 1, Option 2, Option 3"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {field.type === 'formula' && (
+                                                            <div className="mt-2">
+                                                                <label className="text-sm font-medium">Formula</label>
+                                                                <div className="text-xs text-gray-500 mb-1">
+                                                                    Examples: SUM(price_num, tax_num), IF(yesno_bool, TODAY(), ''), CONCAT(first_name, ' ', last_name)
+                                                                </div>
+                                                                <input 
+                                                                    value={field.formula || ''} 
+                                                                    onChange={e => updateField(idx, {formula: e.target.value})} 
+                                                                    className="w-full p-2 border rounded mt-1 font-mono text-sm" 
+                                                                    placeholder="price_num * quantity_num" 
+                                                                />
+                                                                <div className="formula-preview mt-1">
+                                                                    Preview: {evaluateFormula(field.formula || '', {}, formFields) || '—'}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        
+                                                        <div className="mt-3 pt-3 border-t text-sm text-gray-500">
+                                                            Preview:
+                                                        </div>
+                                                        {renderTopFormField(field)}
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                        
+                                        <div className="flex justify-between mt-4">
+                                            <button 
+                                                onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} 
+                                                className="px-4 py-2 text-red-600 border border-red-600 rounded"
+                                            >
+                                                Clear All
+                                            </button>
+                                            <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded">
+                                                <i className="fas fa-save mr-1"></i>Save Form Structure
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* New File Modal */}
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-md">
@@ -792,218 +998,7 @@
                         </div>
                     </div>
 
-                    {/* Form Builder/Viewer Modal */}
-                    <div className={`modal ${showFormBuilder ? 'active' : ''}`}>
-                        <div className="modal-content max-w-6xl">
-                            <div className="modal-header">
-                                <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <i className="fas fa-wpforms text-blue-500"></i>
-                                    {selectedFile?.name}
-                                    {formMode === 'edit' && <span className="edit-badge">Editing Form</span>}
-                                </h2>
-                                <button onClick={() => { 
-                                    setShowFormBuilder(false); 
-                                    setSelectedFile(null); 
-                                    setFormFields([]); 
-                                    setFormData([]); 
-                                    setFormMode('view'); 
-                                }}>
-                                    <i className="fas fa-times"></i>
-                                </button>
-                            </div>
-                            
-                            {/* Top action buttons */}
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex gap-2">
-                                    <button 
-                                        className="add-data-btn"
-                                        onClick={() => {
-                                            setEditingRecord(null);
-                                            setShowAddDataModal(true);
-                                        }}
-                                    >
-                                        <i className="fas fa-plus"></i> Add Data
-                                    </button>
-                                    <button 
-                                        className="edit-form-btn"
-                                        onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}
-                                    >
-                                        <i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i>
-                                        {formMode === 'edit' ? ' View Form' : ' Edit Form'}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="tab-buttons">
-                                <button 
-                                    className={`tab-button ${activeTab === 'data' ? 'active' : ''}`} 
-                                    onClick={() => setActiveTab('data')}
-                                >
-                                    <i className="fas fa-table mr-1"></i>Data Table ({formData.length})
-                                </button>
-                                <button 
-                                    className={`tab-button ${activeTab === 'form' ? 'active' : ''}`} 
-                                    onClick={() => setActiveTab('form')}
-                                >
-                                    <i className="fas fa-wpforms mr-1"></i>Form Structure
-                                </button>
-                            </div>
-
-                            {activeTab === 'data' && (
-                                <div>
-                                    {formData.length > 0 ? renderDataTable() : (
-                                        <div className="text-center py-10 text-gray-500">
-                                            <i className="fas fa-database text-4xl mb-3"></i>
-                                            <p>No data yet. Click "Add Data" to add records.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {activeTab === 'form' && formMode === 'edit' && (
-                                <>
-                                    <div className="mb-6">
-                                        <h3 className="text-sm font-medium mb-2">Drag fields to build form</h3>
-                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                                            {fieldTypes.map(t => (
-                                                <div 
-                                                    key={t.value} 
-                                                    draggable 
-                                                    onDragStart={(e) => handleDragStart(e, t.value)} 
-                                                    className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
-                                                >
-                                                    <i className={`fas fa-${t.icon} block text-lg`}></i>
-                                                    <span className="text-xs">{t.label}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div 
-                                        className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} 
-                                        onDragOver={handleDragOver} 
-                                        onDragLeave={handleDragLeave} 
-                                        onDrop={handleDrop}
-                                    >
-                                        {formFields.length === 0 ? (
-                                            <>
-                                                <i className="fas fa-cloud-upload-alt"></i>
-                                                <p>Drop fields here to build your form</p>
-                                            </>
-                                        ) : (
-                                            formFields.map((field, idx) => (
-                                                <div key={field.id} className="form-field">
-                                                    <div className="field-actions">
-                                                        <button className="field-action-btn delete" onClick={() => deleteField(idx)}>
-                                                            <i className="fas fa-trash"></i>
-                                                        </button>
-                                                    </div>
-                                                    <div className="field-label">
-                                                        <input 
-                                                            value={field.label} 
-                                                            onChange={e => updateField(idx, {label: e.target.value})} 
-                                                            placeholder="Field Label" 
-                                                        />
-                                                        <label className="flex items-center gap-1 text-sm">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                checked={field.required} 
-                                                                onChange={e => updateField(idx, {required: e.target.checked})} 
-                                                            /> Required
-                                                        </label>
-                                                    </div>
-                                                    <div className="field-type-selector">
-                                                        <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})}>
-                                                            {fieldTypes.map(ft => (
-                                                                <option key={ft.value} value={ft.value}>{ft.label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    
-                                                    {field.type === 'select' && (
-                                                        <div className="mt-2">
-                                                            <label className="text-sm">Options (comma separated)</label>
-                                                            <input 
-                                                                value={field.options?.join(', ') || ''} 
-                                                                onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} 
-                                                                className="w-full p-2 border rounded mt-1" 
-                                                                placeholder="Option 1, Option 2, Option 3"
-                                                            />
-                                                        </div>
-                                                    )}
-                                                    
-                                                    {field.type === 'formula' && (
-                                                        <div className="mt-2">
-                                                            <label className="text-sm font-medium">Formula</label>
-                                                            <div className="text-xs text-gray-500 mb-1">
-                                                                Examples: SUM(price_num, tax_num), IF(yesno_bool, TODAY(), ''), CONCAT(first_name, ' ', last_name)
-                                                            </div>
-                                                            <input 
-                                                                value={field.formula || ''} 
-                                                                onChange={e => updateField(idx, {formula: e.target.value})} 
-                                                                className="w-full p-2 border rounded mt-1 font-mono text-sm" 
-                                                                placeholder="price_num * quantity_num" 
-                                                            />
-                                                            <div className="formula-preview mt-1">
-                                                                Preview: {evaluateFormula(field.formula || '', {}, formFields) || '—'}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    
-                                                    <div className="mt-3 pt-3 border-t text-sm text-gray-500">
-                                                        Preview:
-                                                    </div>
-                                                    {renderInputField(field, '', (id, val) => {}, true)}
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                    <div className="flex justify-between mt-4">
-                                        <button 
-                                            onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} 
-                                            className="px-4 py-2 text-red-600 border border-red-600 rounded"
-                                        >
-                                            Clear All
-                                        </button>
-                                        <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded">
-                                            <i className="fas fa-save mr-1"></i>Save Form Structure
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-
-                            {activeTab === 'form' && formMode === 'view' && (
-                                <div className="form-view">
-                                    <h3 className="text-lg font-bold mb-4">Form Fields Preview</h3>
-                                    {formFields.length === 0 ? (
-                                        <div className="text-center py-10 text-gray-500">
-                                            <i className="fas fa-wpforms text-4xl mb-3"></i>
-                                            <p>No fields defined. Switch to Edit Mode to add fields.</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {formFields.map(f => (
-                                                <div key={f.id} className="form-field-view">
-                                                    <label>
-                                                        {f.label}
-                                                        {f.required && <span className="text-red-500 ml-1">*</span>}
-                                                        {f.type === 'formula' && <span className="formula-badge ml-2">Formula</span>}
-                                                    </label>
-                                                    {renderInputField(f, '', (id, val) => {}, true)}
-                                                    {f.type === 'formula' && (
-                                                        <div className="text-xs text-purple-600 mt-1">
-                                                            Formula: {f.formula || 'Not set'}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Add/Edit Data Modal */}
+                    {/* Edit Record Modal */}
                     <div className={`modal ${showAddDataModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-2xl">
                             <div className="modal-header">
@@ -1013,6 +1008,7 @@
                                 <button onClick={() => {
                                     setShowAddDataModal(false);
                                     setEditingRecord(null);
+                                    setNewRecordData({});
                                 }}>
                                     <i className="fas fa-times"></i>
                                 </button>
@@ -1020,20 +1016,10 @@
                             
                             <form onSubmit={(e) => {
                                 e.preventDefault();
-                                const formData = new FormData(e.target);
-                                const data = {};
-                                formFields.forEach(f => {
-                                    if (f.type === 'checkbox') {
-                                        data[f.id] = formData.get(f.id) === 'on';
-                                    } else {
-                                        data[f.id] = formData.get(f.id) || '';
-                                    }
-                                });
-                                
                                 if (editingRecord) {
-                                    updateFormData({ ...editingRecord, ...data });
+                                    updateFormData({ ...editingRecord, ...newRecordData });
                                 } else {
-                                    saveFormData(data);
+                                    saveFormData(newRecordData);
                                 }
                             }}>
                                 {formFields.map(f => (
@@ -1045,12 +1031,12 @@
                                         </label>
                                         {f.type === 'formula' ? (
                                             <div className="p-2 bg-gray-100 rounded">
-                                                {evaluateFormula(f.formula || '', editingRecord || {}, formFields)}
+                                                {evaluateFormula(f.formula || '', newRecordData, formFields)}
                                             </div>
                                         ) : f.type === 'yesno' ? (
                                             <select 
-                                                name={f.id}
-                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                value={newRecordData[f.id] || ''}
+                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             >
@@ -1060,8 +1046,8 @@
                                             </select>
                                         ) : f.type === 'select' ? (
                                             <select 
-                                                name={f.id}
-                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                value={newRecordData[f.id] || ''}
+                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             >
@@ -1073,14 +1059,14 @@
                                         ) : f.type === 'checkbox' ? (
                                             <input 
                                                 type="checkbox"
-                                                name={f.id}
-                                                defaultChecked={editingRecord?.[f.id] || false}
+                                                checked={newRecordData[f.id] || false}
+                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.checked})}
                                                 className="h-5 w-5"
                                             />
                                         ) : f.type === 'textarea' ? (
                                             <textarea 
-                                                name={f.id}
-                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                value={newRecordData[f.id] || ''}
+                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
                                                 className="w-full p-2 border rounded"
                                                 rows="4"
                                                 required={f.required}
@@ -1088,8 +1074,8 @@
                                         ) : (
                                             <input 
                                                 type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
-                                                name={f.id}
-                                                defaultValue={editingRecord?.[f.id] || ''}
+                                                value={newRecordData[f.id] || ''}
+                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             />
@@ -1103,6 +1089,7 @@
                                         onClick={() => {
                                             setShowAddDataModal(false);
                                             setEditingRecord(null);
+                                            setNewRecordData({});
                                         }}
                                         className="px-4 py-2 border rounded"
                                     >
