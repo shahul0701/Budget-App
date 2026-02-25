@@ -119,6 +119,7 @@
         .suggestion-item:hover { background: #f3f4f6; }
         .suggestion-item .field-type { font-size: 10px; background: #e5e7eb; padding: 2px 6px; border-radius: 12px; }
         .function-badge { background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; margin-left: 6px; }
+        .auto-complete-highlight { background-color: #fef3c7; font-weight: 500; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -184,12 +185,57 @@
             { name: 'COUNTIF', description: 'COUNTIF(conditionField, condition)' }
         ];
 
+        // Helper function to get field name variants for auto-complete
+        const getFieldNameVariants = (field) => {
+            const variants = [];
+            const label = field.label;
+            
+            // Original label
+            variants.push(label);
+            
+            // Lowercase with underscores
+            const safeName = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            variants.push(safeName);
+            
+            // CamelCase
+            const camelCase = label.replace(/[^a-zA-Z0-9]/g, ' ').split(' ').map((word, i) => 
+                i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+            ).join('');
+            variants.push(camelCase);
+            
+            // PascalCase
+            const pascalCase = label.replace(/[^a-zA-Z0-9]/g, ' ').split(' ').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+            ).join('');
+            variants.push(pascalCase);
+            
+            // No spaces
+            const noSpaces = label.replace(/\s+/g, '');
+            variants.push(noSpaces);
+            
+            // With type suffixes
+            if (field.type === 'number') {
+                variants.push(safeName + '_num');
+                variants.push(safeName + '_number');
+                variants.push(camelCase + 'Num');
+            } else if (field.type === 'yesno') {
+                variants.push(safeName + '_bool');
+                variants.push(safeName + '_yesno');
+                variants.push(camelCase + 'Bool');
+            } else if (field.type === 'date') {
+                variants.push(safeName + '_date');
+                variants.push(camelCase + 'Date');
+            }
+            
+            return [...new Set(variants)]; // Remove duplicates
+        };
+
         // ADVANCED FORMULA EVALUATOR - Supports VLOOKUP, IFS, CONCAT, SUMIF, etc.
         const evaluateFormula = (formula, record, fields, allRecords = []) => {
             if (!formula || !formula.trim()) return '';
             
             try {
-                // Build context with all field values
+                // Build context with all field values and name variants
                 const context = {};
                 const fieldMap = {};
                 
@@ -197,29 +243,26 @@
                     const val = record[f.id] || '';
                     context[f.id] = val;
                     
-                    // Create sanitized field name (no spaces, lowercase)
-                    const fieldKey = f.label.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                    context[fieldKey] = val;
-                    fieldMap[fieldKey] = f.id;
-                    
-                    // Add numeric version if possible
-                    const num = parseFloat(val);
-                    if (!isNaN(num)) {
-                        context[f.id + '_num'] = num;
-                        context[fieldKey + '_num'] = num;
-                    }
-                    
-                    // For yesno fields, add boolean
-                    if (f.type === 'yesno') {
-                        context[f.id + '_bool'] = val === 'Yes';
-                        context[fieldKey + '_bool'] = val === 'Yes';
-                    }
-                    
-                    // For checkbox
-                    if (f.type === 'checkbox') {
-                        context[f.id + '_bool'] = val === true || val === 'true';
-                        context[fieldKey + '_bool'] = val === true || val === 'true';
-                    }
+                    // Add all name variants for this field
+                    getFieldNameVariants(f).forEach(variant => {
+                        context[variant] = val;
+                        
+                        // Add numeric version if possible
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) {
+                            context[variant + '_num'] = num;
+                        }
+                        
+                        // For yesno fields, add boolean
+                        if (f.type === 'yesno') {
+                            context[variant + '_bool'] = val === 'Yes';
+                        }
+                        
+                        // For checkbox
+                        if (f.type === 'checkbox') {
+                            context[variant + '_bool'] = val === true || val === 'true';
+                        }
+                    });
                 });
 
                 // TODAY() and NOW() functions
@@ -254,9 +297,17 @@
                 const VLOOKUP = (lookupValue, lookupField, returnField, records = allRecords) => {
                     if (!records || records.length === 0) return '';
                     
-                    // Find field IDs by label
-                    const lookupFieldObj = fields.find(f => f.label === lookupField || f.id === lookupField);
-                    const returnFieldObj = fields.find(f => f.label === returnField || f.id === returnField);
+                    // Find field IDs by label or variants
+                    const lookupFieldObj = fields.find(f => 
+                        f.label === lookupField || 
+                        f.id === lookupField ||
+                        getFieldNameVariants(f).includes(lookupField)
+                    );
+                    const returnFieldObj = fields.find(f => 
+                        f.label === returnField || 
+                        f.id === returnField ||
+                        getFieldNameVariants(f).includes(returnField)
+                    );
                     
                     if (!lookupFieldObj || !returnFieldObj) return '';
                     
@@ -266,8 +317,16 @@
                 
                 // SUMIF function
                 const SUMIF = (conditionField, condition, sumField, records = allRecords) => {
-                    const conditionFieldObj = fields.find(f => f.label === conditionField || f.id === conditionField);
-                    const sumFieldObj = fields.find(f => f.label === sumField || f.id === sumField);
+                    const conditionFieldObj = fields.find(f => 
+                        f.label === conditionField || 
+                        f.id === conditionField ||
+                        getFieldNameVariants(f).includes(conditionField)
+                    );
+                    const sumFieldObj = fields.find(f => 
+                        f.label === sumField || 
+                        f.id === sumField ||
+                        getFieldNameVariants(f).includes(sumField)
+                    );
                     
                     if (!conditionFieldObj || !sumFieldObj || !records) return 0;
                     
@@ -281,7 +340,11 @@
                 
                 // COUNTIF function
                 const COUNTIF = (conditionField, condition, records = allRecords) => {
-                    const conditionFieldObj = fields.find(f => f.label === conditionField || f.id === conditionField);
+                    const conditionFieldObj = fields.find(f => 
+                        f.label === conditionField || 
+                        f.id === conditionField ||
+                        getFieldNameVariants(f).includes(conditionField)
+                    );
                     if (!conditionFieldObj || !records) return 0;
                     
                     return records.filter(r => String(r[conditionFieldObj.id]) === String(condition)).length;
@@ -362,7 +425,9 @@
             const [showSuggestions, setShowSuggestions] = useState(false);
             const [suggestions, setSuggestions] = useState([]);
             const [activeFieldIndex, setActiveFieldIndex] = useState(null);
+            const [suggestionPosition, setSuggestionPosition] = useState({ top: 0, left: 0 });
             const suggestionRef = useRef(null);
+            const formulaInputRef = useRef(null);
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
@@ -603,6 +668,14 @@
                     const filesRef = getUserCollection('tables');
                     const currentData = selectedFile.data || [];
                     const newRecord = { ...data, id: Date.now(), uid: user.uid, createdAt: new Date().toISOString() };
+                    
+                    // Evaluate formula fields before saving
+                    formFields.forEach(field => {
+                        if (field.type === 'formula') {
+                            newRecord[field.id] = evaluateFormula(field.formula || '', newRecord, formFields, currentData);
+                        }
+                    });
+                    
                     const newData = [...currentData, newRecord];
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
                     setFormData(newData); 
@@ -616,6 +689,14 @@
                 if (!user || !selectedFile) return;
                 try {
                     const filesRef = getUserCollection('tables');
+                    
+                    // Evaluate formula fields before updating
+                    formFields.forEach(field => {
+                        if (field.type === 'formula') {
+                            updatedRecord[field.id] = evaluateFormula(field.formula || '', updatedRecord, formFields, formData);
+                        }
+                    });
+                    
                     const newData = formData.map(r => r.id === updatedRecord.id ? { ...updatedRecord, updatedAt: new Date().toISOString() } : r);
                     await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
                     setFormData(newData); 
@@ -665,7 +746,16 @@
 
             // Handle new record input change
             const handleNewRecordChange = (fieldId, value) => {
-                setNewRecordData({ ...newRecordData, [fieldId]: value });
+                const updatedData = { ...newRecordData, [fieldId]: value };
+                
+                // Re-evaluate formula fields when any field changes
+                formFields.forEach(field => {
+                    if (field.type === 'formula') {
+                        updatedData[field.id] = evaluateFormula(field.formula || '', updatedData, formFields, formData);
+                    }
+                });
+                
+                setNewRecordData(updatedData);
             };
 
             // Handle submit new record
@@ -674,42 +764,65 @@
                 saveFormData(newRecordData);
             };
 
-            // Handle formula input with suggestions
+            // Get all field name variants for auto-complete
+            const getAllFieldVariants = () => {
+                const variants = [];
+                formFields.forEach(field => {
+                    getFieldNameVariants(field).forEach(variant => {
+                        variants.push({
+                            type: 'field',
+                            name: variant,
+                            original: field.label,
+                            fieldType: field.type,
+                            fieldId: field.id
+                        });
+                    });
+                });
+                return variants;
+            };
+
+            // Handle formula input with auto-complete
             const handleFormulaChange = (index, value) => {
                 updateField(index, { formula: value });
                 
-                // Generate suggestions based on current input
-                const lastWord = value.split(/[\s,()]+/).pop() || '';
-                if (lastWord.length > 0) {
-                    // Get field suggestions
-                    const fieldSuggestions = formFields
-                        .filter(f => f.id !== formFields[index].id) // Don't suggest current field
-                        .map(f => ({
-                            type: 'field',
-                            name: f.label.toLowerCase().replace(/[^a-z0-9]/g, '_'),
-                            original: f.label,
-                            fieldType: f.type,
-                            suffix: f.type === 'yesno' ? '_bool' : (f.type === 'number' ? '_num' : '')
+                // Get cursor position
+                const input = formulaInputRef.current;
+                if (input) {
+                    const cursorPos = input.selectionStart;
+                    const textBeforeCursor = value.substring(0, cursorPos);
+                    
+                    // Find the last word being typed
+                    const match = textBeforeCursor.match(/[a-zA-Z0-9_]+$/);
+                    const lastWord = match ? match[0] : '';
+                    
+                    if (lastWord.length >= 1) {
+                        // Get field variants and functions
+                        const fieldVariants = getAllFieldVariants();
+                        const functionSuggestions = AVAILABLE_FUNCTIONS.map(f => ({
+                            type: 'function',
+                            name: f.name,
+                            description: f.description
                         }));
-                    
-                    // Get function suggestions
-                    const functionSuggestions = AVAILABLE_FUNCTIONS.map(f => ({
-                        type: 'function',
-                        name: f.name,
-                        description: f.description
-                    }));
-                    
-                    // Combine and filter
-                    const allSuggestions = [...fieldSuggestions, ...functionSuggestions];
-                    const filtered = allSuggestions.filter(s => 
-                        s.name.toLowerCase().includes(lastWord.toLowerCase())
-                    );
-                    
-                    setSuggestions(filtered.slice(0, 10));
-                    setShowSuggestions(true);
-                    setActiveFieldIndex(index);
-                } else {
-                    setShowSuggestions(false);
+                        
+                        // Combine and filter
+                        const allSuggestions = [...fieldVariants, ...functionSuggestions];
+                        const filtered = allSuggestions.filter(s => 
+                            s.name.toLowerCase().startsWith(lastWord.toLowerCase())
+                        );
+                        
+                        // Get input position for dropdown
+                        const rect = input.getBoundingClientRect();
+                        setSuggestionPosition({
+                            top: rect.bottom + window.scrollY,
+                            left: rect.left + window.scrollX
+                        });
+                        
+                        setSuggestions(filtered.slice(0, 8));
+                        setShowSuggestions(true);
+                        setActiveFieldIndex(index);
+                    } else {
+                        setShowSuggestions(false);
+                    }
                 }
             };
 
@@ -719,23 +832,64 @@
                 
                 const field = formFields[activeFieldIndex];
                 const currentFormula = field.formula || '';
-                const words = currentFormula.split(/[\s,()]+/);
-                const lastWord = words.pop() || '';
+                const input = formulaInputRef.current;
                 
-                let insertText = suggestion.name;
-                if (suggestion.type === 'field' && suggestion.suffix) {
-                    insertText = suggestion.name + suggestion.suffix;
+                if (input) {
+                    const cursorPos = input.selectionStart;
+                    const textBeforeCursor = currentFormula.substring(0, cursorPos);
+                    const textAfterCursor = currentFormula.substring(cursorPos);
+                    
+                    // Find the word to replace
+                    const match = textBeforeCursor.match(/[a-zA-Z0-9_]+$/);
+                    if (match) {
+                        const start = cursorPos - match[0].length;
+                        const newFormula = 
+                            currentFormula.substring(0, start) + 
+                            suggestion.name + 
+                            textAfterCursor;
+                        
+                        updateField(activeFieldIndex, { formula: newFormula });
+                        
+                        // Set cursor position after inserted text
+                        setTimeout(() => {
+                            if (input) {
+                                const newPos = start + suggestion.name.length;
+                                input.setSelectionRange(newPos, newPos);
+                                input.focus();
+                            }
+                        }, 10);
+                    }
                 }
                 
-                const newFormula = currentFormula.substring(0, currentFormula.length - lastWord.length) + insertText;
-                updateField(activeFieldIndex, { formula: newFormula });
                 setShowSuggestions(false);
+            };
+
+            // Handle key navigation in suggestions
+            const handleKeyDown = (e, index) => {
+                if (!showSuggestions) return;
+                
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const nextIndex = (suggestions.indexOf(selectedSuggestion) + 1) % suggestions.length;
+                    setSelectedSuggestion(suggestions[nextIndex]);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prevIndex = (suggestions.indexOf(selectedSuggestion) - 1 + suggestions.length) % suggestions.length;
+                    setSelectedSuggestion(suggestions[prevIndex]);
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    if (selectedSuggestion) {
+                        insertSuggestion(selectedSuggestion);
+                    }
+                } else if (e.key === 'Escape') {
+                    setShowSuggestions(false);
+                }
             };
 
             // Render input field for the top form
             const renderTopFormField = (field) => {
                 if (field.type === 'formula') {
-                    const computed = evaluateFormula(field.formula || '', newRecordData, formFields, formData);
+                    const computed = newRecordData[field.id] || evaluateFormula(field.formula || '', newRecordData, formFields, formData);
                     return (
                         <div className="p-2 bg-gray-100 rounded font-mono text-sm">
                             {computed || '—'}
@@ -1086,18 +1240,6 @@
                                             </div>
                                         </div>
                                         
-                                        <div className="formula-examples mb-4">
-                                            <p className="text-sm font-medium">Formula Examples:</p>
-                                            <div className="grid grid-cols-2 gap-1 text-xs mt-1">
-                                                <code>CONCAT(first_name, ' ', last_name)</code>
-                                                <code>SUM(price, tax)</code>
-                                                <code>IF(age_num >= 18, 'Adult', 'Minor')</code>
-                                                <code>IFS(score>=90,'A',score>=80,'B','C')</code>
-                                                <code>VLOOKUP(id, 'Product ID', 'Price')</code>
-                                                <code>SUMIF('Category','A','Amount')</code>
-                                            </div>
-                                        </div>
-                                        
                                         <div 
                                             className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} 
                                             onDragOver={handleDragOver} 
@@ -1153,81 +1295,22 @@
                                                         
                                                         {field.type === 'formula' && (
                                                             <div className="mt-2">
-                                                                <label className="text-sm font-medium">Formula</label>
-                                                                <div className="text-xs text-gray-500 mb-1">
-                                                                    Click on field names below to insert them
-                                                                </div>
-                                                                
-                                                                {/* Field selector buttons */}
-                                                                <div className="field-selector mb-2">
-                                                                    {formFields.map(f => (
-                                                                        f.id !== field.id && (
-                                                                            <span 
-                                                                                key={f.id}
-                                                                                className="field-tag"
-                                                                                onClick={() => {
-                                                                                    const fieldName = f.label.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                                                                    const suffix = f.type === 'yesno' ? '_bool' : (f.type === 'number' ? '_num' : '');
-                                                                                    const insertText = fieldName + suffix;
-                                                                                    updateField(idx, { 
-                                                                                        formula: (field.formula || '') + insertText 
-                                                                                    });
-                                                                                }}
-                                                                            >
-                                                                                <i className="fas fa-tag"></i>
-                                                                                {f.label} 
-                                                                                {f.type === 'yesno' && '_bool'}
-                                                                                {f.type === 'number' && '_num'}
-                                                                            </span>
-                                                                        )
-                                                                    ))}
-                                                                </div>
-                                                                
-                                                                {/* Function selector buttons */}
-                                                                <div className="field-selector mb-2">
-                                                                    {AVAILABLE_FUNCTIONS.slice(0, 8).map(func => (
-                                                                        <span 
-                                                                            key={func.name}
-                                                                            className="field-tag bg-purple-100 border-purple-300"
-                                                                            onClick={() => {
-                                                                                updateField(idx, { 
-                                                                                    formula: (field.formula || '') + func.name + '(' 
-                                                                                });
-                                                                            }}
-                                                                        >
-                                                                            <i className="fas fa-function"></i>
-                                                                            {func.name}(
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
+                                                                <label className="text-sm font-medium">Formula (start typing field name for auto-complete)</label>
                                                                 
                                                                 <div className="formula-input-container">
                                                                     <input 
+                                                                        ref={formulaInputRef}
                                                                         value={field.formula || ''} 
                                                                         onChange={e => handleFormulaChange(idx, e.target.value)} 
+                                                                        onKeyDown={(e) => handleKeyDown(e, idx)}
+                                                                        onFocus={(e) => {
+                                                                            if (e.target.value.length > 0) {
+                                                                                handleFormulaChange(idx, e.target.value);
+                                                                            }
+                                                                        }}
                                                                         className="w-full p-2 border rounded mt-1 font-mono text-sm" 
                                                                         placeholder="IF(yesno_bool, TODAY(), '')" 
                                                                     />
-                                                                    
-                                                                    {/* Suggestions dropdown */}
-                                                                    {showSuggestions && activeFieldIndex === idx && suggestions.length > 0 && (
-                                                                        <div ref={suggestionRef} className="suggestions-dropdown">
-                                                                            {suggestions.map((s, i) => (
-                                                                                <div 
-                                                                                    key={i}
-                                                                                    className="suggestion-item"
-                                                                                    onClick={() => insertSuggestion(s)}
-                                                                                >
-                                                                                    <span className="font-mono">{s.name}</span>
-                                                                                    {s.type === 'field' ? (
-                                                                                        <span className="field-type">{s.fieldType}</span>
-                                                                                    ) : (
-                                                                                        <span className="function-badge">fn</span>
-                                                                                    )}
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
                                                                 </div>
                                                                 
                                                                 <div className="formula-preview mt-1">
@@ -1237,7 +1320,7 @@
                                                         )}
                                                         
                                                         <div className="mt-3 pt-3 border-t text-sm text-gray-500">
-                                                            Preview:
+                                                            Example value:
                                                         </div>
                                                         {renderTopFormField({...field, id: 'preview_' + field.id})}
                                                     </div>
@@ -1259,6 +1342,43 @@
                                     </div>
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* Auto-complete Suggestions Dropdown */}
+                    {showSuggestions && suggestions.length > 0 && (
+                        <div 
+                            ref={suggestionRef}
+                            className="fixed z-50 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                            style={{
+                                top: suggestionPosition.top + 'px',
+                                left: suggestionPosition.left + 'px',
+                                minWidth: '300px'
+                            }}
+                        >
+                            {suggestions.map((suggestion, index) => (
+                                <div 
+                                    key={index}
+                                    className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b last:border-b-0"
+                                    onClick={() => insertSuggestion(suggestion)}
+                                >
+                                    <div>
+                                        <span className="font-mono font-medium">{suggestion.name}</span>
+                                        {suggestion.type === 'field' && (
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                {suggestion.original}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className={`text-xs px-2 py-1 rounded ${
+                                        suggestion.type === 'field' 
+                                            ? 'bg-blue-100 text-blue-700' 
+                                            : 'bg-purple-100 text-purple-700'
+                                    }`}>
+                                        {suggestion.type === 'field' ? suggestion.fieldType : 'function'}
+                                    </span>
+                                </div>
+                            ))}
                         </div>
                     )}
 
@@ -1328,12 +1448,12 @@
                                         </label>
                                         {f.type === 'formula' ? (
                                             <div className="p-2 bg-gray-100 rounded">
-                                                {evaluateFormula(f.formula || '', newRecordData, formFields, formData)}
+                                                {newRecordData[f.id] || evaluateFormula(f.formula || '', newRecordData, formFields, formData)}
                                             </div>
                                         ) : f.type === 'yesno' ? (
                                             <select 
                                                 value={newRecordData[f.id] || ''}
-                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
+                                                onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             >
@@ -1344,7 +1464,7 @@
                                         ) : f.type === 'select' ? (
                                             <select 
                                                 value={newRecordData[f.id] || ''}
-                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
+                                                onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             >
@@ -1357,13 +1477,13 @@
                                             <input 
                                                 type="checkbox"
                                                 checked={newRecordData[f.id] || false}
-                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.checked})}
+                                                onChange={(e) => handleNewRecordChange(f.id, e.target.checked)}
                                                 className="h-5 w-5"
                                             />
                                         ) : f.type === 'textarea' ? (
                                             <textarea 
                                                 value={newRecordData[f.id] || ''}
-                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
+                                                onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
                                                 className="w-full p-2 border rounded"
                                                 rows="4"
                                                 required={f.required}
@@ -1372,7 +1492,7 @@
                                             <input 
                                                 type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
                                                 value={newRecordData[f.id] || ''}
-                                                onChange={(e) => setNewRecordData({...newRecordData, [f.id]: e.target.value})}
+                                                onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
                                                 className="w-full p-2 border rounded"
                                                 required={f.required}
                                             />
