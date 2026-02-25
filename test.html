@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer - Advanced Formulas with VLOOKUP, IFS</title>
+    <title>File Explorer - Smart Formula Builder with Field Auto-Populate</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -109,6 +109,16 @@
         .action-buttons { display: flex; gap: 12px; }
         .formula-examples { background: #f3f4f6; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; }
         .formula-examples code { background: #e5e7eb; padding: 2px 6px; border-radius: 4px; color: #1f2937; }
+        .field-selector { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+        .field-tag { background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 16px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #7dd3fc; }
+        .field-tag:hover { background: #bae6fd; }
+        .field-tag i { font-size: 10px; }
+        .formula-input-container { position: relative; }
+        .suggestions-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e5e7eb; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .suggestion-item { padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .suggestion-item:hover { background: #f3f4f6; }
+        .suggestion-item .field-type { font-size: 10px; background: #e5e7eb; padding: 2px 6px; border-radius: 12px; }
+        .function-badge { background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; margin-left: 6px; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -147,6 +157,32 @@
                 </button>
             </div>
         );
+
+        // List of available functions for suggestions
+        const AVAILABLE_FUNCTIONS = [
+            { name: 'IF', description: 'IF(condition, trueValue, falseValue)' },
+            { name: 'IFS', description: 'IFS(condition1, value1, condition2, value2, ...)' },
+            { name: 'SUM', description: 'SUM(value1, value2, ...)' },
+            { name: 'AVG', description: 'AVG(value1, value2, ...)' },
+            { name: 'COUNT', description: 'COUNT(value1, value2, ...)' },
+            { name: 'MIN', description: 'MIN(value1, value2, ...)' },
+            { name: 'MAX', description: 'MAX(value1, value2, ...)' },
+            { name: 'CONCAT', description: 'CONCAT(string1, string2, ...)' },
+            { name: 'UPPER', description: 'UPPER(text)' },
+            { name: 'LOWER', description: 'LOWER(text)' },
+            { name: 'LEFT', description: 'LEFT(text, numChars)' },
+            { name: 'RIGHT', description: 'RIGHT(text, numChars)' },
+            { name: 'LEN', description: 'LEN(text)' },
+            { name: 'TODAY', description: 'TODAY()' },
+            { name: 'NOW', description: 'NOW()' },
+            { name: 'DATEADD', description: 'DATEADD(date, days)' },
+            { name: 'YEAR', description: 'YEAR(date)' },
+            { name: 'MONTH', description: 'MONTH(date)' },
+            { name: 'DAY', description: 'DAY(date)' },
+            { name: 'VLOOKUP', description: 'VLOOKUP(value, lookupField, returnField)' },
+            { name: 'SUMIF', description: 'SUMIF(conditionField, condition, sumField)' },
+            { name: 'COUNTIF', description: 'COUNTIF(conditionField, condition)' }
+        ];
 
         // ADVANCED FORMULA EVALUATOR - Supports VLOOKUP, IFS, CONCAT, SUMIF, etc.
         const evaluateFormula = (formula, record, fields, allRecords = []) => {
@@ -322,6 +358,11 @@
             const [showAddDataModal, setShowAddDataModal] = useState(false);
             const [newRecordData, setNewRecordData] = useState({});
             const [showFolderView, setShowFolderView] = useState(false);
+            // For formula suggestions
+            const [showSuggestions, setShowSuggestions] = useState(false);
+            const [suggestions, setSuggestions] = useState([]);
+            const [activeFieldIndex, setActiveFieldIndex] = useState(null);
+            const suggestionRef = useRef(null);
             
             const dragField = useRef(null);
             const fileInputRef = useRef(null);
@@ -374,6 +415,17 @@
                     setShowFormBuilder(false);
                 }
             }, [currentPath]);
+
+            // Click outside to close suggestions
+            useEffect(() => {
+                function handleClickOutside(event) {
+                    if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
+                        setShowSuggestions(false);
+                    }
+                }
+                document.addEventListener('mousedown', handleClickOutside);
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, []);
 
             const signInAnonymously = async () => {
                 try { setLoading(true); await auth.signInAnonymously(); showToast('success', 'Signed in!'); } 
@@ -476,13 +528,6 @@
                     setShowFolderView(true);
                     setShowFormBuilder(true);
                 }
-            };
-
-            const navigateToMyFiles = () => {
-                setCurrentPath(['My Files']);
-                setShowFolderView(false);
-                setSelectedFile(null);
-                setShowFormBuilder(false);
             };
 
             const navigateUp = () => { 
@@ -627,6 +672,64 @@
             const handleSubmitNewRecord = (e) => {
                 e.preventDefault();
                 saveFormData(newRecordData);
+            };
+
+            // Handle formula input with suggestions
+            const handleFormulaChange = (index, value) => {
+                updateField(index, { formula: value });
+                
+                // Generate suggestions based on current input
+                const lastWord = value.split(/[\s,()]+/).pop() || '';
+                if (lastWord.length > 0) {
+                    // Get field suggestions
+                    const fieldSuggestions = formFields
+                        .filter(f => f.id !== formFields[index].id) // Don't suggest current field
+                        .map(f => ({
+                            type: 'field',
+                            name: f.label.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+                            original: f.label,
+                            fieldType: f.type,
+                            suffix: f.type === 'yesno' ? '_bool' : (f.type === 'number' ? '_num' : '')
+                        }));
+                    
+                    // Get function suggestions
+                    const functionSuggestions = AVAILABLE_FUNCTIONS.map(f => ({
+                        type: 'function',
+                        name: f.name,
+                        description: f.description
+                    }));
+                    
+                    // Combine and filter
+                    const allSuggestions = [...fieldSuggestions, ...functionSuggestions];
+                    const filtered = allSuggestions.filter(s => 
+                        s.name.toLowerCase().includes(lastWord.toLowerCase())
+                    );
+                    
+                    setSuggestions(filtered.slice(0, 10));
+                    setShowSuggestions(true);
+                    setActiveFieldIndex(index);
+                } else {
+                    setShowSuggestions(false);
+                }
+            };
+
+            // Insert suggestion into formula
+            const insertSuggestion = (suggestion) => {
+                if (activeFieldIndex === null) return;
+                
+                const field = formFields[activeFieldIndex];
+                const currentFormula = field.formula || '';
+                const words = currentFormula.split(/[\s,()]+/);
+                const lastWord = words.pop() || '';
+                
+                let insertText = suggestion.name;
+                if (suggestion.type === 'field' && suggestion.suffix) {
+                    insertText = suggestion.name + suggestion.suffix;
+                }
+                
+                const newFormula = currentFormula.substring(0, currentFormula.length - lastWord.length) + insertText;
+                updateField(activeFieldIndex, { formula: newFormula });
+                setShowSuggestions(false);
             };
 
             // Render input field for the top form
@@ -1052,16 +1155,83 @@
                                                             <div className="mt-2">
                                                                 <label className="text-sm font-medium">Formula</label>
                                                                 <div className="text-xs text-gray-500 mb-1">
-                                                                    Use field labels: first_name, price_num, yesno_bool, etc.
+                                                                    Click on field names below to insert them
                                                                 </div>
-                                                                <input 
-                                                                    value={field.formula || ''} 
-                                                                    onChange={e => updateField(idx, {formula: e.target.value})} 
-                                                                    className="w-full p-2 border rounded mt-1 font-mono text-sm" 
-                                                                    placeholder="IF(yesno_bool, TODAY(), '')" 
-                                                                />
+                                                                
+                                                                {/* Field selector buttons */}
+                                                                <div className="field-selector mb-2">
+                                                                    {formFields.map(f => (
+                                                                        f.id !== field.id && (
+                                                                            <span 
+                                                                                key={f.id}
+                                                                                className="field-tag"
+                                                                                onClick={() => {
+                                                                                    const fieldName = f.label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                                                                    const suffix = f.type === 'yesno' ? '_bool' : (f.type === 'number' ? '_num' : '');
+                                                                                    const insertText = fieldName + suffix;
+                                                                                    updateField(idx, { 
+                                                                                        formula: (field.formula || '') + insertText 
+                                                                                    });
+                                                                                }}
+                                                                            >
+                                                                                <i className="fas fa-tag"></i>
+                                                                                {f.label} 
+                                                                                {f.type === 'yesno' && '_bool'}
+                                                                                {f.type === 'number' && '_num'}
+                                                                            </span>
+                                                                        )
+                                                                    ))}
+                                                                </div>
+                                                                
+                                                                {/* Function selector buttons */}
+                                                                <div className="field-selector mb-2">
+                                                                    {AVAILABLE_FUNCTIONS.slice(0, 8).map(func => (
+                                                                        <span 
+                                                                            key={func.name}
+                                                                            className="field-tag bg-purple-100 border-purple-300"
+                                                                            onClick={() => {
+                                                                                updateField(idx, { 
+                                                                                    formula: (field.formula || '') + func.name + '(' 
+                                                                                });
+                                                                            }}
+                                                                        >
+                                                                            <i className="fas fa-function"></i>
+                                                                            {func.name}(
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                                
+                                                                <div className="formula-input-container">
+                                                                    <input 
+                                                                        value={field.formula || ''} 
+                                                                        onChange={e => handleFormulaChange(idx, e.target.value)} 
+                                                                        className="w-full p-2 border rounded mt-1 font-mono text-sm" 
+                                                                        placeholder="IF(yesno_bool, TODAY(), '')" 
+                                                                    />
+                                                                    
+                                                                    {/* Suggestions dropdown */}
+                                                                    {showSuggestions && activeFieldIndex === idx && suggestions.length > 0 && (
+                                                                        <div ref={suggestionRef} className="suggestions-dropdown">
+                                                                            {suggestions.map((s, i) => (
+                                                                                <div 
+                                                                                    key={i}
+                                                                                    className="suggestion-item"
+                                                                                    onClick={() => insertSuggestion(s)}
+                                                                                >
+                                                                                    <span className="font-mono">{s.name}</span>
+                                                                                    {s.type === 'field' ? (
+                                                                                        <span className="field-type">{s.fieldType}</span>
+                                                                                    ) : (
+                                                                                        <span className="function-badge">fn</span>
+                                                                                    )}
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                
                                                                 <div className="formula-preview mt-1">
-                                                                    Preview: {evaluateFormula(field.formula || '', {}, formFields, formData) || '—'}
+                                                                    Preview: {evaluateFormula(field.formula || '', newRecordData, formFields, formData) || '—'}
                                                                 </div>
                                                             </div>
                                                         )}
