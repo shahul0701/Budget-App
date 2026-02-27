@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>File Explorer - Mobile & Scroll Fixed</title>
+    <title>File Explorer - Scroll Fixed + Mobile</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -14,18 +14,22 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
-        /* ensure root container allows scrolling */
+        /* base reset for scrolling */
         html, body { height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
         #root { min-height: 100%; display: flex; flex-direction: column; }
+
+        /* file explorer */
         .file-explorer { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: white; }
         .file-explorer-header { background: #f9fafb; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
         .file-explorer-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .breadcrumb-item { display: flex; align-items: center; gap: 4px; color: #4b5563; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
         .breadcrumb-item:hover { background: #e5e7eb; }
         .breadcrumb-item.active { background: #3b82f6; color: white; }
-        /* grid responsive for mobile */
+
+        /* grid with mobile break */
         .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; padding: 16px; min-height: 200px; }
         @media (max-width: 480px) { .file-grid { grid-template-columns: repeat(2, 1fr); } }
+
         .file-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 8px; cursor: pointer; transition: all 0.2s; position: relative; background: white; }
         .file-item:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-color: #3b82f6; }
         .file-item.selected { border: 2px solid #3b82f6; background: #f0f9ff; }
@@ -35,50 +39,66 @@
         .file-name { font-weight: 500; text-align: center; word-break: break-word; font-size: 0.9rem; }
         .file-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
         .file-item:hover .file-actions { opacity: 1; }
-        @media (max-width: 768px) { .file-actions { opacity: 0.7; } } /* easier on mobile */
+        @media (max-width: 768px) { .file-actions { opacity: 0.7; } }
+
         .file-action-btn { background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer; }
         .file-action-btn.delete:hover { background: #ef4444; color: white; }
+
+        /* dropzone */
         .dropzone { border: 2px dashed #d1d5db; border-radius: 8px; padding: 30px 20px; text-align: center; background: #f9fafb; transition: all 0.2s; cursor: pointer; min-height: 150px; }
         .dropzone.drag-over { border-color: #3b82f6; background: #f0f9ff; }
+
+        /* form field builder */
         .form-field { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; position: relative; }
         .field-label input { flex: 1; padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; overflow-y: auto; padding: 10px; } /* added overflow and padding for mobile */
+
+        /* MODAL – critical for scrolling when many fields */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 12px; overflow-y: auto; } /* allows body scroll if needed */
         .modal.active { display: flex; }
-        .modal-content { background: white; border-radius: 12px; padding: 20px; width: 100%; max-width: 700px; max-height: 85vh; overflow-y: auto; margin: auto; } /* ensures scroll inside modal */
+        .modal-content { background: white; border-radius: 16px; padding: 24px 20px; width: 100%; max-width: 800px; max-height: 85vh; overflow-y: auto; margin: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); } /* scroll inside modal */
+
+        /* toast */
         .toast-container { position: fixed; bottom: 20px; right: 10px; left: 10px; z-index: 1001; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; }
         @media (max-width: 640px) { .toast-container { align-items: stretch; } }
         .toast { background: white; border-radius: 8px; padding: 12px 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 12px; animation: slideIn 0.3s ease; pointer-events: auto; max-width: 400px; }
         @media (max-width: 640px) { .toast { max-width: 100%; } }
+
+        /* table */
         .form-data-table { width: 100%; border-collapse: collapse; }
         .form-data-table th { background: #f9fafb; padding: 10px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
         .form-data-table td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; }
-        .form-data-table tr:hover { background: #f9fafb; }
-        .folder-view { padding: 20px; background: white; border-radius: 12px; margin-top: 20px; border: 1px solid #e5e7eb; overflow-x: auto; } /* added horizontal scroll for table */
+
+        /* folder view with horizontal scroll for table */
+        .folder-view { padding: 20px; background: white; border-radius: 12px; margin-top: 20px; border: 1px solid #e5e7eb; overflow-x: auto; }
+
+        /* top form grid */
         .top-form { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
         .top-form form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
         @media (max-width: 600px) { .top-form form { grid-template-columns: 1fr; } }
+
         .submit-btn { background: #3b82f6; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 500; }
         .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+        /* login */
         .login-container { max-width: 400px; margin: 40px auto; padding: 30px 20px; background: white; border-radius: 12px; text-align: center; }
-        .suggestions-dropdown { position: absolute; background: white; border: 1px solid #e5e7eb; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        /* fix for absolute positioning inside relative container */
+
+        /* formula suggestions */
         .formula-input-container { position: relative; }
         .field-names-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 8px; max-height: 100px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; }
         .field-name-item { background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; white-space: nowrap; }
-        .field-name-item.field-yesno { background: #fed7aa; }
-        .field-name-item.field-date { background: #bfdbfe; }
-        /* mobile optimizations */
-        .container { padding-left: 12px; padding-right: 12px; }
-        .mode-btn, .tab-button { padding: 6px 12px; font-size: 0.9rem; }
+
+        /* misc */
+        .formula-badge { background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; }
+        .formula-preview { background: #ede9fe; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; margin-top: 4px; }
     </style>
 </head>
 <body class="bg-gray-50">
     <div id="root"></div>
-    
+
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Firebase Configuration
+        // Firebase config
         const firebaseConfig = {
             apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
             authDomain: "budget-app-1365f.firebaseapp.com",
@@ -94,7 +114,7 @@
         const storage = firebase.storage();
         const auth = firebase.auth();
 
-        // Toast Component
+        // Toast component
         const Toast = ({ message, type, onClose }) => (
             <div className={`toast ${type}`}>
                 <i className={`fas ${
@@ -109,6 +129,7 @@
             </div>
         );
 
+        // Available functions
         const AVAILABLE_FUNCTIONS = [
             { name: 'IF', description: 'IF(condition, trueValue, falseValue)' },
             { name: 'IFS', description: 'IFS(condition1, value1, condition2, value2)' },
@@ -120,6 +141,7 @@
             { name: 'MONTH', description: 'MONTH(date)' }
         ];
 
+        // Helper to get field name variants
         const getFieldNameVariants = (field) => {
             const variants = [];
             const label = field.label;
@@ -140,6 +162,7 @@
             return [...new Set(variants)];
         };
 
+        // Formula evaluator
         const evaluateFormula = (formula, record, fields, allRecords = []) => {
             if (!formula || !formula.trim()) return null;
             try {
@@ -182,6 +205,7 @@
             }
         };
 
+        // Main App
         function App() {
             const [user, setUser] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -520,13 +544,11 @@
 
             const handleNewRecordChange = (fieldId, value) => {
                 let updatedData = { ...newRecordData, [fieldId]: value };
-                
                 formFields.forEach(field => {
                     if (field.hasFormula && field.formula) {
                         updatedData[field.id] = evaluateFormula(field.formula, updatedData, formFields, formData);
                     }
                 });
-                
                 setNewRecordData(updatedData);
             };
 
@@ -725,25 +747,9 @@
                                             {record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}
                                         </td>
                                         <td>
-                                            <div className="form-data-actions">
-                                                <button 
-                                                    className="data-action-btn edit" 
-                                                    onClick={()=>{ 
-                                                        setEditingRecord(record); 
-                                                        setNewRecordData(record);
-                                                        setShowAddDataModal(true);
-                                                    }}
-                                                    title="Edit record"
-                                                >
-                                                    <i className="fas fa-edit"></i>
-                                                </button>
-                                                <button 
-                                                    className="data-action-btn delete" 
-                                                    onClick={()=>deleteFormData(record.id)}
-                                                    title="Delete record"
-                                                >
-                                                    <i className="fas fa-trash"></i>
-                                                </button>
+                                            <div className="flex gap-2">
+                                                <button className="text-blue-600 hover:text-blue-800" onClick={()=>{ setEditingRecord(record); setNewRecordData(record); setShowAddDataModal(true); }}><i className="fas fa-edit"></i></button>
+                                                <button className="text-red-600 hover:text-red-800" onClick={()=>deleteFormData(record.id)}><i className="fas fa-trash"></i></button>
                                             </div>
                                         </td>
                                     </tr>
@@ -761,18 +767,14 @@
                     <div className="login-container">
                         <h2 className="text-2xl font-bold">Welcome</h2>
                         <p className="text-gray-600 mb-6">Sign in to access files</p>
-                        <button onClick={signInAnonymously} className="login-btn mb-4 bg-blue-500 text-white p-3 rounded w-full">
+                        <button onClick={signInAnonymously} className="w-full bg-blue-500 text-white p-3 rounded mb-4">
                             <i className="fas fa-user-secret mr-2"></i>Anonymous
                         </button>
                         <div className="relative my-6">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-gray-300"></div>
-                            </div>
-                            <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-white text-gray-500">Or</span>
-                            </div>
+                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300"></div></div>
+                            <div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">Or</span></div>
                         </div>
-                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="login-btn bg-purple-600 hover:bg-purple-700 text-white p-3 rounded w-full">
+                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="w-full bg-purple-600 hover:bg-purple-700 text-white p-3 rounded">
                             <i className="fas fa-user mr-2"></i>demo@gmail.com
                         </button>
                     </div>
@@ -781,117 +783,63 @@
 
             return (
                 <div className="container mx-auto p-3 md:p-4 max-w-7xl">
+                    {/* header */}
                     <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 md:p-6 rounded-lg shadow-lg mb-6">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
-                            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
-                                <i className="fas fa-folder-open"></i>File Explorer
-                            </h1>
-                            <div className="user-info flex items-center gap-3">
-                                <div className="text-right hidden sm:block">
-                                    <div className="font-medium">{user.email || (user.isAnonymous ? 'Anonymous' : user.uid)}</div>
-                                    {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs">Admin</span>}
-                                </div>
-                                <button onClick={signOut} className="logout-btn bg-red-500 px-3 py-1 rounded text-sm">
-                                    <i className="fas fa-sign-out-alt mr-1"></i>Sign Out
-                                </button>
+                            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3"><i className="fas fa-folder-open"></i>File Explorer</h1>
+                            <div className="flex items-center gap-3">
+                                <div className="hidden sm:block text-sm">{user.email || (user.isAnonymous ? 'Anonymous' : user.uid)} {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs ml-2">Admin</span>}</div>
+                                <button onClick={signOut} className="bg-red-500 px-3 py-1 rounded text-sm"><i className="fas fa-sign-out-alt mr-1"></i>Sign Out</button>
                             </div>
                         </div>
                     </div>
 
-                    {/* File Explorer */}
+                    {/* file explorer */}
                     <div className="file-explorer mb-8">
                         <div className="file-explorer-header">
                             <div className="file-explorer-breadcrumb">
                                 {currentPath.map((item, idx) => (
                                     <React.Fragment key={idx}>
                                         {idx > 0 && <i className="fas fa-chevron-right text-gray-400 text-sm"></i>}
-                                        <span 
-                                            className={`breadcrumb-item text-sm ${idx === currentPath.length-1 ? 'active' : ''}`} 
-                                            onClick={() => {
-                                                const newPath = currentPath.slice(0, idx+1);
-                                                setCurrentPath(newPath);
-                                                if (newPath.length === 1 && newPath[0] === 'My Files') {
-                                                    setShowFolderView(false);
-                                                    setSelectedFile(null);
-                                                }
-                                            }}
-                                        >
-                                            <i className={`fas ${idx === 0 ? 'fa-home' : 'fa-folder'}`}></i>
-                                            <span className="max-w-[100px] truncate">{item}</span>
+                                        <span className={`breadcrumb-item text-sm ${idx === currentPath.length-1 ? 'active' : ''}`} onClick={() => { const newPath = currentPath.slice(0, idx+1); setCurrentPath(newPath); if (newPath.length === 1 && newPath[0] === 'My Files') { setShowFolderView(false); setSelectedFile(null); } }}>
+                                            <i className={`fas ${idx === 0 ? 'fa-home' : 'fa-folder'}`}></i><span className="max-w-[100px] truncate">{item}</span>
                                         </span>
                                     </React.Fragment>
                                 ))}
                             </div>
                             <div className="flex gap-2 flex-wrap">
-                                {currentPath.length > 1 && (
-                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">
-                                        <i className="fas fa-arrow-up mr-1"></i>Up
-                                    </button>
-                                )}
-                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
-                                    <i className="fas fa-plus mr-1"></i>New
-                                </button>
-                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
-                                    <i className="fas fa-upload mr-1"></i>Upload
-                                </button>
+                                {currentPath.length > 1 && <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"><i className="fas fa-arrow-up mr-1"></i>Up</button>}
+                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"><i className="fas fa-plus mr-1"></i>New</button>
+                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"><i className="fas fa-upload mr-1"></i>Upload</button>
                                 <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                             </div>
                         </div>
-                        
                         <div className="file-grid">
                             {files.map(f => (
                                 <div key={f.id} className={`file-item ${selectedFile?.id === f.id ? 'selected' : ''}`} onClick={() => openFile(f)}>
-                                    <div className="file-actions">
-                                        <button className="file-action-btn delete" onClick={(e) => deleteFile(f, e)}>
-                                            <i className="fas fa-trash"></i>
-                                        </button>
-                                    </div>
-                                    <div className={`file-icon ${f.type}`}>
-                                        <i className={`fas ${f.type === 'folder' ? 'fa-folder' : f.type === 'form' ? 'fa-wpforms' : 'fa-file'}`}></i>
-                                    </div>
+                                    <div className="file-actions"><button className="file-action-btn delete" onClick={(e) => deleteFile(f, e)}><i className="fas fa-trash"></i></button></div>
+                                    <div className={`file-icon ${f.type}`}><i className={`fas ${f.type === 'folder' ? 'fa-folder' : f.type === 'form' ? 'fa-wpforms' : 'fa-file'}`}></i></div>
                                     <div className="file-name">{f.name}</div>
-                                    {f.type === 'file' && f.size && (
-                                        <div className="text-xs text-gray-500 text-center mt-2">
-                                            {(f.size/1024).toFixed(1)} KB
-                                        </div>
-                                    )}
-                                    {f.type === 'form' && f.fields && (
-                                        <div className="text-xs text-gray-500 text-center mt-2">
-                                            {f.fields.length} fields • {f.data?.length || 0} rec
-                                        </div>
-                                    )}
+                                    {f.type === 'file' && f.size && <div className="text-xs text-gray-500 text-center mt-2">{(f.size/1024).toFixed(1)} KB</div>}
+                                    {f.type === 'form' && f.fields && <div className="text-xs text-gray-500 text-center mt-2">{f.fields.length} fields • {f.data?.length || 0} rec</div>}
                                 </div>
                             ))}
-                            {files.length === 0 && (
-                                <div className="col-span-full text-center py-12 text-gray-500">
-                                    <i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i>
-                                    <p>Empty folder</p>
-                                </div>
-                            )}
+                            {files.length === 0 && <div className="col-span-full text-center py-12 text-gray-500"><i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i><p>Empty folder</p></div>}
                         </div>
                     </div>
 
-                    {/* Form View */}
+                    {/* form view */}
                     {showFolderView && selectedFile && (
                         <div className="folder-view">
                             <div className="folder-header flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                                <h2 className="text-xl font-semibold">
-                                    <i className="fas fa-wpforms text-blue-500 mr-2"></i>
-                                    {selectedFile.name}
-                                </h2>
+                                <h2 className="text-xl font-semibold"><i className="fas fa-wpforms text-blue-500 mr-2"></i>{selectedFile.name}</h2>
                                 <div className="action-buttons">
-                                    <button 
-                                        className="edit-form-btn bg-blue-500 text-white px-4 py-2 rounded text-sm"
-                                        onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}
-                                    >
-                                        <i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i>
-                                        {formMode === 'edit' ? ' View' : ' Edit'}
-                                    </button>
+                                    <button className="bg-blue-500 text-white px-4 py-2 rounded text-sm" onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}><i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i> {formMode === 'edit' ? ' View' : ' Edit'}</button>
                                 </div>
                             </div>
 
-                            {/* Formula Examples */}
-                            <div className="formula-examples mb-4 p-3 bg-gray-100 rounded text-sm">
+                            {/* formula examples */}
+                            <div className="bg-gray-100 p-3 rounded mb-4 text-sm">
                                 <p className="font-medium mb-2">📊 WORKING FORMULA EXAMPLES:</p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                                     <code className="bg-green-100 p-1 rounded">IF(yesno_bool, TODAY(), "")</code>
@@ -901,166 +849,90 @@
                                 </div>
                             </div>
 
-                            {/* Data Entry Form */}
+                            {/* data entry form */}
                             {formFields.length > 0 && (
                                 <div className="top-form">
-                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                                        <i className="fas fa-plus-circle"></i> Add New Record
-                                    </h3>
+                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><i className="fas fa-plus-circle"></i> Add New Record</h3>
                                     <form onSubmit={handleSubmitNewRecord}>
                                         {formFields.map(field => (
-                                            <div key={field.id} className="form-field-view mb-4">
-                                                <label className="block font-medium mb-1">
-                                                    {field.label}
-                                                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                                                    {field.hasFormula && <span className="formula-badge ml-2 text-xs bg-purple-200 px-1 rounded">Formula</span>}
-                                                </label>
+                                            <div key={field.id} className="mb-4">
+                                                <label className="block font-medium mb-1">{field.label}{field.required && <span className="text-red-500 ml-1">*</span>}{field.hasFormula && <span className="formula-badge ml-2">Formula</span>}</label>
                                                 {renderTopFormField(field)}
-                                                {field.hasFormula && field.formula && (
-                                                    <div className="text-xs text-purple-600 mt-1 font-mono">
-                                                        = {field.formula}
-                                                    </div>
-                                                )}
+                                                {field.hasFormula && field.formula && <div className="text-xs text-purple-600 mt-1 font-mono">= {field.formula}</div>}
                                             </div>
                                         ))}
-                                        <div className="flex justify-end mt-6">
-                                            <button type="submit" className="submit-btn">
-                                                <i className="fas fa-save mr-2"></i> Save Record
-                                            </button>
-                                        </div>
+                                        <div className="flex justify-end mt-6"><button type="submit" className="submit-btn"><i className="fas fa-save mr-2"></i> Save Record</button></div>
                                     </form>
                                 </div>
                             )}
 
-                            {/* Data Table */}
-                            <div className="table-container mt-6">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-lg font-semibold">
-                                        <i className="fas fa-table mr-2 text-blue-500"></i> Records ({formData.length})
-                                    </h3>
-                                </div>
-                                {formData.length > 0 ? renderDataTable() : (
-                                    <div className="text-center py-10 text-gray-500">
-                                        <i className="fas fa-database text-4xl mb-3"></i>
-                                        <p>No records yet. Use the form above to add data.</p>
-                                    </div>
-                                )}
+                            {/* data table */}
+                            <div className="mt-6">
+                                <h3 className="text-lg font-semibold mb-4"><i className="fas fa-table mr-2 text-blue-500"></i> Records ({formData.length})</h3>
+                                {formData.length > 0 ? renderDataTable() : <div className="text-center py-10 text-gray-500"><i className="fas fa-database text-4xl mb-3"></i><p>No records yet.</p></div>}
                             </div>
 
-                            {/* Form Editor Modal */}
+                            {/* form editor modal - now scrolls! */}
                             {formMode === 'edit' && (
-                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3" style={{overflowY:'auto'}}>
-                                    <div className="bg-white rounded-lg p-5 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                                <div className="modal active" style={{display:'flex'}}> {/* force active */}
+                                    <div className="modal-content">
                                         <div className="flex justify-between items-center mb-4">
                                             <h3 className="text-xl font-bold">Edit Form Structure</h3>
-                                            <button onClick={() => setFormMode('view')} className="text-gray-500 hover:text-gray-700">
-                                                <i className="fas fa-times text-2xl"></i>
-                                            </button>
+                                            <button onClick={() => setFormMode('view')} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times text-2xl"></i></button>
                                         </div>
                                         
                                         <div className="mb-6">
                                             <h4 className="text-sm font-medium mb-2">Drag fields to build form</h4>
                                             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                                                 {fieldTypes.map(t => (
-                                                    <div 
-                                                        key={t.value} 
-                                                        draggable 
-                                                        onDragStart={(e) => handleDragStart(e, t.value)} 
-                                                        className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200 text-xs"
-                                                    >
-                                                        <i className={`fas fa-${t.icon} block text-lg`}></i>
-                                                        <span>{t.label}</span>
+                                                    <div key={t.value} draggable onDragStart={(e) => handleDragStart(e, t.value)} className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200 text-xs">
+                                                        <i className={`fas fa-${t.icon} block text-lg`}></i><span>{t.label}</span>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
                                         
-                                        <div 
-                                            className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} 
-                                            onDragOver={handleDragOver} 
-                                            onDragLeave={handleDragLeave} 
-                                            onDrop={handleDrop}
-                                        >
+                                        <div className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
                                             {formFields.length === 0 ? (
-                                                <>
-                                                    <i className="fas fa-cloud-upload-alt"></i>
-                                                    <p>Drop fields here to build your form</p>
-                                                </>
+                                                <><i className="fas fa-cloud-upload-alt"></i><p>Drop fields here to build your form</p></>
                                             ) : (
                                                 formFields.map((field, idx) => (
                                                     <div key={field.id} className={`form-field ${field.hasFormula ? 'field-with-formula' : ''}`}>
-                                                        <div className="field-actions">
-                                                            <button className="field-action-btn delete" onClick={() => deleteField(idx)}>
-                                                                <i className="fas fa-trash"></i>
-                                                            </button>
-                                                        </div>
+                                                        <div className="field-actions"><button className="field-action-btn delete" onClick={() => deleteField(idx)}><i className="fas fa-trash"></i></button></div>
                                                         <div className="field-label flex items-center gap-2 mb-2">
-                                                            <input 
-                                                                value={field.label} 
-                                                                onChange={e => updateField(idx, {label: e.target.value})} 
-                                                                placeholder="Field Label" 
-                                                                className="border p-1 flex-1"
-                                                            />
-                                                            <label className="flex items-center gap-1 text-sm">
-                                                                <input type="checkbox" checked={field.required} onChange={e => updateField(idx, {required: e.target.checked})} /> Req
-                                                            </label>
+                                                            <input value={field.label} onChange={e => updateField(idx, {label: e.target.value})} placeholder="Field Label" className="border p-1 flex-1" />
+                                                            <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={field.required} onChange={e => updateField(idx, {required: e.target.checked})} /> Req</label>
                                                         </div>
                                                         <div className="field-type-selector mb-2">
                                                             <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})} className="border p-1">
-                                                                {fieldTypes.map(ft => (
-                                                                    <option key={ft.value} value={ft.value}>{ft.label}</option>
-                                                                ))}
+                                                                {fieldTypes.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
                                                             </select>
                                                         </div>
                                                         
                                                         {field.type === 'select' && (
                                                             <div className="mt-2">
                                                                 <label className="text-sm">Options (comma separated)</label>
-                                                                <input 
-                                                                    value={field.options?.join(', ') || ''} 
-                                                                    onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} 
-                                                                    className="w-full p-2 border rounded mt-1" 
-                                                                    placeholder="Option 1, Option 2, Option 3"
-                                                                />
+                                                                <input value={field.options?.join(', ') || ''} onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} className="w-full p-2 border rounded mt-1" placeholder="Option 1, Option 2, Option 3" />
                                                             </div>
                                                         )}
                                                         
                                                         <div className="formula-toggle mt-3">
-                                                            <label className="flex items-center gap-2">
-                                                                <input type="checkbox" checked={field.hasFormula || false} onChange={e => updateField(idx, {hasFormula: e.target.checked})} />
-                                                                <i className="fas fa-calculator text-purple-500"></i> Auto-calculate with formula
-                                                            </label>
+                                                            <label className="flex items-center gap-2"><input type="checkbox" checked={field.hasFormula || false} onChange={e => updateField(idx, {hasFormula: e.target.checked})} /><i className="fas fa-calculator text-purple-500"></i> Auto-calculate</label>
                                                         </div>
                                                         
                                                         {field.hasFormula && (
                                                             <div className="mt-2">
                                                                 <label className="text-sm font-medium">Formula</label>
-                                                                
                                                                 <div className="field-names-list">
-                                                                    <span className="text-xs text-gray-500 block mb-1">Click field name to insert:</span>
+                                                                    <span className="text-xs text-gray-500 block mb-1">Click field name:</span>
                                                                     {formFields.map(f => f.id !== field.id && (
-                                                                        <span key={f.id} className={`field-name-item ${f.type}`} onClick={() => {
-                                                                            const variants = getFieldNameVariants(f);
-                                                                            if (variants.length) updateField(idx, { formula: (field.formula || '') + variants[0] });
-                                                                        }}>{f.label}</span>
+                                                                        <span key={f.id} className={`field-name-item ${f.type}`} onClick={() => { const variants = getFieldNameVariants(f); if (variants.length) updateField(idx, { formula: (field.formula || '') + variants[0] }); }}>{f.label}</span>
                                                                     ))}
                                                                 </div>
-                                                                
                                                                 <div className="formula-input-container">
-                                                                    <input 
-                                                                        ref={formulaInputRef}
-                                                                        value={field.formula || ''} 
-                                                                        onChange={e => handleFormulaChange(idx, e.target.value)} 
-                                                                        className="w-full p-2 border rounded mt-1 font-mono text-sm" 
-                                                                        placeholder="IF(yesno_bool, TODAY(), '')" 
-                                                                    />
+                                                                    <input ref={formulaInputRef} value={field.formula || ''} onChange={e => handleFormulaChange(idx, e.target.value)} className="w-full p-2 border rounded mt-1 font-mono text-sm" placeholder="IF(yesno_bool, TODAY(), '')" />
                                                                 </div>
-                                                                
-                                                                <div className="formula-preview mt-1">
-                                                                    <span className="font-bold">Preview: </span>
-                                                                    {field.formula ? evaluateFormula(field.formula, newRecordData, formFields, formData) || '—' : '—'}
-                                                                </div>
-                                                                
+                                                                <div className="formula-preview mt-1"><span className="font-bold">Preview: </span>{field.formula ? evaluateFormula(field.formula, newRecordData, formFields, formData) || '—' : '—'}</div>
                                                                 <div className="mt-2 text-xs flex gap-2 flex-wrap">
                                                                     <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, TODAY(), "")'})} className="px-2 py-1 bg-green-100 text-green-700 rounded">IF Yes/No then Today</button>
                                                                     <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, date_field, "")'})} className="px-2 py-1 bg-blue-100 text-blue-700 rounded">IF Yes/No then Date</button>
@@ -1082,34 +954,22 @@
                         </div>
                     )}
 
-                    {/* Auto-complete Dropdown */}
+                    {/* suggestions dropdown */}
                     {showSuggestions && suggestions.length > 0 && (
-                        <div 
-                            ref={suggestionRef}
-                            className="fixed z-50 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto"
-                            style={{
-                                top: suggestionPosition.top + 'px',
-                                left: suggestionPosition.left + 'px',
-                                minWidth: '250px',
-                                maxWidth: '90vw'
-                            }}
-                        >
-                            {suggestions.map((suggestion, index) => (
-                                <div key={index} className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b" onClick={() => insertSuggestion(suggestion)}>
-                                    <div><span className="font-mono">{suggestion.name}</span> {suggestion.type==='field' && <span className="ml-2 text-xs text-gray-500">{suggestion.original}</span>}</div>
-                                    <span className={`text-xs px-2 py-1 rounded ${suggestion.type === 'field' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{suggestion.type === 'field' ? suggestion.fieldType : 'fx'}</span>
+                        <div ref={suggestionRef} className="fixed z-50 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto" style={{ top: suggestionPosition.top, left: suggestionPosition.left, minWidth: '250px', maxWidth: '90vw' }}>
+                            {suggestions.map((s, i) => (
+                                <div key={i} className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b" onClick={() => insertSuggestion(s)}>
+                                    <div><span className="font-mono">{s.name}</span> {s.type==='field' && <span className="ml-2 text-xs text-gray-500">{s.original}</span>}</div>
+                                    <span className={`text-xs px-2 py-1 rounded ${s.type === 'field' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{s.type === 'field' ? s.fieldType : 'fx'}</span>
                                 </div>
                             ))}
                         </div>
                     )}
 
-                    {/* New File Modal */}
+                    {/* new file modal */}
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-md">
-                            <div className="modal-header flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-bold">Create New</h2>
-                                <button onClick={() => setShowNewFileModal(false)}><i className="fas fa-times"></i></button>
-                            </div>
+                            <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold">Create New</h2><button onClick={() => setShowNewFileModal(false)}><i className="fas fa-times"></i></button></div>
                             <div className="mb-4">
                                 <label className="block text-sm font-medium">Type</label>
                                 <div className="flex gap-4 mt-2">
@@ -1117,31 +977,21 @@
                                     <label><input type="radio" value="form" checked={newFileType === 'form'} onChange={e => setNewFileType(e.target.value)} /> <i className="fas fa-wpforms text-blue-500"></i> Form</label>
                                 </div>
                             </div>
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium">Name</label>
-                                <input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter name" />
-                            </div>
-                            <div className="flex justify-end gap-2">
-                                <button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded">Cancel</button>
-                                <button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded">Create</button>
-                            </div>
+                            <div className="mb-4"><label className="block text-sm font-medium">Name</label><input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter name" /></div>
+                            <div className="flex justify-end gap-2"><button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded">Cancel</button><button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded">Create</button></div>
                         </div>
                     </div>
 
-                    {/* Edit Record Modal */}
+                    {/* edit record modal */}
                     <div className={`modal ${showAddDataModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-2xl">
-                            <div className="modal-header flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-bold">{editingRecord ? 'Edit Record' : 'Add New Record'}</h2>
-                                <button onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }}><i className="fas fa-times"></i></button>
-                            </div>
-                            
+                            <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold">{editingRecord ? 'Edit Record' : 'Add New Record'}</h2><button onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }}><i className="fas fa-times"></i></button></div>
                             <form onSubmit={(e) => { e.preventDefault(); if (editingRecord) updateFormData({ ...editingRecord, ...newRecordData }); else saveFormData(newRecordData); }}>
                                 {formFields.map(f => {
                                     if (f.hasFormula && f.formula) {
                                         return (
                                             <div key={f.id} className="mb-4">
-                                                <label className="block font-medium mb-1">{f.label}<span className="formula-badge ml-2 text-xs">Auto</span></label>
+                                                <label className="block font-medium mb-1">{f.label}<span className="formula-badge ml-2">Auto</span></label>
                                                 <div className="p-2 bg-purple-50 border rounded">{newRecordData[f.id] || evaluateFormula(f.formula, newRecordData, formFields, formData) || '—'}</div>
                                             </div>
                                         );
@@ -1175,9 +1025,8 @@
                         </div>
                     </div>
 
-                    <div className="toast-container">
-                        {toasts.map(t => <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />)}
-                    </div>
+                    {/* toast container */}
+                    <div className="toast-container">{toasts.map(t => <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />)}</div>
                 </div>
             );
         }
