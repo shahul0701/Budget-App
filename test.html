@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Explorer - Smart Formula Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>File Explorer - Mobile & Scroll Fixed</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
@@ -14,119 +14,62 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
+        /* ensure root container allows scrolling */
+        html, body { height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
+        #root { min-height: 100%; display: flex; flex-direction: column; }
         .file-explorer { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: white; }
-        .file-explorer-header { background: #f9fafb; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
-        .file-explorer-breadcrumb { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .file-explorer-header { background: #f9fafb; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+        .file-explorer-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .breadcrumb-item { display: flex; align-items: center; gap: 4px; color: #4b5563; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
         .breadcrumb-item:hover { background: #e5e7eb; }
         .breadcrumb-item.active { background: #3b82f6; color: white; }
-        .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 16px; min-height: 300px; }
-        .file-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; position: relative; background: white; }
+        /* grid responsive for mobile */
+        .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; padding: 16px; min-height: 200px; }
+        @media (max-width: 480px) { .file-grid { grid-template-columns: repeat(2, 1fr); } }
+        .file-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 8px; cursor: pointer; transition: all 0.2s; position: relative; background: white; }
         .file-item:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-color: #3b82f6; }
         .file-item.selected { border: 2px solid #3b82f6; background: #f0f9ff; }
-        .file-icon { font-size: 48px; text-align: center; margin-bottom: 12px; color: #6b7280; }
+        .file-icon { font-size: 40px; text-align: center; margin-bottom: 8px; color: #6b7280; }
         .file-icon.folder { color: #fbbf24; }
         .file-icon.form { color: #3b82f6; }
-        .file-name { font-weight: 500; text-align: center; word-break: break-word; }
-        .file-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
+        .file-name { font-weight: 500; text-align: center; word-break: break-word; font-size: 0.9rem; }
+        .file-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
         .file-item:hover .file-actions { opacity: 1; }
-        .file-action-btn { background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-        .file-action-btn:hover { background: #f3f4f6; }
-        .file-action-btn.delete:hover { background: #ef4444; color: white; border-color: #ef4444; }
-        .dropzone { border: 2px dashed #d1d5db; border-radius: 8px; padding: 40px; text-align: center; background: #f9fafb; transition: all 0.2s; cursor: pointer; min-height: 200px; }
+        @media (max-width: 768px) { .file-actions { opacity: 0.7; } } /* easier on mobile */
+        .file-action-btn { background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer; }
+        .file-action-btn.delete:hover { background: #ef4444; color: white; }
+        .dropzone { border: 2px dashed #d1d5db; border-radius: 8px; padding: 30px 20px; text-align: center; background: #f9fafb; transition: all 0.2s; cursor: pointer; min-height: 150px; }
         .dropzone.drag-over { border-color: #3b82f6; background: #f0f9ff; }
-        .dropzone i { font-size: 48px; color: #9ca3af; margin-bottom: 16px; }
         .form-field { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; position: relative; }
-        .form-field:hover { border-color: #3b82f6; }
-        .field-label { font-weight: 500; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
         .field-label input { flex: 1; padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; }
-        .field-type-selector { margin-bottom: 12px; }
-        .field-type-selector select { padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; background: white; }
-        .field-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
-        .field-action-btn { background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 8px; cursor: pointer; transition: all 0.2s; }
-        .field-action-btn:hover { background: #f3f4f6; }
-        .field-action-btn.delete:hover { background: #ef4444; color: white; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; overflow-y: auto; padding: 10px; } /* added overflow and padding for mobile */
         .modal.active { display: flex; }
-        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 90%; max-width: 900px; max-height: 90vh; overflow-y: auto; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #e5e7eb; }
-        .modal-close { cursor: pointer; font-size: 20px; color: #9ca3af; }
-        .modal-close:hover { color: #4b5563; }
-        .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1001; }
-        .toast { background: white; border-radius: 8px; padding: 12px 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 12px; animation: slideIn 0.3s ease; }
-        .toast.success { border-left: 4px solid #10b981; }
-        .toast.error { border-left: 4px solid #ef4444; }
-        .toast.info { border-left: 4px solid #3b82f6; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .modal-content { background: white; border-radius: 12px; padding: 20px; width: 100%; max-width: 700px; max-height: 85vh; overflow-y: auto; margin: auto; } /* ensures scroll inside modal */
+        .toast-container { position: fixed; bottom: 20px; right: 10px; left: 10px; z-index: 1001; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; }
+        @media (max-width: 640px) { .toast-container { align-items: stretch; } }
+        .toast { background: white; border-radius: 8px; padding: 12px 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 12px; animation: slideIn 0.3s ease; pointer-events: auto; max-width: 400px; }
+        @media (max-width: 640px) { .toast { max-width: 100%; } }
         .form-data-table { width: 100%; border-collapse: collapse; }
-        .form-data-table th { background: #f9fafb; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
-        .form-data-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+        .form-data-table th { background: #f9fafb; padding: 10px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
+        .form-data-table td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; }
         .form-data-table tr:hover { background: #f9fafb; }
-        .form-data-actions { display: flex; gap: 8px; }
-        .data-action-btn { padding: 4px 8px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
-        .data-action-btn.edit:hover { background: #3b82f6; color: white; }
-        .data-action-btn.delete:hover { background: #ef4444; color: white; }
-        .login-container { max-width: 400px; margin: 100px auto; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-        .login-container h2 { margin-bottom: 20px; color: #1f2937; }
-        .login-btn { background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background 0.2s; width: 100%; }
-        .login-btn:hover { background: #2563eb; }
-        .user-info { display: flex; align-items: center; gap: 12px; }
-        .user-email { color: #4b5563; font-size: 14px; }
-        .logout-btn { background: #ef4444; color: white; padding: 6px 12px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
-        .logout-btn:hover { background: #dc2626; }
-        .tab-buttons { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
-        .tab-button { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: all 0.2s; }
-        .tab-button.active { background: #3b82f6; color: white; }
-        .tab-button:not(.active) { background: #f3f4f6; color: #4b5563; }
-        .tab-button:not(.active):hover { background: #e5e7eb; }
-        .mode-toggle { display: flex; gap: 10px; margin-bottom: 20px; padding: 4px; background: #f3f4f6; border-radius: 8px; width: fit-content; }
-        .mode-btn { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: all 0.2s; }
-        .mode-btn.active { background: #3b82f6; color: white; }
-        .mode-btn:not(.active) { color: #4b5563; }
-        .form-view { padding: 20px; background: #f9fafb; border-radius: 8px; }
-        .form-field-view { margin-bottom: 20px; }
-        .form-field-view label { display: block; font-weight: 500; margin-bottom: 5px; color: #374151; }
-        .form-field-view input, .form-field-view select, .form-field-view textarea { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white; }
-        .form-field-view input[type="checkbox"] { width: auto; }
-        .edit-badge { background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px; }
-        .formula-badge { background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; margin-left: 6px; }
-        .formula-preview { background: #ede9fe; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; margin-top: 4px; color: #4c1d95; }
-        .field-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .aggregate-row { background: #f3e8ff; padding: 8px; border-radius: 6px; margin: 8px 0; font-weight: 500; }
-        .add-data-btn { background: #10b981; color: white; padding: 8px 16px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
-        .add-data-btn:hover { background: #059669; }
-        .edit-form-btn { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
-        .edit-form-btn:hover { background: #2563eb; }
-        .folder-view { padding: 20px; background: white; border-radius: 8px; margin-top: 20px; border: 1px solid #e5e7eb; }
-        .top-form { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 24px; margin-bottom: 30px; }
-        .top-form h3 { color: #1e40af; font-size: 1.25rem; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
-        .submit-btn { background: #3b82f6; color: white; padding: 10px 24px; border-radius: 8px; font-weight: 500; transition: all 0.2s; }
-        .submit-btn:hover { background: #1d4ed8; transform: translateY(-1px); }
-        .table-container { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .folder-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .folder-header h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; }
-        .action-buttons { display: flex; gap: 12px; }
-        .formula-examples { background: #f3f4f6; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; }
-        .formula-examples code { background: #e5e7eb; padding: 2px 6px; border-radius: 4px; color: #1f2937; }
-        .field-selector { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-        .field-tag { background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 16px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #7dd3fc; }
-        .field-tag:hover { background: #bae6fd; }
-        .field-tag i { font-size: 10px; }
+        .folder-view { padding: 20px; background: white; border-radius: 12px; margin-top: 20px; border: 1px solid #e5e7eb; overflow-x: auto; } /* added horizontal scroll for table */
+        .top-form { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
+        .top-form form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+        @media (max-width: 600px) { .top-form form { grid-template-columns: 1fr; } }
+        .submit-btn { background: #3b82f6; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 500; }
+        .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .login-container { max-width: 400px; margin: 40px auto; padding: 30px 20px; background: white; border-radius: 12px; text-align: center; }
+        .suggestions-dropdown { position: absolute; background: white; border: 1px solid #e5e7eb; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        /* fix for absolute positioning inside relative container */
         .formula-input-container { position: relative; }
-        .suggestions-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e5e7eb; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .suggestion-item { padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .suggestion-item:hover { background: #f3f4f6; }
-        .suggestion-item .field-type { font-size: 10px; background: #e5e7eb; padding: 2px 6px; border-radius: 12px; }
-        .function-badge { background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; margin-left: 6px; }
-        .formula-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px; background: #f3f4f6; border-radius: 6px; }
-        .formula-toggle label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-        .formula-toggle input[type="checkbox"] { width: auto; margin-right: 4px; }
-        .field-with-formula { border-left: 3px solid #8b5cf6; }
-        .field-names-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 8px; max-height: 100px; overflow-y: auto; }
-        .field-name-item { display: inline-block; background: #e2e8f0; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin: 2px; cursor: pointer; }
-        .field-name-item:hover { background: #cbd5e1; }
-        .field-name-item.field-yesno { background: #fed7aa; color: #92400e; }
-        .field-name-item.field-date { background: #bfdbfe; color: #1e40af; }
+        .field-names-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 8px; max-height: 100px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+        .field-name-item { background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+        .field-name-item.field-yesno { background: #fed7aa; }
+        .field-name-item.field-date { background: #bfdbfe; }
+        /* mobile optimizations */
+        .container { padding-left: 12px; padding-right: 12px; }
+        .mode-btn, .tab-button { padding: 6px 12px; font-size: 0.9rem; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -159,14 +102,13 @@
                     type === 'error' ? 'fa-exclamation-circle text-red-500' :
                     'fa-info-circle text-blue-500'
                 }`}></i>
-                <span>{message}</span>
-                <button onClick={onClose} className="ml-4 text-gray-400 hover:text-gray-600">
+                <span className="flex-1">{message}</span>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                     <i className="fas fa-times"></i>
                 </button>
             </div>
         );
 
-        // List of available functions
         const AVAILABLE_FUNCTIONS = [
             { name: 'IF', description: 'IF(condition, trueValue, falseValue)' },
             { name: 'IFS', description: 'IFS(condition1, value1, condition2, value2)' },
@@ -178,22 +120,13 @@
             { name: 'MONTH', description: 'MONTH(date)' }
         ];
 
-        // Helper to get field name variants
         const getFieldNameVariants = (field) => {
             const variants = [];
             const label = field.label;
-            
-            // Original label
             variants.push(label);
-            
-            // Lowercase with underscores
             const safeName = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
             variants.push(safeName);
-            
-            // Direct ID
             variants.push(field.id);
-            
-            // With type suffixes
             if (field.type === 'yesno') {
                 variants.push(safeName + '_bool');
                 variants.push(field.id + '_bool');
@@ -204,41 +137,30 @@
                 variants.push(safeName + '_num');
                 variants.push(field.id + '_num');
             }
-            
             return [...new Set(variants)];
         };
 
-        // Formula Evaluator
         const evaluateFormula = (formula, record, fields, allRecords = []) => {
             if (!formula || !formula.trim()) return null;
-            
             try {
                 const context = {};
-                
                 fields.forEach(f => {
                     const val = record[f.id] || '';
                     context[f.id] = val;
-                    
                     getFieldNameVariants(f).forEach(variant => {
                         context[variant] = val;
-                        
                         if (f.type === 'yesno') {
                             context[variant + '_bool'] = val === 'Yes';
                             context[variant + '_value'] = val;
                         }
-                        if (f.type === 'date') {
-                            context[variant + '_date'] = val;
-                        }
+                        if (f.type === 'date') context[variant + '_date'] = val;
                         if (f.type === 'number') {
                             const num = parseFloat(val);
-                            if (!isNaN(num)) {
-                                context[variant + '_num'] = num;
-                            }
+                            if (!isNaN(num)) context[variant + '_num'] = num;
                         }
                     });
                 });
 
-                // Helper functions
                 const TODAY = () => new Date().toISOString().split('T')[0];
                 const IF = (condition, trueVal, falseVal) => condition ? trueVal : falseVal;
                 const SUM = (...args) => args.reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0);
@@ -260,7 +182,6 @@
             }
         };
 
-        // Main App Component
         function App() {
             const [user, setUser] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -520,7 +441,6 @@
                     const filesRef = getUserCollection('tables');
                     const currentData = selectedFile.data || [];
                     
-                    // Evaluate formulas
                     const evaluatedData = { ...data };
                     formFields.forEach(field => {
                         if (field.hasFormula && field.formula) {
@@ -601,7 +521,6 @@
             const handleNewRecordChange = (fieldId, value) => {
                 let updatedData = { ...newRecordData, [fieldId]: value };
                 
-                // Re-evaluate formulas
                 formFields.forEach(field => {
                     if (field.hasFormula && field.formula) {
                         updatedData[field.id] = evaluateFormula(field.formula, updatedData, formFields, formData);
@@ -842,7 +761,7 @@
                     <div className="login-container">
                         <h2 className="text-2xl font-bold">Welcome</h2>
                         <p className="text-gray-600 mb-6">Sign in to access files</p>
-                        <button onClick={signInAnonymously} className="login-btn mb-4">
+                        <button onClick={signInAnonymously} className="login-btn mb-4 bg-blue-500 text-white p-3 rounded w-full">
                             <i className="fas fa-user-secret mr-2"></i>Anonymous
                         </button>
                         <div className="relative my-6">
@@ -853,7 +772,7 @@
                                 <span className="px-2 bg-white text-gray-500">Or</span>
                             </div>
                         </div>
-                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="login-btn bg-purple-600 hover:bg-purple-700">
+                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="login-btn bg-purple-600 hover:bg-purple-700 text-white p-3 rounded w-full">
                             <i className="fas fa-user mr-2"></i>demo@gmail.com
                         </button>
                     </div>
@@ -861,18 +780,18 @@
             }
 
             return (
-                <div className="container mx-auto p-4 max-w-7xl">
-                    <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
-                        <div className="flex justify-between items-center">
-                            <h1 className="text-3xl font-bold flex items-center gap-3">
+                <div className="container mx-auto p-3 md:p-4 max-w-7xl">
+                    <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 md:p-6 rounded-lg shadow-lg mb-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
+                            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
                                 <i className="fas fa-folder-open"></i>File Explorer
                             </h1>
-                            <div className="user-info">
-                                <div className="text-right">
+                            <div className="user-info flex items-center gap-3">
+                                <div className="text-right hidden sm:block">
                                     <div className="font-medium">{user.email || (user.isAnonymous ? 'Anonymous' : user.uid)}</div>
-                                    {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs ml-2">Admin</span>}
+                                    {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs">Admin</span>}
                                 </div>
-                                <button onClick={signOut} className="logout-btn">
+                                <button onClick={signOut} className="logout-btn bg-red-500 px-3 py-1 rounded text-sm">
                                     <i className="fas fa-sign-out-alt mr-1"></i>Sign Out
                                 </button>
                             </div>
@@ -885,9 +804,9 @@
                             <div className="file-explorer-breadcrumb">
                                 {currentPath.map((item, idx) => (
                                     <React.Fragment key={idx}>
-                                        {idx > 0 && <i className="fas fa-chevron-right text-gray-400"></i>}
+                                        {idx > 0 && <i className="fas fa-chevron-right text-gray-400 text-sm"></i>}
                                         <span 
-                                            className={`breadcrumb-item ${idx === currentPath.length-1 ? 'active' : ''}`} 
+                                            className={`breadcrumb-item text-sm ${idx === currentPath.length-1 ? 'active' : ''}`} 
                                             onClick={() => {
                                                 const newPath = currentPath.slice(0, idx+1);
                                                 setCurrentPath(newPath);
@@ -898,21 +817,21 @@
                                             }}
                                         >
                                             <i className={`fas ${idx === 0 ? 'fa-home' : 'fa-folder'}`}></i>
-                                            {item}
+                                            <span className="max-w-[100px] truncate">{item}</span>
                                         </span>
                                     </React.Fragment>
                                 ))}
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                                 {currentPath.length > 1 && (
-                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
+                                    <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">
                                         <i className="fas fa-arrow-up mr-1"></i>Up
                                     </button>
                                 )}
-                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
+                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
                                     <i className="fas fa-plus mr-1"></i>New
                                 </button>
-                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
+                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
                                     <i className="fas fa-upload mr-1"></i>Upload
                                 </button>
                                 <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
@@ -938,7 +857,7 @@
                                     )}
                                     {f.type === 'form' && f.fields && (
                                         <div className="text-xs text-gray-500 text-center mt-2">
-                                            {f.fields.length} fields • {f.data?.length || 0} records
+                                            {f.fields.length} fields • {f.data?.length || 0} rec
                                         </div>
                                     )}
                                 </div>
@@ -955,48 +874,46 @@
                     {/* Form View */}
                     {showFolderView && selectedFile && (
                         <div className="folder-view">
-                            <div className="folder-header">
-                                <h2>
+                            <div className="folder-header flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                                <h2 className="text-xl font-semibold">
                                     <i className="fas fa-wpforms text-blue-500 mr-2"></i>
                                     {selectedFile.name}
                                 </h2>
                                 <div className="action-buttons">
                                     <button 
-                                        className="edit-form-btn"
+                                        className="edit-form-btn bg-blue-500 text-white px-4 py-2 rounded text-sm"
                                         onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}
                                     >
                                         <i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i>
-                                        {formMode === 'edit' ? ' View Form' : ' Edit Form'}
+                                        {formMode === 'edit' ? ' View' : ' Edit'}
                                     </button>
                                 </div>
                             </div>
 
                             {/* Formula Examples */}
-                            <div className="formula-examples mb-4">
-                                <p className="text-sm font-medium mb-2">📊 WORKING FORMULA EXAMPLES:</p>
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                    <code className="bg-green-100">IF(yesno_bool, TODAY(), "")</code>
-                                    <code className="bg-green-100">IF(yesno == "Yes", TODAY(), "No date")</code>
-                                    <code className="bg-green-100">IF(yesno_bool, date_field, "Not completed")</code>
-                                    <code className="bg-green-100">CONCAT(first_name, " ", last_name)</code>
+                            <div className="formula-examples mb-4 p-3 bg-gray-100 rounded text-sm">
+                                <p className="font-medium mb-2">📊 WORKING FORMULA EXAMPLES:</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                    <code className="bg-green-100 p-1 rounded">IF(yesno_bool, TODAY(), "")</code>
+                                    <code className="bg-green-100 p-1 rounded">IF(yesno == "Yes", TODAY(), "No date")</code>
+                                    <code className="bg-green-100 p-1 rounded">IF(yesno_bool, date_field, "Not completed")</code>
+                                    <code className="bg-green-100 p-1 rounded">CONCAT(first_name, " ", last_name)</code>
                                 </div>
-                                <p className="text-xs text-green-600 mt-1">✓ These formulas WORK! Use them exactly as shown</p>
                             </div>
 
                             {/* Data Entry Form */}
                             {formFields.length > 0 && (
                                 <div className="top-form">
-                                    <h3>
-                                        <i className="fas fa-plus-circle"></i>
-                                        Add New Record
+                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                        <i className="fas fa-plus-circle"></i> Add New Record
                                     </h3>
-                                    <form onSubmit={handleSubmitNewRecord} className="grid grid-cols-2 gap-4">
+                                    <form onSubmit={handleSubmitNewRecord}>
                                         {formFields.map(field => (
-                                            <div key={field.id} className="form-field-view">
-                                                <label>
+                                            <div key={field.id} className="form-field-view mb-4">
+                                                <label className="block font-medium mb-1">
                                                     {field.label}
                                                     {field.required && <span className="text-red-500 ml-1">*</span>}
-                                                    {field.hasFormula && <span className="formula-badge ml-2">Formula</span>}
+                                                    {field.hasFormula && <span className="formula-badge ml-2 text-xs bg-purple-200 px-1 rounded">Formula</span>}
                                                 </label>
                                                 {renderTopFormField(field)}
                                                 {field.hasFormula && field.formula && (
@@ -1006,10 +923,9 @@
                                                 )}
                                             </div>
                                         ))}
-                                        <div className="col-span-2 flex justify-end mt-4">
+                                        <div className="flex justify-end mt-6">
                                             <button type="submit" className="submit-btn">
-                                                <i className="fas fa-save mr-2"></i>
-                                                Save Record
+                                                <i className="fas fa-save mr-2"></i> Save Record
                                             </button>
                                         </div>
                                     </form>
@@ -1017,11 +933,10 @@
                             )}
 
                             {/* Data Table */}
-                            <div className="table-container">
+                            <div className="table-container mt-6">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-lg font-semibold">
-                                        <i className="fas fa-table mr-2 text-blue-500"></i>
-                                        Records ({formData.length})
+                                        <i className="fas fa-table mr-2 text-blue-500"></i> Records ({formData.length})
                                     </h3>
                                 </div>
                                 {formData.length > 0 ? renderDataTable() : (
@@ -1034,8 +949,8 @@
 
                             {/* Form Editor Modal */}
                             {formMode === 'edit' && (
-                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                                    <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3" style={{overflowY:'auto'}}>
+                                    <div className="bg-white rounded-lg p-5 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
                                         <div className="flex justify-between items-center mb-4">
                                             <h3 className="text-xl font-bold">Edit Form Structure</h3>
                                             <button onClick={() => setFormMode('view')} className="text-gray-500 hover:text-gray-700">
@@ -1045,16 +960,16 @@
                                         
                                         <div className="mb-6">
                                             <h4 className="text-sm font-medium mb-2">Drag fields to build form</h4>
-                                            <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                                                 {fieldTypes.map(t => (
                                                     <div 
                                                         key={t.value} 
                                                         draggable 
                                                         onDragStart={(e) => handleDragStart(e, t.value)} 
-                                                        className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200"
+                                                        className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200 text-xs"
                                                     >
                                                         <i className={`fas fa-${t.icon} block text-lg`}></i>
-                                                        <span className="text-xs">{t.label}</span>
+                                                        <span>{t.label}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -1079,22 +994,19 @@
                                                                 <i className="fas fa-trash"></i>
                                                             </button>
                                                         </div>
-                                                        <div className="field-label">
+                                                        <div className="field-label flex items-center gap-2 mb-2">
                                                             <input 
                                                                 value={field.label} 
                                                                 onChange={e => updateField(idx, {label: e.target.value})} 
                                                                 placeholder="Field Label" 
+                                                                className="border p-1 flex-1"
                                                             />
                                                             <label className="flex items-center gap-1 text-sm">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={field.required} 
-                                                                    onChange={e => updateField(idx, {required: e.target.checked})} 
-                                                                /> Required
+                                                                <input type="checkbox" checked={field.required} onChange={e => updateField(idx, {required: e.target.checked})} /> Req
                                                             </label>
                                                         </div>
-                                                        <div className="field-type-selector">
-                                                            <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})}>
+                                                        <div className="field-type-selector mb-2">
+                                                            <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})} className="border p-1">
                                                                 {fieldTypes.map(ft => (
                                                                     <option key={ft.value} value={ft.value}>{ft.label}</option>
                                                                 ))}
@@ -1113,16 +1025,10 @@
                                                             </div>
                                                         )}
                                                         
-                                                        {/* Formula Toggle */}
                                                         <div className="formula-toggle mt-3">
-                                                            <label>
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={field.hasFormula || false} 
-                                                                    onChange={e => updateField(idx, {hasFormula: e.target.checked})} 
-                                                                />
-                                                                <i className="fas fa-calculator text-purple-500 ml-1"></i>
-                                                                Auto-calculate with formula
+                                                            <label className="flex items-center gap-2">
+                                                                <input type="checkbox" checked={field.hasFormula || false} onChange={e => updateField(idx, {hasFormula: e.target.checked})} />
+                                                                <i className="fas fa-calculator text-purple-500"></i> Auto-calculate with formula
                                                             </label>
                                                         </div>
                                                         
@@ -1130,28 +1036,13 @@
                                                             <div className="mt-2">
                                                                 <label className="text-sm font-medium">Formula</label>
                                                                 
-                                                                {/* Available Fields List - Click to insert */}
                                                                 <div className="field-names-list">
                                                                     <span className="text-xs text-gray-500 block mb-1">Click field name to insert:</span>
-                                                                    {formFields.map(f => (
-                                                                        f.id !== field.id && (
-                                                                            <span 
-                                                                                key={f.id}
-                                                                                className={`field-name-item ${f.type}`}
-                                                                                onClick={() => {
-                                                                                    const variants = getFieldNameVariants(f);
-                                                                                    if (variants.length > 0) {
-                                                                                        updateField(idx, { 
-                                                                                            formula: (field.formula || '') + variants[0]
-                                                                                        });
-                                                                                    }
-                                                                                }}
-                                                                            >
-                                                                                {f.label}
-                                                                                {f.type === 'yesno' && ' (Yes/No)'}
-                                                                                {f.type === 'date' && ' (Date)'}
-                                                                            </span>
-                                                                        )
+                                                                    {formFields.map(f => f.id !== field.id && (
+                                                                        <span key={f.id} className={`field-name-item ${f.type}`} onClick={() => {
+                                                                            const variants = getFieldNameVariants(f);
+                                                                            if (variants.length) updateField(idx, { formula: (field.formula || '') + variants[0] });
+                                                                        }}>{f.label}</span>
                                                                     ))}
                                                                 </div>
                                                                 
@@ -1165,54 +1056,25 @@
                                                                     />
                                                                 </div>
                                                                 
-                                                                {/* Formula Preview */}
                                                                 <div className="formula-preview mt-1">
                                                                     <span className="font-bold">Preview: </span>
-                                                                    {field.formula ? (
-                                                                        evaluateFormula(field.formula, newRecordData, formFields, formData) || '—'
-                                                                    ) : '—'}
+                                                                    {field.formula ? evaluateFormula(field.formula, newRecordData, formFields, formData) || '—' : '—'}
                                                                 </div>
                                                                 
-                                                                {/* Quick Formula Examples */}
-                                                                <div className="mt-2 text-xs">
-                                                                    <span className="font-medium">Quick insert:</span>
-                                                                    <div className="flex gap-2 mt-1 flex-wrap">
-                                                                        <button 
-                                                                            onClick={() => updateField(idx, {formula: 'IF(yesno_bool, TODAY(), "")'})}
-                                                                            className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs"
-                                                                        >
-                                                                            IF Yes/No then Today
-                                                                        </button>
-                                                                        <button 
-                                                                            onClick={() => updateField(idx, {formula: 'IF(yesno_bool, date_field, "")'})}
-                                                                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs"
-                                                                        >
-                                                                            IF Yes/No then Date
-                                                                        </button>
-                                                                    </div>
+                                                                <div className="mt-2 text-xs flex gap-2 flex-wrap">
+                                                                    <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, TODAY(), "")'})} className="px-2 py-1 bg-green-100 text-green-700 rounded">IF Yes/No then Today</button>
+                                                                    <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, date_field, "")'})} className="px-2 py-1 bg-blue-100 text-blue-700 rounded">IF Yes/No then Date</button>
                                                                 </div>
                                                             </div>
                                                         )}
-                                                        
-                                                        <div className="mt-3 pt-3 border-t text-sm text-gray-500">
-                                                            Example:
-                                                        </div>
-                                                        {renderTopFormField({...field, id: 'preview_' + field.id})}
                                                     </div>
                                                 ))
                                             )}
                                         </div>
                                         
                                         <div className="flex justify-between mt-4">
-                                            <button 
-                                                onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} 
-                                                className="px-4 py-2 text-red-600 border border-red-600 rounded"
-                                            >
-                                                Clear All
-                                            </button>
-                                            <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded">
-                                                <i className="fas fa-save mr-1"></i>Save Form Structure
-                                            </button>
+                                            <button onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} className="px-4 py-2 text-red-600 border border-red-600 rounded">Clear All</button>
+                                            <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded"><i className="fas fa-save mr-1"></i>Save Form</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1228,30 +1090,14 @@
                             style={{
                                 top: suggestionPosition.top + 'px',
                                 left: suggestionPosition.left + 'px',
-                                minWidth: '300px'
+                                minWidth: '250px',
+                                maxWidth: '90vw'
                             }}
                         >
                             {suggestions.map((suggestion, index) => (
-                                <div 
-                                    key={index}
-                                    className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b last:border-b-0"
-                                    onClick={() => insertSuggestion(suggestion)}
-                                >
-                                    <div>
-                                        <span className="font-mono font-medium">{suggestion.name}</span>
-                                        {suggestion.type === 'field' && (
-                                            <span className="ml-2 text-xs text-gray-500">
-                                                {suggestion.original}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                        suggestion.type === 'field' 
-                                            ? 'bg-blue-100 text-blue-700' 
-                                            : 'bg-purple-100 text-purple-700'
-                                    }`}>
-                                        {suggestion.type === 'field' ? suggestion.fieldType : 'function'}
-                                    </span>
+                                <div key={index} className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b" onClick={() => insertSuggestion(suggestion)}>
+                                    <div><span className="font-mono">{suggestion.name}</span> {suggestion.type==='field' && <span className="ml-2 text-xs text-gray-500">{suggestion.original}</span>}</div>
+                                    <span className={`text-xs px-2 py-1 rounded ${suggestion.type === 'field' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{suggestion.type === 'field' ? suggestion.fieldType : 'fx'}</span>
                                 </div>
                             ))}
                         </div>
@@ -1260,23 +1106,15 @@
                     {/* New File Modal */}
                     <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-md">
-                            <div className="modal-header">
+                            <div className="modal-header flex justify-between items-center mb-4">
                                 <h2 className="text-xl font-bold">Create New</h2>
-                                <button onClick={() => setShowNewFileModal(false)}>
-                                    <i className="fas fa-times"></i>
-                                </button>
+                                <button onClick={() => setShowNewFileModal(false)}><i className="fas fa-times"></i></button>
                             </div>
                             <div className="mb-4">
                                 <label className="block text-sm font-medium">Type</label>
-                                <div className="flex gap-4 mt-1">
-                                    <label>
-                                        <input type="radio" value="folder" checked={newFileType === 'folder'} onChange={e => setNewFileType(e.target.value)} /> 
-                                        <i className="fas fa-folder text-yellow-500 ml-1"></i> Folder
-                                    </label>
-                                    <label>
-                                        <input type="radio" value="form" checked={newFileType === 'form'} onChange={e => setNewFileType(e.target.value)} /> 
-                                        <i className="fas fa-wpforms text-blue-500 ml-1"></i> Form
-                                    </label>
+                                <div className="flex gap-4 mt-2">
+                                    <label><input type="radio" value="folder" checked={newFileType === 'folder'} onChange={e => setNewFileType(e.target.value)} /> <i className="fas fa-folder text-yellow-500"></i> Folder</label>
+                                    <label><input type="radio" value="form" checked={newFileType === 'form'} onChange={e => setNewFileType(e.target.value)} /> <i className="fas fa-wpforms text-blue-500"></i> Form</label>
                                 </div>
                             </div>
                             <div className="mb-4">
@@ -1293,126 +1131,52 @@
                     {/* Edit Record Modal */}
                     <div className={`modal ${showAddDataModal ? 'active' : ''}`}>
                         <div className="modal-content max-w-2xl">
-                            <div className="modal-header">
-                                <h2 className="text-xl font-bold">
-                                    {editingRecord ? 'Edit Record' : 'Add New Record'}
-                                </h2>
-                                <button onClick={() => {
-                                    setShowAddDataModal(false);
-                                    setEditingRecord(null);
-                                    setNewRecordData({});
-                                }}>
-                                    <i className="fas fa-times"></i>
-                                </button>
+                            <div className="modal-header flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-bold">{editingRecord ? 'Edit Record' : 'Add New Record'}</h2>
+                                <button onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }}><i className="fas fa-times"></i></button>
                             </div>
                             
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                if (editingRecord) {
-                                    updateFormData({ ...editingRecord, ...newRecordData });
-                                } else {
-                                    saveFormData(newRecordData);
-                                }
-                            }}>
+                            <form onSubmit={(e) => { e.preventDefault(); if (editingRecord) updateFormData({ ...editingRecord, ...newRecordData }); else saveFormData(newRecordData); }}>
                                 {formFields.map(f => {
                                     if (f.hasFormula && f.formula) {
                                         return (
                                             <div key={f.id} className="mb-4">
-                                                <label className="block text-sm font-medium mb-1">
-                                                    {f.label}
-                                                    <span className="formula-badge ml-2">Auto</span>
-                                                </label>
-                                                <div className="p-2 bg-purple-50 border border-purple-200 rounded">
-                                                    {newRecordData[f.id] || evaluateFormula(f.formula, newRecordData, formFields, formData) || '—'}
-                                                </div>
+                                                <label className="block font-medium mb-1">{f.label}<span className="formula-badge ml-2 text-xs">Auto</span></label>
+                                                <div className="p-2 bg-purple-50 border rounded">{newRecordData[f.id] || evaluateFormula(f.formula, newRecordData, formFields, formData) || '—'}</div>
                                             </div>
                                         );
                                     }
-                                    
                                     return (
                                         <div key={f.id} className="mb-4">
-                                            <label className="block text-sm font-medium mb-1">
-                                                {f.label}
-                                                {f.required && <span className="text-red-500 ml-1">*</span>}
-                                            </label>
+                                            <label className="block font-medium mb-1">{f.label}{f.required && <span className="text-red-500 ml-1">*</span>}</label>
                                             {f.type === 'yesno' ? (
-                                                <select 
-                                                    value={newRecordData[f.id] || ''}
-                                                    onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
-                                                    className="w-full p-2 border rounded"
-                                                    required={f.required}
-                                                >
-                                                    <option value="">Select...</option>
-                                                    <option value="Yes">Yes</option>
-                                                    <option value="No">No</option>
+                                                <select value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required}>
+                                                    <option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option>
                                                 </select>
                                             ) : f.type === 'select' ? (
-                                                <select 
-                                                    value={newRecordData[f.id] || ''}
-                                                    onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
-                                                    className="w-full p-2 border rounded"
-                                                    required={f.required}
-                                                >
-                                                    <option value="">Select...</option>
-                                                    {(f.options || []).map((opt, i) => (
-                                                        <option key={i} value={opt}>{opt}</option>
-                                                    ))}
+                                                <select value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required}>
+                                                    <option value="">Select...</option>{(f.options || []).map((opt,i) => <option key={i} value={opt}>{opt}</option>)}
                                                 </select>
                                             ) : f.type === 'checkbox' ? (
-                                                <input 
-                                                    type="checkbox"
-                                                    checked={newRecordData[f.id] || false}
-                                                    onChange={(e) => handleNewRecordChange(f.id, e.target.checked)}
-                                                    className="h-5 w-5"
-                                                />
+                                                <input type="checkbox" checked={newRecordData[f.id] || false} onChange={(e) => handleNewRecordChange(f.id, e.target.checked)} className="h-5 w-5" />
                                             ) : f.type === 'textarea' ? (
-                                                <textarea 
-                                                    value={newRecordData[f.id] || ''}
-                                                    onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
-                                                    className="w-full p-2 border rounded"
-                                                    rows="4"
-                                                    required={f.required}
-                                                />
+                                                <textarea value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" rows="4" required={f.required} />
                                             ) : (
-                                                <input 
-                                                    type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
-                                                    value={newRecordData[f.id] || ''}
-                                                    onChange={(e) => handleNewRecordChange(f.id, e.target.value)}
-                                                    className="w-full p-2 border rounded"
-                                                    required={f.required}
-                                                />
+                                                <input type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required} />
                                             )}
                                         </div>
                                     );
                                 })}
-                                
                                 <div className="flex justify-end gap-2 mt-6">
-                                    <button 
-                                        type="button"
-                                        onClick={() => {
-                                            setShowAddDataModal(false);
-                                            setEditingRecord(null);
-                                            setNewRecordData({});
-                                        }}
-                                        className="px-4 py-2 border rounded"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button 
-                                        type="submit"
-                                        className="px-4 py-2 bg-blue-500 text-white rounded"
-                                    >
-                                        {editingRecord ? 'Update' : 'Save'} Record
-                                    </button>
+                                    <button type="button" onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }} className="px-4 py-2 border rounded">Cancel</button>
+                                    <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">{editingRecord ? 'Update' : 'Save'} Record</button>
                                 </div>
                             </form>
                         </div>
                     </div>
 
                     <div className="toast-container">
-                        {toasts.map(t => (
-                            <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />
-                        ))}
+                        {toasts.map(t => <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />)}
                     </div>
                 </div>
             );
