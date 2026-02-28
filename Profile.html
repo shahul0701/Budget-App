@@ -858,33 +858,34 @@
       background: #28a745;
     }
     
-    /* Error State */
-    .error-state {
-      text-align: center;
-      padding: 40px 20px;
-      background: #fff3f3;
+    /* Debug Panel */
+    .debug-panel {
+      background: #1e1e2f;
+      color: #00ff00;
+      padding: 15px;
       border-radius: 8px;
-      color: #dc3545;
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      display: none;
     }
     
-    .error-state i {
-      font-size: 48px;
-      margin-bottom: 15px;
-      opacity: 0.5;
+    .debug-panel.show {
+      display: block;
     }
     
-    .retry-btn {
-      margin-top: 15px;
-      padding: 8px 20px;
-      background: #dc3545;
-      color: white;
-      border: none;
-      border-radius: 6px;
+    .debug-toggle {
+      font-size: 12px;
+      color: #666;
       cursor: pointer;
+      text-decoration: underline;
+      margin-left: 10px;
     }
     
-    .retry-btn:hover {
-      background: #c82333;
+    .debug-toggle:hover {
+      color: #6200ee;
     }
     
     /* Responsive Design */
@@ -924,10 +925,6 @@
       .graph-bar {
         min-width: 40px;
       }
-      
-      .session-actions .btn {
-        width: 100%;
-      }
     }
     
     @media (max-width: 480px) {
@@ -950,24 +947,6 @@
       
       .tab {
         text-align: center;
-      }
-      
-      .message-header {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      
-      .message-footer {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      
-      .message-actions {
-        flex-direction: column;
-      }
-      
-      .message-actions button {
-        width: 100%;
       }
     }
   </style>
@@ -992,6 +971,7 @@
         <div class="nav-links">
           <a href="home.html">Dashboard</a>
           <a href="profile.html" style="background: rgba(255, 255, 255, 0.2);">Profile</a>
+          <a href="admin-chat.html" target="_blank">Admin Panel</a>
           <a href="#" id="logoutBtn">Logout</a>
         </div>
       </div>
@@ -1031,6 +1011,7 @@
         <div class="settings-card">
           <div class="card-title">
             📊 Last 7 Days Activity
+            <span class="debug-toggle" id="toggleDebug">[Debug]</span>
           </div>
           
           <div class="usage-graph">
@@ -1047,6 +1028,12 @@
                 <span>Logins</span>
               </div>
             </div>
+          </div>
+          
+          <!-- Debug Panel -->
+          <div id="debugPanel" class="debug-panel">
+            <strong>Debug Log:</strong>
+            <div id="debugContent"></div>
           </div>
         </div>
 
@@ -1121,7 +1108,7 @@
           
           <div class="form-group">
             <label for="displayNameInput">Display Name</label>
-            <input type="text" id="displayNameInput" placeholder="Enter your name" value="SHA">
+            <input type="text" id="displayNameInput" placeholder="Enter your name">
           </div>
           <button class="btn" id="updateNameBtn">Update Name</button>
           
@@ -1284,6 +1271,11 @@
     const messagesList = document.getElementById('messagesList');
     const messageTabs = document.querySelectorAll('.tab');
 
+    // Debug elements
+    const debugPanel = document.getElementById('debugPanel');
+    const debugContent = document.getElementById('debugContent');
+    const toggleDebug = document.getElementById('toggleDebug');
+
     // ============ STATE VARIABLES ============
     let currentSessionId = null;
     let currentFilter = 'all';
@@ -1294,6 +1286,25 @@
     let messagesUnsubscribe = null;
     let sessionsUnsubscribe = null;
     let historyUnsubscribe = null;
+
+    // ============ DEBUG FUNCTION ============
+    function addDebug(message, data = null) {
+      const timestamp = new Date().toLocaleTimeString();
+      const dataStr = data ? ' - ' + JSON.stringify(data).substring(0, 200) : '';
+      debugContent.innerHTML = `[${timestamp}] ${message}${dataStr}<br>` + debugContent.innerHTML;
+      
+      // Keep only last 10 lines
+      const lines = debugContent.innerHTML.split('<br>');
+      if (lines.length > 10) {
+        debugContent.innerHTML = lines.slice(0, 10).join('<br>');
+      }
+    }
+
+    // Toggle debug panel
+    toggleDebug.addEventListener('click', () => {
+      debugPanel.classList.toggle('show');
+      toggleDebug.textContent = debugPanel.classList.contains('show') ? '[Hide Debug]' : '[Debug]';
+    });
 
     // ============ LOADING FUNCTIONS ============
     function showLoading(message = 'Loading profile...') {
@@ -1310,6 +1321,7 @@
       loadingPercentage.textContent = `${percentage}%`;
       progressBar.style.width = `${percentage}%`;
       if (message) loadingText.textContent = message;
+      addDebug(`Step ${step}/${totalSteps}: ${message}`);
     }
 
     function hideLoading() {
@@ -1431,9 +1443,11 @@
         
         localStorage.setItem('currentSessionId', sessionId);
         currentSessionId = sessionId;
+        addDebug('Session recorded', { sessionId, ip: ipAddress });
         
       } catch (error) {
         console.error('Error recording session:', error);
+        addDebug('Error recording session', error.message);
       }
     }
 
@@ -1456,6 +1470,8 @@
       try {
         const user = auth.currentUser;
         if (!user) return;
+        
+        addDebug('Loading usage graph...');
         
         // Get last 7 days
         const days = [];
@@ -1517,10 +1533,12 @@
         });
         
         displayUsageGraph(days);
+        addDebug('Graph loaded', days);
         
       } catch (error) {
         console.error('Error loading graph:', error);
         usageGraph.innerHTML = '<div style="text-align: center; color: #dc3545;">Error loading graph data</div>';
+        addDebug('Error loading graph', error.message);
       }
     }
 
@@ -1577,9 +1595,11 @@
         
         activeDevices.textContent = sessions.length;
         displaySessions(sessions);
+        addDebug('Sessions updated', { count: sessions.length });
       }, (error) => {
         console.error('Error loading sessions:', error);
         sessionsList.innerHTML = '<div class="empty-state">Error loading sessions</div>';
+        addDebug('Error loading sessions', error.message);
       });
     }
 
@@ -1645,8 +1665,10 @@
           logoutTime: serverTimestamp()
         });
         showAlert('Session logged out successfully', 'success');
+        addDebug('Session logged out', { sessionId });
       } catch (error) {
         showAlert('Error logging out session: ' + error.message, 'error');
+        addDebug('Error logging out session', error.message);
       }
     }
 
@@ -1673,9 +1695,11 @@
         });
         
         displayLoginHistory(history);
+        addDebug('History updated', { count: history.length });
       }, (error) => {
         console.error('Error loading history:', error);
         loginHistory.innerHTML = '<div class="empty-state">Error loading history</div>';
+        addDebug('Error loading history', error.message);
       });
     }
 
@@ -1773,6 +1797,7 @@
         };
 
         await addDoc(collection(db, 'adminMessages'), messageData);
+        addDebug('Message sent', { type: messageType, subject });
 
         // Update user stats
         const userRef = doc(db, 'users', user.uid);
@@ -1791,6 +1816,7 @@
       } catch (error) {
         console.error('Error sending message:', error);
         showAlert('Error sending message: ' + error.message, 'error', messageAlertBox);
+        addDebug('Error sending message', error.message);
       }
     }
 
@@ -1801,6 +1827,8 @@
       if (messagesUnsubscribe) {
         messagesUnsubscribe();
       }
+      
+      addDebug('Loading messages...');
       
       const q = query(
         collection(db, 'adminMessages'),
@@ -1820,6 +1848,8 @@
             repliedAt: data.repliedAt?.toDate ? data.repliedAt.toDate() : null
           });
         });
+
+        addDebug('Messages loaded', { count: messages.length });
 
         // Update stats
         totalMessages.textContent = messages.length;
@@ -1843,6 +1873,7 @@
             <button class="retry-btn" onclick="location.reload()">Retry</button>
           </div>
         `;
+        addDebug('Error loading messages', error.message);
       });
     }
 
@@ -1973,8 +2004,10 @@
           isEditing = false;
           editingMessageId = null;
           showAlert('Message updated successfully', 'success', messageAlertBox);
+          addDebug('Message updated', { messageId });
         } catch (error) {
           showAlert('Error updating message: ' + error.message, 'error', messageAlertBox);
+          addDebug('Error updating message', error.message);
         }
       };
 
@@ -1990,8 +2023,10 @@
         try {
           await deleteDoc(doc(db, 'adminMessages', messageId));
           showAlert('Message deleted successfully', 'success', messageAlertBox);
+          addDebug('Message deleted', { messageId });
         } catch (error) {
           showAlert('Error deleting message: ' + error.message, 'error', messageAlertBox);
+          addDebug('Error deleting message', error.message);
         }
       };
     }
@@ -2032,8 +2067,10 @@
         
         await Promise.all(updates);
         showAlert('Logged out from all other devices', 'success');
+        addDebug('Logged out all other devices');
       } catch (error) {
         showAlert('Error logging out devices: ' + error.message, 'error');
+        addDebug('Error logging out devices', error.message);
       }
     }
 
@@ -2041,6 +2078,7 @@
     auth.onAuthStateChanged(async (user) => {
       if (user) {
         showLoading('Initializing profile...');
+        addDebug('User authenticated', { uid: user.uid, email: user.email });
         
         // Step 1: Update UI
         updateLoadingProgress(1, 'Loading user profile...');
@@ -2097,6 +2135,7 @@
         // Hide loading
         setTimeout(() => {
           hideLoading();
+          addDebug('All data loaded successfully');
         }, 1000);
         
       } else {
@@ -2122,8 +2161,10 @@
           updatedAt: serverTimestamp()
         });
         showAlert('Name updated successfully!', 'success');
+        addDebug('Name updated', { newName });
       } catch (error) {
         showAlert('Error updating name: ' + error.message, 'error');
+        addDebug('Error updating name', error.message);
       }
     });
 
@@ -2159,8 +2200,10 @@
         confirmPassword.value = '';
         
         showAlert('Password updated successfully!', 'success');
+        addDebug('Password updated');
       } catch (error) {
         showAlert('Error updating password: ' + error.message, 'error');
+        addDebug('Error updating password', error.message);
       }
     });
 
@@ -2185,6 +2228,7 @@
         window.location.href = 'index.html';
       } catch (error) {
         showAlert('Error signing out: ' + error.message, 'error');
+        addDebug('Error signing out', error.message);
       }
     });
 
@@ -2224,6 +2268,17 @@
 
     // Update activity every 30 seconds
     setInterval(updateLastActivity, 30000);
+
+    // Handle online/offline
+    window.addEventListener('online', () => {
+      showAlert('You are back online!', 'success');
+      addDebug('Connection restored');
+    });
+    
+    window.addEventListener('offline', () => {
+      showAlert('You are offline. Some features may not work.', 'error');
+      addDebug('Offline mode');
+    });
 
   </script>
 </body>
