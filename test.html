@@ -2,1036 +2,2063 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>File Explorer - Scroll Fixed + Mobile</title>
-    <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <title>Vehicle Manager Pro - Complete Working Version</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone@7.22.9/babel.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <style>
-        /* base reset for scrolling */
-        html, body { height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
-        #root { min-height: 100%; display: flex; flex-direction: column; }
-
-        /* file explorer */
-        .file-explorer { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: white; }
-        .file-explorer-header { background: #f9fafb; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
-        .file-explorer-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .breadcrumb-item { display: flex; align-items: center; gap: 4px; color: #4b5563; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
-        .breadcrumb-item:hover { background: #e5e7eb; }
-        .breadcrumb-item.active { background: #3b82f6; color: white; }
-
-        /* grid with mobile break */
-        .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; padding: 16px; min-height: 200px; }
-        @media (max-width: 480px) { .file-grid { grid-template-columns: repeat(2, 1fr); } }
-
-        .file-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 8px; cursor: pointer; transition: all 0.2s; position: relative; background: white; }
-        .file-item:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-color: #3b82f6; }
-        .file-item.selected { border: 2px solid #3b82f6; background: #f0f9ff; }
-        .file-icon { font-size: 40px; text-align: center; margin-bottom: 8px; color: #6b7280; }
-        .file-icon.folder { color: #fbbf24; }
-        .file-icon.form { color: #3b82f6; }
-        .file-name { font-weight: 500; text-align: center; word-break: break-word; font-size: 0.9rem; }
-        .file-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
-        .file-item:hover .file-actions { opacity: 1; }
-        @media (max-width: 768px) { .file-actions { opacity: 0.7; } }
-
-        .file-action-btn { background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer; }
-        .file-action-btn.delete:hover { background: #ef4444; color: white; }
-
-        /* dropzone */
-        .dropzone { border: 2px dashed #d1d5db; border-radius: 8px; padding: 30px 20px; text-align: center; background: #f9fafb; transition: all 0.2s; cursor: pointer; min-height: 150px; }
-        .dropzone.drag-over { border-color: #3b82f6; background: #f0f9ff; }
-
-        /* form field builder */
-        .form-field { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; position: relative; }
-        .field-label input { flex: 1; padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; }
-
-        /* MODAL – critical for scrolling when many fields */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 12px; overflow-y: auto; } /* allows body scroll if needed */
-        .modal.active { display: flex; }
-        .modal-content { background: white; border-radius: 16px; padding: 24px 20px; width: 100%; max-width: 800px; max-height: 85vh; overflow-y: auto; margin: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); } /* scroll inside modal */
-
-        /* toast */
-        .toast-container { position: fixed; bottom: 20px; right: 10px; left: 10px; z-index: 1001; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; }
-        @media (max-width: 640px) { .toast-container { align-items: stretch; } }
-        .toast { background: white; border-radius: 8px; padding: 12px 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 12px; animation: slideIn 0.3s ease; pointer-events: auto; max-width: 400px; }
-        @media (max-width: 640px) { .toast { max-width: 100%; } }
-
-        /* table */
-        .form-data-table { width: 100%; border-collapse: collapse; }
-        .form-data-table th { background: #f9fafb; padding: 10px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
-        .form-data-table td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; }
-
-        /* folder view with horizontal scroll for table */
-        .folder-view { padding: 20px; background: white; border-radius: 12px; margin-top: 20px; border: 1px solid #e5e7eb; overflow-x: auto; }
-
-        /* top form grid */
-        .top-form { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
-        .top-form form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-        @media (max-width: 600px) { .top-form form { grid-template-columns: 1fr; } }
-
-        .submit-btn { background: #3b82f6; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 500; }
-        .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-
-        /* login */
-        .login-container { max-width: 400px; margin: 40px auto; padding: 30px 20px; background: white; border-radius: 12px; text-align: center; }
-
-        /* formula suggestions */
-        .formula-input-container { position: relative; }
-        .field-names-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 8px; max-height: 100px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; }
-        .field-name-item { background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; white-space: nowrap; }
-
-        /* misc */
-        .formula-badge { background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; }
-        .formula-preview { background: #ede9fe; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; margin-top: 4px; }
-    </style>
-</head>
-<body class="bg-gray-50">
-    <div id="root"></div>
-
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
-
-        // Firebase config
-        const firebaseConfig = {
-            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-            authDomain: "budget-app-1365f.firebaseapp.com",
-            projectId: "budget-app-1365f",
-            storageBucket: "budget-app-1365f.firebasestorage.app",
-            messagingSenderId: "1036194450411",
-            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-            measurementId: "G-YFFJL2H54X"
-        };
-
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const storage = firebase.storage();
-        const auth = firebase.auth();
-
-        // Toast component
-        const Toast = ({ message, type, onClose }) => (
-            <div className={`toast ${type}`}>
-                <i className={`fas ${
-                    type === 'success' ? 'fa-check-circle text-green-500' :
-                    type === 'error' ? 'fa-exclamation-circle text-red-500' :
-                    'fa-info-circle text-blue-500'
-                }`}></i>
-                <span className="flex-1">{message}</span>
-                <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                    <i className="fas fa-times"></i>
-                </button>
-            </div>
-        );
-
-        // Available functions
-        const AVAILABLE_FUNCTIONS = [
-            { name: 'IF', description: 'IF(condition, trueValue, falseValue)' },
-            { name: 'IFS', description: 'IFS(condition1, value1, condition2, value2)' },
-            { name: 'SUM', description: 'SUM(value1, value2)' },
-            { name: 'AVG', description: 'AVG(value1, value2)' },
-            { name: 'CONCAT', description: 'CONCAT(string1, string2)' },
-            { name: 'TODAY', description: 'TODAY()' },
-            { name: 'YEAR', description: 'YEAR(date)' },
-            { name: 'MONTH', description: 'MONTH(date)' }
-        ];
-
-        // Helper to get field name variants
-        const getFieldNameVariants = (field) => {
-            const variants = [];
-            const label = field.label;
-            variants.push(label);
-            const safeName = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            variants.push(safeName);
-            variants.push(field.id);
-            if (field.type === 'yesno') {
-                variants.push(safeName + '_bool');
-                variants.push(field.id + '_bool');
-            } else if (field.type === 'date') {
-                variants.push(safeName + '_date');
-                variants.push(field.id + '_date');
-            } else if (field.type === 'number') {
-                variants.push(safeName + '_num');
-                variants.push(field.id + '_num');
-            }
-            return [...new Set(variants)];
-        };
-
-        // Formula evaluator
-        const evaluateFormula = (formula, record, fields, allRecords = []) => {
-            if (!formula || !formula.trim()) return null;
-            try {
-                const context = {};
-                fields.forEach(f => {
-                    const val = record[f.id] || '';
-                    context[f.id] = val;
-                    getFieldNameVariants(f).forEach(variant => {
-                        context[variant] = val;
-                        if (f.type === 'yesno') {
-                            context[variant + '_bool'] = val === 'Yes';
-                            context[variant + '_value'] = val;
-                        }
-                        if (f.type === 'date') context[variant + '_date'] = val;
-                        if (f.type === 'number') {
-                            const num = parseFloat(val);
-                            if (!isNaN(num)) context[variant + '_num'] = num;
-                        }
-                    });
-                });
-
-                const TODAY = () => new Date().toISOString().split('T')[0];
-                const IF = (condition, trueVal, falseVal) => condition ? trueVal : falseVal;
-                const SUM = (...args) => args.reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0);
-                const CONCAT = (...args) => args.join('');
-
-                const paramNames = [...Object.keys(context), 'TODAY', 'IF', 'SUM', 'CONCAT'];
-                const paramValues = [...Object.values(context), TODAY, IF, SUM, CONCAT];
-                
-                const fn = new Function(...paramNames, `return ${formula};`);
-                let result = fn(...paramValues);
-                
-                if (result instanceof Date) result = result.toISOString().split('T')[0];
-                if (typeof result === 'number' && !Number.isInteger(result)) result = result.toFixed(2);
-                
-                return result;
-            } catch (e) {
-                console.warn('Formula error:', e);
-                return '#ERROR';
-            }
-        };
-
-        // Main App
-        function App() {
-            const [user, setUser] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [currentPath, setCurrentPath] = useState(['My Files']);
-            const [files, setFiles] = useState([]);
-            const [selectedFile, setSelectedFile] = useState(null);
-            const [showNewFileModal, setShowNewFileModal] = useState(false);
-            const [formFields, setFormFields] = useState([]);
-            const [formData, setFormData] = useState([]);
-            const [editingRecord, setEditingRecord] = useState(null);
-            const [toasts, setToasts] = useState([]);
-            const [isDraggingOver, setIsDraggingOver] = useState(false);
-            const [newFileType, setNewFileType] = useState('form');
-            const [newFileName, setNewFileName] = useState('');
-            const [isAdmin, setIsAdmin] = useState(false);
-            const [formMode, setFormMode] = useState('view');
-            const [showAddDataModal, setShowAddDataModal] = useState(false);
-            const [newRecordData, setNewRecordData] = useState({});
-            const [showFolderView, setShowFolderView] = useState(false);
-            const [showSuggestions, setShowSuggestions] = useState(false);
-            const [suggestions, setSuggestions] = useState([]);
-            const [activeFieldIndex, setActiveFieldIndex] = useState(null);
-            const [suggestionPosition, setSuggestionPosition] = useState({ top: 0, left: 0 });
-            const suggestionRef = useRef(null);
-            const formulaInputRef = useRef(null);
-            
-            const dragField = useRef(null);
-            const fileInputRef = useRef(null);
-
-            const fieldTypes = [
-                { value: 'text', label: 'Text', icon: 'font' },
-                { value: 'number', label: 'Number', icon: 'hashtag' },
-                { value: 'email', label: 'Email', icon: 'envelope' },
-                { value: 'tel', label: 'Phone', icon: 'phone' },
-                { value: 'date', label: 'Date', icon: 'calendar' },
-                { value: 'time', label: 'Time', icon: 'clock' },
-                { value: 'checkbox', label: 'Checkbox', icon: 'square-check' },
-                { value: 'select', label: 'Dropdown', icon: 'caret-down' },
-                { value: 'textarea', label: 'Text Area', icon: 'align-left' },
-                { value: 'yesno', label: 'Yes/No', icon: 'circle-question' },
-                { value: 'color', label: 'Color', icon: 'palette' },
-                { value: 'range', label: 'Range', icon: 'sliders' }
-            ];
-
-            useEffect(() => {
-                const unsubscribe = auth.onAuthStateChanged(async (user) => {
-                    if (user) {
-                        setUser(user);
-                        const token = await user.getIdTokenResult();
-                        setIsAdmin(
-                            token.claims.admin === true || 
-                            token.claims.isAdmin === true || 
-                            user.email === 'shahulsha254@gmail.com'
-                        );
-                    } else {
-                        setUser(null);
-                        setIsAdmin(false);
-                    }
-                    setLoading(false);
-                });
-                return () => unsubscribe();
-            }, []);
-
-            useEffect(() => {
-                if (user) loadFiles();
-            }, [user, currentPath]);
-
-            useEffect(() => {
-                if (currentPath.length === 1 && currentPath[0] === 'My Files') {
-                    setShowFolderView(false);
-                    setSelectedFile(null);
-                }
-            }, [currentPath]);
-
-            useEffect(() => {
-                function handleClickOutside(event) {
-                    if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
-                        setShowSuggestions(false);
-                    }
-                }
-                document.addEventListener('mousedown', handleClickOutside);
-                return () => document.removeEventListener('mousedown', handleClickOutside);
-            }, []);
-
-            const signInAnonymously = async () => {
-                try { setLoading(true); await auth.signInAnonymously(); showToast('success', 'Signed in!'); } 
-                catch (error) { showToast('error', error.message); } finally { setLoading(false); }
-            };
-
-            const signInWithEmail = async (email, password) => {
-                try { setLoading(true); await auth.signInWithEmailAndPassword(email, password); showToast('success','Signed in!'); } 
-                catch (error) { showToast('error', error.message); } finally { setLoading(false); }
-            };
-
-            const signOut = async () => {
-                try {
-                    await auth.signOut(); 
-                    setCurrentPath(['My Files']); 
-                    setFiles([]); 
-                    setSelectedFile(null); 
-                    setShowFolderView(false);
-                    showToast('success','Signed out');
-                } catch (error) { showToast('error', error.message); }
-            };
-
-            const getUserCollection = (collectionName) => db.collection('users').doc(user.uid).collection(collectionName);
-
-            const loadFiles = async () => {
-                if (!user) return;
-                try {
-                    const path = currentPath.join('/');
-                    const filesRef = getUserCollection('tables');
-                    const snapshot = await filesRef.where('path', '==', path).get();
-                    const fileList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setFiles(fileList);
-                } catch (error) { showToast('error', error.message); }
-            };
-
-            const showToast = (type, message) => {
-                const id = Date.now();
-                setToasts(prev => [...prev, { id, type, message }]);
-                setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-            };
-
-            const createNewFile = async () => {
-                if (!user) { showToast('error','Please sign in'); return; }
-                if (!newFileName.trim()) { showToast('error','Enter name'); return; }
-                try {
-                    const path = currentPath.join('/');
-                    const filesRef = getUserCollection('tables');
-                    const fileData = { 
-                        name: newFileName, 
-                        path, 
-                        type: newFileType, 
-                        uid: user.uid, 
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(), 
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
-                    };
-                    if (newFileType === 'form') { 
-                        fileData.fields = []; 
-                        fileData.data = []; 
-                    }
-                    await filesRef.add(fileData);
-                    setShowNewFileModal(false); 
-                    setNewFileName(''); 
-                    loadFiles(); 
-                    showToast('success','Created!');
-                } catch (error) { showToast('error', error.message); }
-            };
-
-            const deleteFile = async (file, e) => {
-                e.stopPropagation();
-                if (!user) { showToast('error','Sign in'); return; }
-                if (!window.confirm(`Delete "${file.name}"?`)) return;
-                try {
-                    const filesRef = getUserCollection('tables');
-                    await filesRef.doc(file.id).delete();
-                    if (file.type === 'folder') {
-                        const folderPath = [...currentPath, file.name].join('/');
-                        const contents = await filesRef.where('path', '>=', folderPath).where('path', '<', folderPath + '\uf8ff').get();
-                        const batch = db.batch(); 
-                        contents.docs.forEach(doc => batch.delete(doc.ref)); 
-                        await batch.commit();
-                    }
-                    loadFiles(); 
-                    showToast('success','Deleted');
-                } catch (error) { showToast('error', error.message); }
-            };
-
-            const openFile = (file) => {
-                if (file.type === 'folder') { 
-                    setCurrentPath([...currentPath, file.name]); 
-                    setShowFolderView(false);
-                    setSelectedFile(null);
-                }
-                else if (file.type === 'form') { 
-                    setSelectedFile(file); 
-                    setFormFields(file.fields || []); 
-                    setFormData(file.data || []); 
-                    setFormMode('view');
-                    setNewRecordData({});
-                    setShowFolderView(true);
-                }
-            };
-
-            const navigateUp = () => { 
-                if (currentPath.length > 1) {
-                    const newPath = currentPath.slice(0, -1);
-                    setCurrentPath(newPath);
-                    if (newPath.length === 1 && newPath[0] === 'My Files') {
-                        setShowFolderView(false);
-                        setSelectedFile(null);
-                    }
-                }
-            };
-
-            const handleDragStart = (e, fieldType) => { 
-                if (formMode === 'edit') { 
-                    dragField.current = fieldType; 
-                    e.dataTransfer.setData('text/plain', fieldType); 
-                } else { 
-                    e.preventDefault(); 
-                    showToast('info','Switch to Edit Mode'); 
-                } 
-            };
-
-            const handleDragOver = (e) => { if (formMode === 'edit') { e.preventDefault(); setIsDraggingOver(true); } };
-            const handleDragLeave = (e) => { e.preventDefault(); setIsDraggingOver(false); };
-
-            const handleDrop = (e) => {
-                e.preventDefault(); 
-                setIsDraggingOver(false);
-                if (formMode === 'edit' && dragField.current) {
-                    const newField = { 
-                        id: 'field_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), 
-                        type: dragField.current, 
-                        label: dragField.current, 
-                        required: false, 
-                        options: dragField.current === 'select' ? ['Option 1','Option 2','Option 3'] : [], 
-                        hasFormula: false,
-                        formula: '' 
-                    };
-                    setFormFields([...formFields, newField]); 
-                    dragField.current = null;
-                }
-            };
-
-            const updateField = (index, updates) => { 
-                const newFields = [...formFields]; 
-                newFields[index] = { ...newFields[index], ...updates }; 
-                setFormFields(newFields); 
-            };
-
-            const deleteField = (index) => { 
-                if (window.confirm('Delete field?')) { 
-                    setFormFields(formFields.filter((_,i)=>i!==index)); 
-                } 
-            };
-
-            const saveFormStructure = async () => {
-                if (!user || !selectedFile) return;
-                try {
-                    const filesRef = getUserCollection('tables');
-                    await filesRef.doc(selectedFile.id).update({ 
-                        fields: formFields, 
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
-                    });
-                    setSelectedFile({...selectedFile, fields: formFields}); 
-                    showToast('success','Form saved'); 
-                    setFormMode('view');
-                } catch (error) { showToast('error',error.message); }
-            };
-
-            const saveFormData = async (data) => {
-                if (!user || !selectedFile) return;
-                try {
-                    const filesRef = getUserCollection('tables');
-                    const currentData = selectedFile.data || [];
-                    
-                    const evaluatedData = { ...data };
-                    formFields.forEach(field => {
-                        if (field.hasFormula && field.formula) {
-                            evaluatedData[field.id] = evaluateFormula(field.formula, evaluatedData, formFields, currentData);
-                        }
-                    });
-                    
-                    const newRecord = { ...evaluatedData, id: Date.now(), uid: user.uid, createdAt: new Date().toISOString() };
-                    const newData = [...currentData, newRecord];
-                    
-                    await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); 
-                    setSelectedFile({...selectedFile, data: newData}); 
-                    setNewRecordData({});
-                    showToast('success','Data saved');
-                } catch (error) { showToast('error',error.message); }
-            };
-
-            const updateFormData = async (updatedRecord) => {
-                if (!user || !selectedFile) return;
-                try {
-                    const filesRef = getUserCollection('tables');
-                    
-                    const evaluatedData = { ...updatedRecord };
-                    formFields.forEach(field => {
-                        if (field.hasFormula && field.formula) {
-                            evaluatedData[field.id] = evaluateFormula(field.formula, evaluatedData, formFields, formData);
-                        }
-                    });
-                    
-                    const newData = formData.map(r => r.id === updatedRecord.id ? { ...evaluatedData, updatedAt: new Date().toISOString() } : r);
-                    await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); 
-                    setSelectedFile({...selectedFile, data: newData}); 
-                    setEditingRecord(null); 
-                    setNewRecordData({});
-                    setShowAddDataModal(false);
-                    showToast('success','Updated');
-                } catch (error) { showToast('error',error.message); }
-            };
-
-            const deleteFormData = async (recordId) => {
-                if (!user || !window.confirm('Delete record?')) return;
-                try {
-                    const filesRef = getUserCollection('tables');
-                    const newData = formData.filter(r => r.id !== recordId);
-                    await filesRef.doc(selectedFile.id).update({ data: newData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-                    setFormData(newData); 
-                    setSelectedFile({...selectedFile, data: newData}); 
-                    showToast('success','Deleted');
-                } catch (error) { showToast('error',error.message); }
-            };
-
-            const uploadFile = async (file) => {
-                if (!user) return;
-                try {
-                    const path = currentPath.join('/');
-                    const storageRef = storage.ref().child(`users/${user.uid}/${path}/${file.name}`);
-                    await storageRef.put(file);
-                    const filesRef = getUserCollection('tables');
-                    await filesRef.add({ 
-                        name: file.name, 
-                        path, 
-                        type: 'file', 
-                        size: file.size, 
-                        contentType: file.type, 
-                        uid: user.uid, 
-                        storagePath: `users/${user.uid}/${path}/${file.name}`, 
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
-                    });
-                    loadFiles(); 
-                    showToast('success','File uploaded');
-                } catch (error) { showToast('error',error.message); }
-            };
-
-            const handleFileSelect = (e) => { const file = e.target.files[0]; if (file) uploadFile(file); };
-
-            const handleNewRecordChange = (fieldId, value) => {
-                let updatedData = { ...newRecordData, [fieldId]: value };
-                formFields.forEach(field => {
-                    if (field.hasFormula && field.formula) {
-                        updatedData[field.id] = evaluateFormula(field.formula, updatedData, formFields, formData);
-                    }
-                });
-                setNewRecordData(updatedData);
-            };
-
-            const handleSubmitNewRecord = (e) => {
-                e.preventDefault();
-                saveFormData(newRecordData);
-            };
-
-            const getAllFieldVariants = () => {
-                const variants = [];
-                formFields.forEach(field => {
-                    getFieldNameVariants(field).forEach(variant => {
-                        variants.push({
-                            type: 'field',
-                            name: variant,
-                            original: field.label,
-                            fieldType: field.type,
-                            fieldId: field.id
-                        });
-                    });
-                });
-                return variants;
-            };
-
-            const handleFormulaChange = (index, value) => {
-                updateField(index, { formula: value });
-                
-                const input = formulaInputRef.current;
-                if (input) {
-                    const cursorPos = input.selectionStart;
-                    const textBeforeCursor = value.substring(0, cursorPos);
-                    const match = textBeforeCursor.match(/[a-zA-Z0-9_]+$/);
-                    const lastWord = match ? match[0] : '';
-                    
-                    if (lastWord.length >= 1) {
-                        const fieldVariants = getAllFieldVariants();
-                        const functionSuggestions = AVAILABLE_FUNCTIONS.map(f => ({
-                            type: 'function',
-                            name: f.name,
-                            description: f.description
-                        }));
-                        
-                        const allSuggestions = [...fieldVariants, ...functionSuggestions];
-                        const filtered = allSuggestions.filter(s => 
-                            s.name.toLowerCase().startsWith(lastWord.toLowerCase())
-                        );
-                        
-                        const rect = input.getBoundingClientRect();
-                        setSuggestionPosition({
-                            top: rect.bottom + window.scrollY,
-                            left: rect.left + window.scrollX
-                        });
-                        
-                        setSuggestions(filtered.slice(0, 8));
-                        setShowSuggestions(true);
-                        setActiveFieldIndex(index);
-                    } else {
-                        setShowSuggestions(false);
-                    }
-                }
-            };
-
-            const insertSuggestion = (suggestion) => {
-                if (activeFieldIndex === null) return;
-                
-                const field = formFields[activeFieldIndex];
-                const currentFormula = field.formula || '';
-                const input = formulaInputRef.current;
-                
-                if (input) {
-                    const cursorPos = input.selectionStart;
-                    const textBeforeCursor = currentFormula.substring(0, cursorPos);
-                    const textAfterCursor = currentFormula.substring(cursorPos);
-                    
-                    const match = textBeforeCursor.match(/[a-zA-Z0-9_]+$/);
-                    if (match) {
-                        const start = cursorPos - match[0].length;
-                        const newFormula = 
-                            currentFormula.substring(0, start) + 
-                            suggestion.name + 
-                            textAfterCursor;
-                        
-                        updateField(activeFieldIndex, { formula: newFormula });
-                        
-                        setTimeout(() => {
-                            if (input) {
-                                const newPos = start + suggestion.name.length;
-                                input.setSelectionRange(newPos, newPos);
-                                input.focus();
-                            }
-                        }, 10);
-                    }
-                }
-                
-                setShowSuggestions(false);
-            };
-
-            const renderTopFormField = (field) => {
-                if (field.hasFormula && field.formula) {
-                    const computedValue = newRecordData[field.id] || evaluateFormula(field.formula, newRecordData, formFields, formData);
-                    
-                    return (
-                        <div className="p-2 bg-purple-50 border border-purple-200 rounded font-mono text-sm flex items-center">
-                            <i className="fas fa-calculator text-purple-500 mr-2"></i>
-                            <span>{computedValue || '—'}</span>
-                        </div>
-                    );
-                }
-                
-                const commonProps = {
-                    id: field.id,
-                    name: field.id,
-                    value: newRecordData[field.id] || '',
-                    onChange: (e) => handleNewRecordChange(field.id, field.type === 'checkbox' ? e.target.checked : e.target.value),
-                    className: "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500",
-                    required: field.required && !field.hasFormula
-                };
-                
-                switch (field.type) {
-                    case 'text': case 'email': case 'tel': case 'number': case 'date': case 'time':
-                        return <input type={field.type} {...commonProps} />;
-                    case 'checkbox':
-                        return <input type="checkbox" checked={newRecordData[field.id] || false} onChange={(e) => handleNewRecordChange(field.id, e.target.checked)} className="h-5 w-5" />;
-                    case 'select':
-                        return (
-                            <select {...commonProps}>
-                                <option value="">Select...</option>
-                                {(field.options || []).map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
-                            </select>
-                        );
-                    case 'yesno':
-                        return (
-                            <select {...commonProps}>
-                                <option value="">Select...</option>
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                            </select>
-                        );
-                    case 'textarea':
-                        return <textarea {...commonProps} rows="3" />;
-                    case 'color':
-                        return <input type="color" {...commonProps} className="w-full p-1 border rounded h-10" />;
-                    case 'range':
-                        return <input type="range" {...commonProps} min="0" max="100" />;
-                    default:
-                        return <input type="text" {...commonProps} />;
-                }
-            };
-
-            const renderDataTable = () => {
-                const allFields = formFields;
-                const formulaFields = allFields.filter(f => f.hasFormula && f.formula);
-                
-                const enhancedData = formData.map(record => {
-                    const enhanced = { ...record };
-                    formulaFields.forEach(f => { 
-                        enhanced[f.id] = evaluateFormula(f.formula, record, allFields, formData); 
-                    });
-                    return enhanced;
-                });
-
-                return (
-                    <div className="overflow-x-auto">
-                        <table className="form-data-table">
-                            <thead>
-                                <tr>
-                                    {allFields.map(f => (
-                                        <th key={f.id}>
-                                            {f.label} 
-                                            {f.hasFormula && <span className="formula-badge ml-1">fx</span>}
-                                        </th>
-                                    ))}
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {enhancedData.map(record => (
-                                    <tr key={record.id}>
-                                        {allFields.map(f => {
-                                            let displayValue = record[f.id] ?? '-';
-                                            
-                                            if (f.type === 'checkbox') {
-                                                displayValue = record[f.id] ? '✓' : '✗';
-                                            } else if (f.type === 'date' && displayValue !== '-') {
-                                                try {
-                                                    displayValue = new Date(displayValue).toLocaleDateString();
-                                                } catch (e) {}
-                                            } else if (f.type === 'number' && displayValue !== '-') {
-                                                displayValue = Number(displayValue).toLocaleString();
-                                            }
-                                            
-                                            return <td key={f.id}>{displayValue}</td>;
-                                        })}
-                                        <td className="text-sm text-gray-500">
-                                            {record.createdAt ? new Date(record.createdAt).toLocaleString() : '-'}
-                                        </td>
-                                        <td>
-                                            <div className="flex gap-2">
-                                                <button className="text-blue-600 hover:text-blue-800" onClick={()=>{ setEditingRecord(record); setNewRecordData(record); setShowAddDataModal(true); }}><i className="fas fa-edit"></i></button>
-                                                <button className="text-red-600 hover:text-red-800" onClick={()=>deleteFormData(record.id)}><i className="fas fa-trash"></i></button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                );
-            };
-
-            if (loading) return <div className="flex items-center justify-center min-h-screen"><i className="fas fa-spinner fa-spin text-4xl text-blue-500"></i></div>;
-            
-            if (!user) {
-                return (
-                    <div className="login-container">
-                        <h2 className="text-2xl font-bold">Welcome</h2>
-                        <p className="text-gray-600 mb-6">Sign in to access files</p>
-                        <button onClick={signInAnonymously} className="w-full bg-blue-500 text-white p-3 rounded mb-4">
-                            <i className="fas fa-user-secret mr-2"></i>Anonymous
-                        </button>
-                        <div className="relative my-6">
-                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300"></div></div>
-                            <div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">Or</span></div>
-                        </div>
-                        <button onClick={()=>signInWithEmail('demo@gmail.com','password123')} className="w-full bg-purple-600 hover:bg-purple-700 text-white p-3 rounded">
-                            <i className="fas fa-user mr-2"></i>demo@gmail.com
-                        </button>
-                    </div>
-                );
-            }
-
-            return (
-                <div className="container mx-auto p-3 md:p-4 max-w-7xl">
-                    {/* header */}
-                    <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 md:p-6 rounded-lg shadow-lg mb-6">
-                        <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
-                            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3"><i className="fas fa-folder-open"></i>File Explorer</h1>
-                            <div className="flex items-center gap-3">
-                                <div className="hidden sm:block text-sm">{user.email || (user.isAnonymous ? 'Anonymous' : user.uid)} {isAdmin && <span className="bg-yellow-400 text-gray-800 px-2 py-0.5 rounded text-xs ml-2">Admin</span>}</div>
-                                <button onClick={signOut} className="bg-red-500 px-3 py-1 rounded text-sm"><i className="fas fa-sign-out-alt mr-1"></i>Sign Out</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* file explorer */}
-                    <div className="file-explorer mb-8">
-                        <div className="file-explorer-header">
-                            <div className="file-explorer-breadcrumb">
-                                {currentPath.map((item, idx) => (
-                                    <React.Fragment key={idx}>
-                                        {idx > 0 && <i className="fas fa-chevron-right text-gray-400 text-sm"></i>}
-                                        <span className={`breadcrumb-item text-sm ${idx === currentPath.length-1 ? 'active' : ''}`} onClick={() => { const newPath = currentPath.slice(0, idx+1); setCurrentPath(newPath); if (newPath.length === 1 && newPath[0] === 'My Files') { setShowFolderView(false); setSelectedFile(null); } }}>
-                                            <i className={`fas ${idx === 0 ? 'fa-home' : 'fa-folder'}`}></i><span className="max-w-[100px] truncate">{item}</span>
-                                        </span>
-                                    </React.Fragment>
-                                ))}
-                            </div>
-                            <div className="flex gap-2 flex-wrap">
-                                {currentPath.length > 1 && <button onClick={navigateUp} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"><i className="fas fa-arrow-up mr-1"></i>Up</button>}
-                                <button onClick={() => setShowNewFileModal(true)} className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"><i className="fas fa-plus mr-1"></i>New</button>
-                                <button onClick={() => fileInputRef.current.click()} className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"><i className="fas fa-upload mr-1"></i>Upload</button>
-                                <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-                            </div>
-                        </div>
-                        <div className="file-grid">
-                            {files.map(f => (
-                                <div key={f.id} className={`file-item ${selectedFile?.id === f.id ? 'selected' : ''}`} onClick={() => openFile(f)}>
-                                    <div className="file-actions"><button className="file-action-btn delete" onClick={(e) => deleteFile(f, e)}><i className="fas fa-trash"></i></button></div>
-                                    <div className={`file-icon ${f.type}`}><i className={`fas ${f.type === 'folder' ? 'fa-folder' : f.type === 'form' ? 'fa-wpforms' : 'fa-file'}`}></i></div>
-                                    <div className="file-name">{f.name}</div>
-                                    {f.type === 'file' && f.size && <div className="text-xs text-gray-500 text-center mt-2">{(f.size/1024).toFixed(1)} KB</div>}
-                                    {f.type === 'form' && f.fields && <div className="text-xs text-gray-500 text-center mt-2">{f.fields.length} fields • {f.data?.length || 0} rec</div>}
-                                </div>
-                            ))}
-                            {files.length === 0 && <div className="col-span-full text-center py-12 text-gray-500"><i className="fas fa-folder-open text-5xl mb-4 opacity-50"></i><p>Empty folder</p></div>}
-                        </div>
-                    </div>
-
-                    {/* form view */}
-                    {showFolderView && selectedFile && (
-                        <div className="folder-view">
-                            <div className="folder-header flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                                <h2 className="text-xl font-semibold"><i className="fas fa-wpforms text-blue-500 mr-2"></i>{selectedFile.name}</h2>
-                                <div className="action-buttons">
-                                    <button className="bg-blue-500 text-white px-4 py-2 rounded text-sm" onClick={() => setFormMode(formMode === 'edit' ? 'view' : 'edit')}><i className={`fas fa-${formMode === 'edit' ? 'eye' : 'edit'}`}></i> {formMode === 'edit' ? ' View' : ' Edit'}</button>
-                                </div>
-                            </div>
-
-                            {/* formula examples */}
-                            <div className="bg-gray-100 p-3 rounded mb-4 text-sm">
-                                <p className="font-medium mb-2">📊 WORKING FORMULA EXAMPLES:</p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                    <code className="bg-green-100 p-1 rounded">IF(yesno_bool, TODAY(), "")</code>
-                                    <code className="bg-green-100 p-1 rounded">IF(yesno == "Yes", TODAY(), "No date")</code>
-                                    <code className="bg-green-100 p-1 rounded">IF(yesno_bool, date_field, "Not completed")</code>
-                                    <code className="bg-green-100 p-1 rounded">CONCAT(first_name, " ", last_name)</code>
-                                </div>
-                            </div>
-
-                            {/* data entry form */}
-                            {formFields.length > 0 && (
-                                <div className="top-form">
-                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><i className="fas fa-plus-circle"></i> Add New Record</h3>
-                                    <form onSubmit={handleSubmitNewRecord}>
-                                        {formFields.map(field => (
-                                            <div key={field.id} className="mb-4">
-                                                <label className="block font-medium mb-1">{field.label}{field.required && <span className="text-red-500 ml-1">*</span>}{field.hasFormula && <span className="formula-badge ml-2">Formula</span>}</label>
-                                                {renderTopFormField(field)}
-                                                {field.hasFormula && field.formula && <div className="text-xs text-purple-600 mt-1 font-mono">= {field.formula}</div>}
-                                            </div>
-                                        ))}
-                                        <div className="flex justify-end mt-6"><button type="submit" className="submit-btn"><i className="fas fa-save mr-2"></i> Save Record</button></div>
-                                    </form>
-                                </div>
-                            )}
-
-                            {/* data table */}
-                            <div className="mt-6">
-                                <h3 className="text-lg font-semibold mb-4"><i className="fas fa-table mr-2 text-blue-500"></i> Records ({formData.length})</h3>
-                                {formData.length > 0 ? renderDataTable() : <div className="text-center py-10 text-gray-500"><i className="fas fa-database text-4xl mb-3"></i><p>No records yet.</p></div>}
-                            </div>
-
-                            {/* form editor modal - now scrolls! */}
-                            {formMode === 'edit' && (
-                                <div className="modal active" style={{display:'flex'}}> {/* force active */}
-                                    <div className="modal-content">
-                                        <div className="flex justify-between items-center mb-4">
-                                            <h3 className="text-xl font-bold">Edit Form Structure</h3>
-                                            <button onClick={() => setFormMode('view')} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times text-2xl"></i></button>
-                                        </div>
-                                        
-                                        <div className="mb-6">
-                                            <h4 className="text-sm font-medium mb-2">Drag fields to build form</h4>
-                                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                                {fieldTypes.map(t => (
-                                                    <div key={t.value} draggable onDragStart={(e) => handleDragStart(e, t.value)} className="p-2 bg-gray-100 rounded text-center cursor-move hover:bg-gray-200 text-xs">
-                                                        <i className={`fas fa-${t.icon} block text-lg`}></i><span>{t.label}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        
-                                        <div className={`dropzone ${isDraggingOver ? 'drag-over' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-                                            {formFields.length === 0 ? (
-                                                <><i className="fas fa-cloud-upload-alt"></i><p>Drop fields here to build your form</p></>
-                                            ) : (
-                                                formFields.map((field, idx) => (
-                                                    <div key={field.id} className={`form-field ${field.hasFormula ? 'field-with-formula' : ''}`}>
-                                                        <div className="field-actions"><button className="field-action-btn delete" onClick={() => deleteField(idx)}><i className="fas fa-trash"></i></button></div>
-                                                        <div className="field-label flex items-center gap-2 mb-2">
-                                                            <input value={field.label} onChange={e => updateField(idx, {label: e.target.value})} placeholder="Field Label" className="border p-1 flex-1" />
-                                                            <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={field.required} onChange={e => updateField(idx, {required: e.target.checked})} /> Req</label>
-                                                        </div>
-                                                        <div className="field-type-selector mb-2">
-                                                            <select value={field.type} onChange={e => updateField(idx, {type: e.target.value})} className="border p-1">
-                                                                {fieldTypes.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
-                                                            </select>
-                                                        </div>
-                                                        
-                                                        {field.type === 'select' && (
-                                                            <div className="mt-2">
-                                                                <label className="text-sm">Options (comma separated)</label>
-                                                                <input value={field.options?.join(', ') || ''} onChange={e => updateField(idx, {options: e.target.value.split(',').map(s => s.trim())})} className="w-full p-2 border rounded mt-1" placeholder="Option 1, Option 2, Option 3" />
-                                                            </div>
-                                                        )}
-                                                        
-                                                        <div className="formula-toggle mt-3">
-                                                            <label className="flex items-center gap-2"><input type="checkbox" checked={field.hasFormula || false} onChange={e => updateField(idx, {hasFormula: e.target.checked})} /><i className="fas fa-calculator text-purple-500"></i> Auto-calculate</label>
-                                                        </div>
-                                                        
-                                                        {field.hasFormula && (
-                                                            <div className="mt-2">
-                                                                <label className="text-sm font-medium">Formula</label>
-                                                                <div className="field-names-list">
-                                                                    <span className="text-xs text-gray-500 block mb-1">Click field name:</span>
-                                                                    {formFields.map(f => f.id !== field.id && (
-                                                                        <span key={f.id} className={`field-name-item ${f.type}`} onClick={() => { const variants = getFieldNameVariants(f); if (variants.length) updateField(idx, { formula: (field.formula || '') + variants[0] }); }}>{f.label}</span>
-                                                                    ))}
-                                                                </div>
-                                                                <div className="formula-input-container">
-                                                                    <input ref={formulaInputRef} value={field.formula || ''} onChange={e => handleFormulaChange(idx, e.target.value)} className="w-full p-2 border rounded mt-1 font-mono text-sm" placeholder="IF(yesno_bool, TODAY(), '')" />
-                                                                </div>
-                                                                <div className="formula-preview mt-1"><span className="font-bold">Preview: </span>{field.formula ? evaluateFormula(field.formula, newRecordData, formFields, formData) || '—' : '—'}</div>
-                                                                <div className="mt-2 text-xs flex gap-2 flex-wrap">
-                                                                    <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, TODAY(), "")'})} className="px-2 py-1 bg-green-100 text-green-700 rounded">IF Yes/No then Today</button>
-                                                                    <button onClick={() => updateField(idx, {formula: 'IF(yesno_bool, date_field, "")'})} className="px-2 py-1 bg-blue-100 text-blue-700 rounded">IF Yes/No then Date</button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                        
-                                        <div className="flex justify-between mt-4">
-                                            <button onClick={() => { if(window.confirm('Clear all fields?')) setFormFields([]); }} className="px-4 py-2 text-red-600 border border-red-600 rounded">Clear All</button>
-                                            <button onClick={saveFormStructure} className="px-4 py-2 bg-green-500 text-white rounded"><i className="fas fa-save mr-1"></i>Save Form</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* suggestions dropdown */}
-                    {showSuggestions && suggestions.length > 0 && (
-                        <div ref={suggestionRef} className="fixed z-50 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto" style={{ top: suggestionPosition.top, left: suggestionPosition.left, minWidth: '250px', maxWidth: '90vw' }}>
-                            {suggestions.map((s, i) => (
-                                <div key={i} className="p-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b" onClick={() => insertSuggestion(s)}>
-                                    <div><span className="font-mono">{s.name}</span> {s.type==='field' && <span className="ml-2 text-xs text-gray-500">{s.original}</span>}</div>
-                                    <span className={`text-xs px-2 py-1 rounded ${s.type === 'field' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{s.type === 'field' ? s.fieldType : 'fx'}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* new file modal */}
-                    <div className={`modal ${showNewFileModal ? 'active' : ''}`}>
-                        <div className="modal-content max-w-md">
-                            <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold">Create New</h2><button onClick={() => setShowNewFileModal(false)}><i className="fas fa-times"></i></button></div>
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium">Type</label>
-                                <div className="flex gap-4 mt-2">
-                                    <label><input type="radio" value="folder" checked={newFileType === 'folder'} onChange={e => setNewFileType(e.target.value)} /> <i className="fas fa-folder text-yellow-500"></i> Folder</label>
-                                    <label><input type="radio" value="form" checked={newFileType === 'form'} onChange={e => setNewFileType(e.target.value)} /> <i className="fas fa-wpforms text-blue-500"></i> Form</label>
-                                </div>
-                            </div>
-                            <div className="mb-4"><label className="block text-sm font-medium">Name</label><input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter name" /></div>
-                            <div className="flex justify-end gap-2"><button onClick={() => setShowNewFileModal(false)} className="px-4 py-2 border rounded">Cancel</button><button onClick={createNewFile} className="px-4 py-2 bg-blue-500 text-white rounded">Create</button></div>
-                        </div>
-                    </div>
-
-                    {/* edit record modal */}
-                    <div className={`modal ${showAddDataModal ? 'active' : ''}`}>
-                        <div className="modal-content max-w-2xl">
-                            <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold">{editingRecord ? 'Edit Record' : 'Add New Record'}</h2><button onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }}><i className="fas fa-times"></i></button></div>
-                            <form onSubmit={(e) => { e.preventDefault(); if (editingRecord) updateFormData({ ...editingRecord, ...newRecordData }); else saveFormData(newRecordData); }}>
-                                {formFields.map(f => {
-                                    if (f.hasFormula && f.formula) {
-                                        return (
-                                            <div key={f.id} className="mb-4">
-                                                <label className="block font-medium mb-1">{f.label}<span className="formula-badge ml-2">Auto</span></label>
-                                                <div className="p-2 bg-purple-50 border rounded">{newRecordData[f.id] || evaluateFormula(f.formula, newRecordData, formFields, formData) || '—'}</div>
-                                            </div>
-                                        );
-                                    }
-                                    return (
-                                        <div key={f.id} className="mb-4">
-                                            <label className="block font-medium mb-1">{f.label}{f.required && <span className="text-red-500 ml-1">*</span>}</label>
-                                            {f.type === 'yesno' ? (
-                                                <select value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required}>
-                                                    <option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option>
-                                                </select>
-                                            ) : f.type === 'select' ? (
-                                                <select value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required}>
-                                                    <option value="">Select...</option>{(f.options || []).map((opt,i) => <option key={i} value={opt}>{opt}</option>)}
-                                                </select>
-                                            ) : f.type === 'checkbox' ? (
-                                                <input type="checkbox" checked={newRecordData[f.id] || false} onChange={(e) => handleNewRecordChange(f.id, e.target.checked)} className="h-5 w-5" />
-                                            ) : f.type === 'textarea' ? (
-                                                <textarea value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" rows="4" required={f.required} />
-                                            ) : (
-                                                <input type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} value={newRecordData[f.id] || ''} onChange={(e) => handleNewRecordChange(f.id, e.target.value)} className="w-full p-2 border rounded" required={f.required} />
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                                <div className="flex justify-end gap-2 mt-6">
-                                    <button type="button" onClick={() => { setShowAddDataModal(false); setEditingRecord(null); setNewRecordData({}); }} className="px-4 py-2 border rounded">Cancel</button>
-                                    <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">{editingRecord ? 'Update' : 'Save'} Record</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-
-                    {/* toast container */}
-                    <div className="toast-container">{toasts.map(t => <Toast key={t.id} message={t.message} type={t.type} onClose={() => setToasts(prev => prev.filter(tt => tt.id !== t.id))} />)}</div>
-                </div>
-            );
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        :root {
+            --primary: #4361ee;
+            --secondary: #3f37c9;
+            --success: #4cc9f0;
+            --danger: #f72585;
+            --warning: #f8961e;
+            --dark: #1e293b;
+            --light: #f8f9fa;
+            --gray: #adb5bd;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.3rem;
+            font-weight: bold;
+        }
+
+        .logo i {
+            font-size: 1.8rem;
+        }
+
+        .auth-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .auth-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 25px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 768px) {
+            .main-content {
+                flex-direction: row;
+            }
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: #f8f9fa;
+            padding: 20px;
+            border-right: 1px solid #dee2e6;
+        }
+
+        @media (min-width: 768px) {
+            .sidebar {
+                width: 300px;
+                min-height: calc(100vh - 140px);
+            }
+        }
+
+        .vehicle-list {
+            margin-top: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .vehicle-card {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .vehicle-card.active {
+            border-color: var(--primary);
+            background: #e6f0ff;
+        }
+
+        .vehicle-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+        }
+
+        .vehicle-info {
+            flex: 1;
+        }
+
+        .vehicle-info h3 {
+            font-size: 1.1rem;
+            margin-bottom: 5px;
+        }
+
+        .vehicle-info p {
+            font-size: 0.9rem;
+            color: var(--gray);
+        }
+
+        .vehicle-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .add-vehicle-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, var(--success), #4895ef);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        /* Content Area */
+        .content-area {
+            flex: 1;
+            padding: 20px;
+            background: white;
+        }
+
+        /* Dashboard Cards */
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px 15px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-card h3 {
+            font-size: 0.9rem;
+            color: var(--gray);
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: var(--dark);
+        }
+
+        .stat-card .unit {
+            font-size: 0.8rem;
+            color: var(--gray);
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            padding: 5px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            border: none;
+            background: #f8f9fa;
+            border-radius: 30px;
+            font-weight: 600;
+            color: var(--gray);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        /* Panels */
+        .panel {
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        /* Forms */
+        .expense-form, #trip-form, #service-form {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        @media (min-width: 768px) {
+            .expense-form, #trip-form {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .input-group label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .input-group input,
+        .input-group select,
+        .input-group textarea {
+            padding: 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            font-size: 16px;
+        }
+
+        .input-group input:focus,
+        .input-group select:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+
+        .btn {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 30px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success), #4895ef);
+            color: white;
+        }
+
+        /* Tables */
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            display: block;
+            overflow-x: auto;
+        }
+
+        .history-table th,
+        .history-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .history-table th {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            color: var(--primary);
+            cursor: pointer;
+            font-size: 1.1rem;
+            padding: 5px;
+            margin: 0 3px;
+        }
+
+        .delete-btn {
+            color: var(--danger);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 25px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 2rem;
+            cursor: pointer;
+            color: var(--gray);
+        }
+
+        /* Filter Section */
+        .filter-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        .filter-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        @media (min-width: 768px) {
+            .filter-controls {
+                flex-direction: row;
+                align-items: flex-end;
+            }
+        }
+
+        .data-summary {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .summary-item {
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .summary-item .label {
+            font-size: 0.8rem;
+            color: var(--gray);
+        }
+
+        .summary-item .value {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        /* Service Reminder */
+        .service-reminder {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: #fff3cd;
+            color: #856404;
+            border-left: 5px solid #ffc107;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 20px;
+            background: #f8f9fa;
+            color: var(--gray);
+            border-top: 1px solid #dee2e6;
+        }
+
+        /* Login Prompt */
+        .login-prompt {
+            text-align: center;
+            padding: 50px 20px;
+            color: var(--gray);
+        }
+
+        .login-prompt i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+
+        /* No Vehicle */
+        .no-vehicle {
+            text-align: center;
+            padding: 50px 20px;
+            color: var(--gray);
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            left: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            z-index: 2000;
+            transform: translateY(-150%);
+            transition: transform 0.3s;
+            text-align: center;
+        }
+
+        @media (min-width: 768px) {
+            .notification {
+                left: auto;
+                min-width: 300px;
+            }
+        }
+
+        .notification.show {
+            transform: translateY(0);
+        }
+
+        .notification.success { background: linear-gradient(135deg, #4cc9f0, #4895ef); }
+        .notification.error { background: linear-gradient(135deg, #f72585, #b5179e); }
+        .notification.warning { background: linear-gradient(135deg, #f8961e, #f3722c); }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <i class="fas fa-car"></i>
+                <span>Vehicle Manager Pro</span>
+            </div>
+            <div class="auth-section">
+                <div id="user-info" class="user-info" style="display: none;">
+                    <span id="user-name">Guest User</span>
+                    <button class="auth-btn" id="sign-out-btn">Sign Out</button>
+                </div>
+                <div id="auth-buttons">
+                    <button class="auth-btn" id="sign-in-btn">Sign In</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <h2><i class="fas fa-car-side"></i> My Vehicles</h2>
+                <div class="vehicle-list" id="vehicle-list">
+                    <!-- Vehicles will be added here -->
+                </div>
+                <button class="add-vehicle-btn" id="add-vehicle-btn">
+                    <i class="fas fa-plus"></i> Add New Vehicle
+                </button>
+            </aside>
+
+            <main class="content-area">
+                <div id="login-prompt" class="login-prompt">
+                    <i class="fas fa-user-lock"></i>
+                    <h2>Welcome to Vehicle Manager Pro</h2>
+                    <p>Sign in to access your vehicle data or continue as guest</p>
+                    <button class="btn btn-primary" id="guest-login-btn" style="margin-top: 20px;">
+                        <i class="fas fa-user"></i> Continue as Guest
+                    </button>
+                </div>
+
+                <div id="no-vehicle" class="no-vehicle" style="display: none;">
+                    <i class="fas fa-car-side"></i>
+                    <h2>No Vehicle Selected</h2>
+                    <p>Select a vehicle from the list or add a new one to get started.</p>
+                </div>
+
+                <div id="vehicle-details" style="display: none;">
+                    <!-- Dashboard -->
+                    <div class="dashboard">
+                        <div class="stat-card">
+                            <h3>Current Odometer</h3>
+                            <div class="value" id="current-odometer">0</div>
+                            <div class="unit">km</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Total Spent</h3>
+                            <div class="value" id="total-spent">0</div>
+                            <div class="unit">$</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Avg Mileage</h3>
+                            <div class="value" id="avg-mileage">0</div>
+                            <div class="unit">km/L</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Next Service</h3>
+                            <div class="value" id="next-service">-</div>
+                            <div class="unit"></div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <div class="tab active" data-tab="expenses">Expenses</div>
+                        <div class="tab" data-tab="trips">Trips</div>
+                        <div class="tab" data-tab="services">Services</div>
+                        <div class="tab" data-tab="reports">Reports</div>
+                    </div>
+
+                    <!-- Panels -->
+                    <div class="panels">
+                        <!-- Expenses Panel -->
+                        <div class="panel active" id="expenses-panel">
+                            <h3>Expense Tracking</h3>
+                            
+                            <!-- Filter Section -->
+                            <div class="filter-section">
+                                <h4>Filter Expenses</h4>
+                                <div class="filter-controls">
+                                    <div class="input-group">
+                                        <label>Period</label>
+                                        <select id="expense-filter-period">
+                                            <option value="all">All Time</option>
+                                            <option value="thisMonth" selected>This Month</option>
+                                            <option value="lastMonth">Last Month</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Category</label>
+                                        <select id="expense-filter-category">
+                                            <option value="all">All</option>
+                                            <option value="fuel">Fuel</option>
+                                            <option value="service">Service</option>
+                                            <option value="repair">Repair</option>
+                                        </select>
+                                    </div>
+                                    <button class="btn btn-primary" id="apply-expense-filter">
+                                        <i class="fas fa-filter"></i> Apply
+                                    </button>
+                                </div>
+                                <div class="data-summary" id="expense-summary">
+                                    <div class="summary-item">
+                                        <div class="label">Total</div>
+                                        <div class="value" id="total-expenses">$0</div>
+                                    </div>
+                                    <div class="summary-item">
+                                        <div class="label">This Month</div>
+                                        <div class="value" id="month-expenses">$0</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Add Expense Form -->
+                            <form class="expense-form" id="expense-form">
+                                <div class="input-group">
+                                    <label>Type</label>
+                                    <select id="expense-type" required>
+                                        <option value="fuel">Fuel</option>
+                                        <option value="service">Service</option>
+                                        <option value="repair">Repair</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Amount ($)</label>
+                                    <input type="number" id="expense-amount" step="0.01" required>
+                                </div>
+                                <div class="input-group" id="fuel-volume-group">
+                                    <label>Fuel Volume (L)</label>
+                                    <input type="number" id="expense-fuel-volume" step="0.01">
+                                </div>
+                                <div class="input-group">
+                                    <label>Date</label>
+                                    <input type="date" id="expense-date" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>Odometer (km)</label>
+                                    <input type="number" id="expense-odometer">
+                                </div>
+                                <div class="input-group">
+                                    <label>Notes</label>
+                                    <textarea id="expense-notes" rows="2"></textarea>
+                                </div>
+                                <input type="hidden" id="expense-id">
+                                <button type="submit" class="btn btn-primary" id="expense-submit-btn">
+                                    <i class="fas fa-save"></i> Add Expense
+                                </button>
+                            </form>
+
+                            <!-- Expense History -->
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Type</th>
+                                        <th>Amount</th>
+                                        <th>Fuel (L)</th>
+                                        <th>Odometer</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="expense-history">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center;">No expenses yet. Add your first expense above.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Trips Panel -->
+                        <div class="panel" id="trips-panel">
+                            <h3>Trip Log</h3>
+                            
+                            <!-- Add Trip Form -->
+                            <form id="trip-form" class="expense-form">
+                                <div class="input-group">
+                                    <label>Date</label>
+                                    <input type="date" id="trip-date" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>Start Location</label>
+                                    <input type="text" id="trip-start" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>End Location</label>
+                                    <input type="text" id="trip-end" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>Distance (km)</label>
+                                    <input type="number" id="trip-distance" step="0.1" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>Purpose</label>
+                                    <input type="text" id="trip-purpose">
+                                </div>
+                                <input type="hidden" id="trip-id">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save"></i> Add Trip
+                                </button>
+                            </form>
+
+                            <!-- Trip History -->
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Route</th>
+                                        <th>Distance</th>
+                                        <th>Purpose</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="trip-history">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center;">No trips yet. Add your first trip above.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Services Panel -->
+                        <div class="panel" id="services-panel">
+                            <h3>Service History</h3>
+                            
+                            <div id="service-reminder" class="service-reminder" style="display: none;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span id="service-reminder-text"></span>
+                            </div>
+
+                            <!-- Add Service Form -->
+                            <button class="btn btn-success" id="add-service-btn" style="margin-bottom: 20px;">
+                                <i class="fas fa-plus"></i> Add Service Record
+                            </button>
+
+                            <!-- Service History -->
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Service Type</th>
+                                        <th>Odometer</th>
+                                        <th>Cost</th>
+                                        <th>Next Service</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="service-history">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center;">No services yet. Add your first service above.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Reports Panel -->
+                        <div class="panel" id="reports-panel">
+                            <h3>Reports</h3>
+                            
+                            <div class="filter-section">
+                                <h4>Generate Report</h4>
+                                <div class="filter-controls">
+                                    <div class="input-group">
+                                        <label>Report Type</label>
+                                        <select id="report-type">
+                                            <option value="monthly">Monthly Summary</option>
+                                            <option value="category">By Category</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Month</label>
+                                        <select id="report-month">
+                                            <option value="1">January</option>
+                                            <option value="2">February</option>
+                                            <option value="3">March</option>
+                                            <option value="4">April</option>
+                                            <option value="5">May</option>
+                                            <option value="6">June</option>
+                                            <option value="7">July</option>
+                                            <option value="8">August</option>
+                                            <option value="9">September</option>
+                                            <option value="10">October</option>
+                                            <option value="11">November</option>
+                                            <option value="12">December</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Year</label>
+                                        <select id="report-year"></select>
+                                    </div>
+                                    <button class="btn btn-primary" id="generate-report-btn">
+                                        <i class="fas fa-chart-bar"></i> Generate
+                                    </button>
+                                    <button class="btn btn-success" id="export-report-btn">
+                                        <i class="fas fa-download"></i> Export PDF
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="report-results"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <footer>
+            <p>Vehicle Manager Pro &copy; 2024 - Complete Working Version</p>
+        </footer>
+    </div>
+
+    <!-- Add Vehicle Modal -->
+    <div class="modal" id="add-vehicle-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="vehicle-modal-title">Add New Vehicle</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <form id="vehicle-form">
+                <div class="input-group">
+                    <label>Vehicle Name</label>
+                    <input type="text" id="vehicle-name" placeholder="e.g., My Honda Civic" required>
+                </div>
+                <div class="input-group">
+                    <label>Vehicle Type</label>
+                    <select id="vehicle-type">
+                        <option value="car">Car</option>
+                        <option value="suv">SUV</option>
+                        <option value="truck">Truck</option>
+                        <option value="motorcycle">Motorcycle</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Model</label>
+                    <input type="text" id="vehicle-model" placeholder="e.g., Honda Civic 2020">
+                </div>
+                <div class="input-group">
+                    <label>Initial Odometer (km)</label>
+                    <input type="number" id="initial-odometer" value="0">
+                </div>
+                <input type="hidden" id="vehicle-id">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Vehicle
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Service Modal -->
+    <div class="modal" id="add-service-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Service Record</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <form id="service-form">
+                <div class="input-group">
+                    <label>Service Type</label>
+                    <select id="service-type" required>
+                        <option value="oil_change">Oil Change</option>
+                        <option value="tire_rotation">Tire Rotation</option>
+                        <option value="brake_service">Brake Service</option>
+                        <option value="general">General Service</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Date</label>
+                    <input type="date" id="service-date" required>
+                </div>
+                <div class="input-group">
+                    <label>Odometer (km)</label>
+                    <input type="number" id="service-odometer" required>
+                </div>
+                <div class="input-group">
+                    <label>Cost ($)</label>
+                    <input type="number" id="service-cost" step="0.01" required>
+                </div>
+                <div class="input-group">
+                    <label>Next Service (km)</label>
+                    <input type="number" id="service-next-km" placeholder="e.g., 5000">
+                </div>
+                <div class="input-group">
+                    <label>Details</label>
+                    <textarea id="service-details" rows="3"></textarea>
+                </div>
+                <input type="hidden" id="service-id">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Service
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification"></div>
+
+    <script>
+        // ==================== DATA STORAGE ====================
+        // Use localStorage for demo purposes (no Firebase needed)
+        const STORAGE_KEYS = {
+            VEHICLES: 'vehicle_manager_vehicles',
+            SELECTED_VEHICLE: 'vehicle_manager_selected',
+            USER: 'vehicle_manager_user'
+        };
+
+        // Sample data for demo
+        const SAMPLE_DATA = {
+            vehicles: [
+                {
+                    id: '1',
+                    name: 'My Honda Civic',
+                    type: 'car',
+                    model: 'Honda Civic 2020',
+                    odometer: 15000,
+                    createdAt: new Date().toISOString()
+                },
+                {
+                    id: '2',
+                    name: 'Family SUV',
+                    type: 'suv',
+                    model: 'Toyota RAV4',
+                    odometer: 25000,
+                    createdAt: new Date().toISOString()
+                }
+            ],
+            expenses: {
+                '1': [
+                    {
+                        id: 'e1',
+                        type: 'fuel',
+                        amount: 45.50,
+                        date: new Date().toISOString().split('T')[0],
+                        fuelVolume: 30.5,
+                        odometer: 15200,
+                        notes: 'Shell gas station'
+                    },
+                    {
+                        id: 'e2',
+                        type: 'service',
+                        amount: 120.00,
+                        date: new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0],
+                        odometer: 15100,
+                        notes: 'Oil change'
+                    }
+                ],
+                '2': []
+            },
+            trips: {
+                '1': [
+                    {
+                        id: 't1',
+                        date: new Date().toISOString().split('T')[0],
+                        startLocation: 'Home',
+                        endLocation: 'Office',
+                        distance: 25.5,
+                        purpose: 'Commute'
+                    }
+                ],
+                '2': []
+            },
+            services: {
+                '1': [
+                    {
+                        id: 's1',
+                        type: 'oil_change',
+                        date: new Date(Date.now() - 30*24*60*60*1000).toISOString().split('T')[0],
+                        odometer: 14500,
+                        cost: 80.00,
+                        nextServiceKm: 5000,
+                        details: 'Regular oil change'
+                    }
+                ],
+                '2': []
+            }
+        };
+
+        // ==================== GLOBAL VARIABLES ====================
+        let vehicles = [];
+        let selectedVehicleId = null;
+        let expenses = [];
+        let trips = [];
+        let services = [];
+        let isGuest = false;
+
+        // DOM Elements
+        const vehicleList = document.getElementById('vehicle-list');
+        const noVehicle = document.getElementById('no-vehicle');
+        const vehicleDetails = document.getElementById('vehicle-details');
+        const loginPrompt = document.getElementById('login-prompt');
+        const addVehicleBtn = document.getElementById('add-vehicle-btn');
+        const addVehicleModal = document.getElementById('add-vehicle-modal');
+        const addServiceModal = document.getElementById('add-service-modal');
+        const addServiceBtn = document.getElementById('add-service-btn');
+        const closeModals = document.querySelectorAll('.close-modal');
+        const vehicleForm = document.getElementById('vehicle-form');
+        const serviceForm = document.getElementById('service-form');
+        const tabs = document.querySelectorAll('.tab');
+        const panels = document.querySelectorAll('.panel');
+        const expenseForm = document.getElementById('expense-form');
+        const tripForm = document.getElementById('trip-form');
+        const signInBtn = document.getElementById('sign-in-btn');
+        const guestLoginBtn = document.getElementById('guest-login-btn');
+        const signOutBtn = document.getElementById('sign-out-btn');
+        const userInfo = document.getElementById('user-info');
+        const userName = document.getElementById('user-name');
+        const expenseType = document.getElementById('expense-type');
+        const fuelVolumeGroup = document.getElementById('fuel-volume-group');
+        const notification = document.getElementById('notification');
+        const applyExpenseFilter = document.getElementById('apply-expense-filter');
+        const generateReportBtn = document.getElementById('generate-report-btn');
+        const exportReportBtn = document.getElementById('export-report-btn');
+        const reportResults = document.getElementById('report-results');
+
+        // ==================== INITIALIZATION ====================
+        function init() {
+            console.log('Initializing app...');
+            loadFromStorage();
+            setupEventListeners();
+            setCurrentDate();
+            populateYearDropdown();
+            
+            // Show login prompt by default
+            loginPrompt.style.display = 'block';
+            vehicleDetails.style.display = 'none';
+            noVehicle.style.display = 'none';
+            
+            console.log('App initialized with', vehicles.length, 'vehicles');
+        }
+
+        // Load data from localStorage
+        function loadFromStorage() {
+            try {
+                // Load vehicles
+                const savedVehicles = localStorage.getItem(STORAGE_KEYS.VEHICLES);
+                if (savedVehicles) {
+                    vehicles = JSON.parse(savedVehicles);
+                } else {
+                    // Use sample data for demo
+                    vehicles = SAMPLE_DATA.vehicles;
+                    saveVehicles();
+                }
+
+                // Load selected vehicle
+                const savedSelected = localStorage.getItem(STORAGE_KEYS.SELECTED_VEHICLE);
+                if (savedSelected) {
+                    selectedVehicleId = savedSelected;
+                }
+
+                // Load user preference
+                const savedUser = localStorage.getItem(STORAGE_KEYS.USER);
+                if (savedUser) {
+                    const user = JSON.parse(savedUser);
+                    if (user.isGuest) {
+                        enableGuestMode();
+                    }
+                }
+            } catch (e) {
+                console.error('Error loading from storage:', e);
+                vehicles = [];
+            }
+        }
+
+        // Save vehicles to localStorage
+        function saveVehicles() {
+            localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(vehicles));
+        }
+
+        // Save selected vehicle
+        function saveSelectedVehicle() {
+            if (selectedVehicleId) {
+                localStorage.setItem(STORAGE_KEYS.SELECTED_VEHICLE, selectedVehicleId);
+            }
+        }
+
+        // ==================== AUTHENTICATION ====================
+        function enableGuestMode() {
+            isGuest = true;
+            userInfo.style.display = 'flex';
+            document.getElementById('auth-buttons').style.display = 'none';
+            userName.textContent = 'Guest User';
+            loginPrompt.style.display = 'none';
+            
+            // Save user preference
+            localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ isGuest: true }));
+            
+            renderVehicles();
+            
+            if (vehicles.length > 0) {
+                selectVehicle(vehicles[0].id);
+            } else {
+                vehicleDetails.style.display = 'none';
+                noVehicle.style.display = 'block';
+            }
+            
+            showNotification('Welcome, Guest User!', 'success');
+        }
+
+        function signOut() {
+            isGuest = false;
+            userInfo.style.display = 'none';
+            document.getElementById('auth-buttons').style.display = 'block';
+            loginPrompt.style.display = 'block';
+            vehicleDetails.style.display = 'none';
+            noVehicle.style.display = 'none';
+            selectedVehicleId = null;
+            
+            // Clear user preference
+            localStorage.removeItem(STORAGE_KEYS.USER);
+            
+            showNotification('Signed out successfully', 'info');
+        }
+
+        // ==================== VEHICLE FUNCTIONS ====================
+        function renderVehicles() {
+            vehicleList.innerHTML = '';
+            
+            if (vehicles.length === 0) {
+                vehicleList.innerHTML = '<p>No vehicles yet. Add your first vehicle!</p>';
+                return;
+            }
+            
+            vehicles.forEach(vehicle => {
+                const card = document.createElement('div');
+                card.className = 'vehicle-card';
+                if (vehicle.id === selectedVehicleId) {
+                    card.classList.add('active');
+                }
+                
+                card.innerHTML = `
+                    <div class="vehicle-icon">
+                        <i class="fas fa-${getVehicleIcon(vehicle.type)}"></i>
+                    </div>
+                    <div class="vehicle-info">
+                        <h3>${vehicle.name}</h3>
+                        <p>${vehicle.model || 'No model'} • ${vehicle.odometer || 0} km</p>
+                    </div>
+                    <div class="vehicle-actions">
+                        <button class="action-btn" onclick="editVehicle('${vehicle.id}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteVehicle('${vehicle.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                
+                card.addEventListener('click', (e) => {
+                    if (!e.target.closest('.action-btn')) {
+                        selectVehicle(vehicle.id);
+                    }
+                });
+                
+                vehicleList.appendChild(card);
+            });
+        }
+
+        function selectVehicle(vehicleId) {
+            selectedVehicleId = vehicleId;
+            saveSelectedVehicle();
+            
+            renderVehicles();
+            
+            const vehicle = vehicles.find(v => v.id === vehicleId);
+            if (vehicle) {
+                noVehicle.style.display = 'none';
+                vehicleDetails.style.display = 'block';
+                
+                // Load data for this vehicle
+                loadVehicleData(vehicleId);
+                updateDashboard();
+            }
+        }
+
+        function loadVehicleData(vehicleId) {
+            // Load expenses
+            const savedExpenses = localStorage.getItem(`expenses_${vehicleId}`);
+            expenses = savedExpenses ? JSON.parse(savedExpenses) : (SAMPLE_DATA.expenses[vehicleId] || []);
+            
+            // Load trips
+            const savedTrips = localStorage.getItem(`trips_${vehicleId}`);
+            trips = savedTrips ? JSON.parse(savedTrips) : (SAMPLE_DATA.trips[vehicleId] || []);
+            
+            // Load services
+            const savedServices = localStorage.getItem(`services_${vehicleId}`);
+            services = savedServices ? JSON.parse(savedServices) : (SAMPLE_DATA.services[vehicleId] || []);
+            
+            renderExpenses();
+            renderTrips();
+            renderServices();
+            checkServiceReminder();
+        }
+
+        function saveExpenses() {
+            if (selectedVehicleId) {
+                localStorage.setItem(`expenses_${selectedVehicleId}`, JSON.stringify(expenses));
+            }
+        }
+
+        function saveTrips() {
+            if (selectedVehicleId) {
+                localStorage.setItem(`trips_${selectedVehicleId}`, JSON.stringify(trips));
+            }
+        }
+
+        function saveServices() {
+            if (selectedVehicleId) {
+                localStorage.setItem(`services_${selectedVehicleId}`, JSON.stringify(services));
+            }
+        }
+
+        function addNewVehicle() {
+            const name = document.getElementById('vehicle-name').value;
+            const type = document.getElementById('vehicle-type').value;
+            const model = document.getElementById('vehicle-model').value;
+            const odometer = parseInt(document.getElementById('initial-odometer').value) || 0;
+            
+            const newVehicle = {
+                id: Date.now().toString(),
+                name,
+                type,
+                model,
+                odometer,
+                createdAt: new Date().toISOString()
+            };
+            
+            vehicles.push(newVehicle);
+            saveVehicles();
+            
+            addVehicleModal.style.display = 'none';
+            vehicleForm.reset();
+            
+            renderVehicles();
+            selectVehicle(newVehicle.id);
+            
+            showNotification('Vehicle added successfully!', 'success');
+        }
+
+        function editVehicle(id) {
+            const vehicle = vehicles.find(v => v.id === id);
+            if (!vehicle) return;
+            
+            document.getElementById('vehicle-name').value = vehicle.name;
+            document.getElementById('vehicle-type').value = vehicle.type;
+            document.getElementById('vehicle-model').value = vehicle.model || '';
+            document.getElementById('initial-odometer').value = vehicle.odometer || 0;
+            document.getElementById('vehicle-id').value = id;
+            document.getElementById('vehicle-modal-title').textContent = 'Edit Vehicle';
+            
+            addVehicleModal.style.display = 'flex';
+        }
+
+        function updateVehicle() {
+            const id = document.getElementById('vehicle-id').value;
+            const vehicle = vehicles.find(v => v.id === id);
+            if (!vehicle) return;
+            
+            vehicle.name = document.getElementById('vehicle-name').value;
+            vehicle.type = document.getElementById('vehicle-type').value;
+            vehicle.model = document.getElementById('vehicle-model').value;
+            vehicle.odometer = parseInt(document.getElementById('initial-odometer').value) || 0;
+            
+            saveVehicles();
+            
+            addVehicleModal.style.display = 'none';
+            vehicleForm.reset();
+            document.getElementById('vehicle-id').value = '';
+            document.getElementById('vehicle-modal-title').textContent = 'Add New Vehicle';
+            
+            renderVehicles();
+            if (selectedVehicleId === id) {
+                updateDashboard();
+            }
+            
+            showNotification('Vehicle updated successfully!', 'success');
+        }
+
+        function deleteVehicle(id) {
+            if (!confirm('Are you sure you want to delete this vehicle?')) return;
+            
+            vehicles = vehicles.filter(v => v.id !== id);
+            saveVehicles();
+            
+            // Clear vehicle data from localStorage
+            localStorage.removeItem(`expenses_${id}`);
+            localStorage.removeItem(`trips_${id}`);
+            localStorage.removeItem(`services_${id}`);
+            
+            if (selectedVehicleId === id) {
+                selectedVehicleId = vehicles.length > 0 ? vehicles[0].id : null;
+                if (selectedVehicleId) {
+                    selectVehicle(selectedVehicleId);
+                } else {
+                    vehicleDetails.style.display = 'none';
+                    noVehicle.style.display = 'block';
+                }
+            }
+            
+            renderVehicles();
+            showNotification('Vehicle deleted successfully!', 'success');
+        }
+
+        // ==================== EXPENSE FUNCTIONS ====================
+        function addNewExpense() {
+            const type = document.getElementById('expense-type').value;
+            const amount = parseFloat(document.getElementById('expense-amount').value);
+            const date = document.getElementById('expense-date').value;
+            const odometer = document.getElementById('expense-odometer').value ? parseInt(document.getElementById('expense-odometer').value) : null;
+            const notes = document.getElementById('expense-notes').value;
+            const fuelVolume = type === 'fuel' ? parseFloat(document.getElementById('expense-fuel-volume').value) : null;
+            
+            if (!amount || !date) {
+                showNotification('Please fill in required fields', 'warning');
+                return;
+            }
+            
+            const newExpense = {
+                id: Date.now().toString(),
+                type,
+                amount,
+                date,
+                odometer,
+                notes,
+                fuelVolume
+            };
+            
+            expenses.push(newExpense);
+            saveExpenses();
+            
+            // Update vehicle odometer if higher
+            if (odometer) {
+                const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+                if (vehicle && odometer > (vehicle.odometer || 0)) {
+                    vehicle.odometer = odometer;
+                    saveVehicles();
+                }
+            }
+            
+            expenseForm.reset();
+            setCurrentDate();
+            renderExpenses();
+            updateDashboard();
+            
+            showNotification('Expense added successfully!', 'success');
+        }
+
+        function renderExpenses() {
+            const tbody = document.getElementById('expense-history');
+            tbody.innerHTML = '';
+            
+            if (expenses.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No expenses yet. Add your first expense above.</td></tr>';
+                return;
+            }
+            
+            // Sort by date descending
+            const sorted = [...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            sorted.forEach(expense => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDate(expense.date)}</td>
+                    <td>${capitalizeFirst(expense.type)}</td>
+                    <td>$${expense.amount.toFixed(2)}</td>
+                    <td>${expense.fuelVolume ? expense.fuelVolume.toFixed(2) : '-'}</td>
+                    <td>${expense.odometer || '-'}</td>
+                    <td>
+                        <button class="action-btn" onclick="editExpense('${expense.id}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteExpense('${expense.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+            
+            updateExpenseSummary();
+        }
+
+        function editExpense(id) {
+            const expense = expenses.find(e => e.id === id);
+            if (!expense) return;
+            
+            document.getElementById('expense-type').value = expense.type;
+            document.getElementById('expense-amount').value = expense.amount;
+            document.getElementById('expense-date').value = expense.date;
+            document.getElementById('expense-odometer').value = expense.odometer || '';
+            document.getElementById('expense-notes').value = expense.notes || '';
+            document.getElementById('expense-fuel-volume').value = expense.fuelVolume || '';
+            document.getElementById('expense-id').value = id;
+            document.getElementById('expense-submit-btn').innerHTML = '<i class="fas fa-save"></i> Update Expense';
+            
+            // Show/hide fuel volume field
+            fuelVolumeGroup.style.display = expense.type === 'fuel' ? 'block' : 'none';
+            
+            expenseForm.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateExpense() {
+            const id = document.getElementById('expense-id').value;
+            const expense = expenses.find(e => e.id === id);
+            if (!expense) return;
+            
+            expense.type = document.getElementById('expense-type').value;
+            expense.amount = parseFloat(document.getElementById('expense-amount').value);
+            expense.date = document.getElementById('expense-date').value;
+            expense.odometer = document.getElementById('expense-odometer').value ? parseInt(document.getElementById('expense-odometer').value) : null;
+            expense.notes = document.getElementById('expense-notes').value;
+            expense.fuelVolume = expense.type === 'fuel' ? parseFloat(document.getElementById('expense-fuel-volume').value) : null;
+            
+            saveExpenses();
+            
+            // Reset form
+            expenseForm.reset();
+            setCurrentDate();
+            document.getElementById('expense-id').value = '';
+            document.getElementById('expense-submit-btn').innerHTML = '<i class="fas fa-save"></i> Add Expense';
+            
+            renderExpenses();
+            updateDashboard();
+            
+            showNotification('Expense updated successfully!', 'success');
+        }
+
+        function deleteExpense(id) {
+            if (!confirm('Delete this expense?')) return;
+            
+            expenses = expenses.filter(e => e.id !== id);
+            saveExpenses();
+            renderExpenses();
+            updateDashboard();
+            
+            showNotification('Expense deleted', 'info');
+        }
+
+        function updateExpenseSummary() {
+            const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            const now = new Date();
+            const thisMonth = expenses.filter(e => {
+                const d = new Date(e.date);
+                return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+            }).reduce((sum, e) => sum + e.amount, 0);
+            
+            document.getElementById('total-expenses').textContent = '$' + total.toFixed(2);
+            document.getElementById('month-expenses').textContent = '$' + thisMonth.toFixed(2);
+        }
+
+        // ==================== TRIP FUNCTIONS ====================
+        function addNewTrip() {
+            const date = document.getElementById('trip-date').value;
+            const start = document.getElementById('trip-start').value;
+            const end = document.getElementById('trip-end').value;
+            const distance = parseFloat(document.getElementById('trip-distance').value);
+            const purpose = document.getElementById('trip-purpose').value;
+            
+            if (!date || !start || !end || !distance) {
+                showNotification('Please fill in all required fields', 'warning');
+                return;
+            }
+            
+            const newTrip = {
+                id: Date.now().toString(),
+                date,
+                startLocation: start,
+                endLocation: end,
+                distance,
+                purpose
+            };
+            
+            trips.push(newTrip);
+            saveTrips();
+            
+            tripForm.reset();
+            setCurrentDate();
+            renderTrips();
+            updateDashboard();
+            
+            showNotification('Trip added successfully!', 'success');
+        }
+
+        function renderTrips() {
+            const tbody = document.getElementById('trip-history');
+            tbody.innerHTML = '';
+            
+            if (trips.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No trips yet. Add your first trip above.</td></tr>';
+                return;
+            }
+            
+            const sorted = [...trips].sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            sorted.forEach(trip => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDate(trip.date)}</td>
+                    <td>${trip.startLocation} → ${trip.endLocation}</td>
+                    <td>${trip.distance} km</td>
+                    <td>${trip.purpose || '-'}</td>
+                    <td>
+                        <button class="action-btn" onclick="editTrip('${trip.id}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteTrip('${trip.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function editTrip(id) {
+            const trip = trips.find(t => t.id === id);
+            if (!trip) return;
+            
+            document.getElementById('trip-date').value = trip.date;
+            document.getElementById('trip-start').value = trip.startLocation;
+            document.getElementById('trip-end').value = trip.endLocation;
+            document.getElementById('trip-distance').value = trip.distance;
+            document.getElementById('trip-purpose').value = trip.purpose || '';
+            document.getElementById('trip-id').value = id;
+            
+            tripForm.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateTrip() {
+            const id = document.getElementById('trip-id').value;
+            const trip = trips.find(t => t.id === id);
+            if (!trip) return;
+            
+            trip.date = document.getElementById('trip-date').value;
+            trip.startLocation = document.getElementById('trip-start').value;
+            trip.endLocation = document.getElementById('trip-end').value;
+            trip.distance = parseFloat(document.getElementById('trip-distance').value);
+            trip.purpose = document.getElementById('trip-purpose').value;
+            
+            saveTrips();
+            
+            tripForm.reset();
+            setCurrentDate();
+            document.getElementById('trip-id').value = '';
+            renderTrips();
+            
+            showNotification('Trip updated successfully!', 'success');
+        }
+
+        function deleteTrip(id) {
+            if (!confirm('Delete this trip?')) return;
+            
+            trips = trips.filter(t => t.id !== id);
+            saveTrips();
+            renderTrips();
+            
+            showNotification('Trip deleted', 'info');
+        }
+
+        // ==================== SERVICE FUNCTIONS ====================
+        function addNewService() {
+            const type = document.getElementById('service-type').value;
+            const date = document.getElementById('service-date').value;
+            const odometer = parseInt(document.getElementById('service-odometer').value);
+            const cost = parseFloat(document.getElementById('service-cost').value);
+            const nextKm = document.getElementById('service-next-km').value ? parseInt(document.getElementById('service-next-km').value) : null;
+            const details = document.getElementById('service-details').value;
+            
+            if (!type || !date || !odometer || !cost) {
+                showNotification('Please fill in required fields', 'warning');
+                return;
+            }
+            
+            const newService = {
+                id: Date.now().toString(),
+                type,
+                date,
+                odometer,
+                cost,
+                nextServiceKm: nextKm,
+                details
+            };
+            
+            services.push(newService);
+            saveServices();
+            
+            // Update vehicle odometer
+            const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+            if (vehicle && odometer > (vehicle.odometer || 0)) {
+                vehicle.odometer = odometer;
+                saveVehicles();
+            }
+            
+            addServiceModal.style.display = 'none';
+            serviceForm.reset();
+            renderServices();
+            updateDashboard();
+            checkServiceReminder();
+            
+            showNotification('Service added successfully!', 'success');
+        }
+
+        function renderServices() {
+            const tbody = document.getElementById('service-history');
+            tbody.innerHTML = '';
+            
+            if (services.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No services yet. Add your first service above.</td></tr>';
+                return;
+            }
+            
+            const sorted = [...services].sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            sorted.forEach(service => {
+                let nextServiceText = '-';
+                if (service.nextServiceKm) {
+                    nextServiceText = `${service.odometer + service.nextServiceKm} km`;
+                }
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDate(service.date)}</td>
+                    <td>${formatServiceType(service.type)}</td>
+                    <td>${service.odometer}</td>
+                    <td>$${service.cost.toFixed(2)}</td>
+                    <td>${nextServiceText}</td>
+                    <td>
+                        <button class="action-btn" onclick="editService('${service.id}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteService('${service.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function editService(id) {
+            const service = services.find(s => s.id === id);
+            if (!service) return;
+            
+            document.getElementById('service-type').value = service.type;
+            document.getElementById('service-date').value = service.date;
+            document.getElementById('service-odometer').value = service.odometer;
+            document.getElementById('service-cost').value = service.cost;
+            document.getElementById('service-next-km').value = service.nextServiceKm || '';
+            document.getElementById('service-details').value = service.details || '';
+            document.getElementById('service-id').value = id;
+            
+            addServiceModal.style.display = 'flex';
+        }
+
+        function updateService() {
+            const id = document.getElementById('service-id').value;
+            const service = services.find(s => s.id === id);
+            if (!service) return;
+            
+            service.type = document.getElementById('service-type').value;
+            service.date = document.getElementById('service-date').value;
+            service.odometer = parseInt(document.getElementById('service-odometer').value);
+            service.cost = parseFloat(document.getElementById('service-cost').value);
+            service.nextServiceKm = document.getElementById('service-next-km').value ? parseInt(document.getElementById('service-next-km').value) : null;
+            service.details = document.getElementById('service-details').value;
+            
+            saveServices();
+            
+            addServiceModal.style.display = 'none';
+            serviceForm.reset();
+            document.getElementById('service-id').value = '';
+            renderServices();
+            updateDashboard();
+            checkServiceReminder();
+            
+            showNotification('Service updated successfully!', 'success');
+        }
+
+        function deleteService(id) {
+            if (!confirm('Delete this service record?')) return;
+            
+            services = services.filter(s => s.id !== id);
+            saveServices();
+            renderServices();
+            checkServiceReminder();
+            
+            showNotification('Service deleted', 'info');
+        }
+
+        function checkServiceReminder() {
+            const reminder = document.getElementById('service-reminder');
+            const reminderText = document.getElementById('service-reminder-text');
+            
+            if (services.length === 0) {
+                reminder.style.display = 'none';
+                return;
+            }
+            
+            const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+            if (!vehicle) return;
+            
+            const latestService = services[0];
+            let reminderMessage = '';
+            
+            if (latestService.nextServiceKm) {
+                const kmRemaining = (latestService.odometer + latestService.nextServiceKm) - (vehicle.odometer || 0);
+                if (kmRemaining <= 0) {
+                    reminderMessage = `Service overdue by ${Math.abs(kmRemaining)} km!`;
+                } else if (kmRemaining <= 500) {
+                    reminderMessage = `Service due in ${kmRemaining} km`;
+                }
+            }
+            
+            if (reminderMessage) {
+                reminderText.textContent = reminderMessage;
+                reminder.style.display = 'flex';
+            } else {
+                reminder.style.display = 'none';
+            }
+        }
+
+        // ==================== DASHBOARD FUNCTIONS ====================
+        function updateDashboard() {
+            const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+            if (!vehicle) return;
+            
+            // Current odometer
+            document.getElementById('current-odometer').textContent = vehicle.odometer || 0;
+            
+            // Total spent
+            const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+            document.getElementById('total-spent').textContent = totalSpent.toFixed(2);
+            
+            // Average mileage
+            const fuelExpenses = expenses.filter(e => e.type === 'fuel' && e.fuelVolume && e.odometer);
+            let avgMileage = 0;
+            if (fuelExpenses.length > 1) {
+                const sorted = fuelExpenses.sort((a, b) => a.odometer - b.odometer);
+                let totalMileage = 0;
+                let count = 0;
+                for (let i = 1; i < sorted.length; i++) {
+                    const distance = sorted[i].odometer - sorted[i-1].odometer;
+                    if (distance > 0 && sorted[i].fuelVolume > 0) {
+                        totalMileage += distance / sorted[i].fuelVolume;
+                        count++;
+                    }
+                }
+                avgMileage = count > 0 ? totalMileage / count : 0;
+            }
+            document.getElementById('avg-mileage').textContent = avgMileage.toFixed(1);
+            
+            // Next service
+            checkServiceReminder();
+        }
+
+        // ==================== REPORT FUNCTIONS ====================
+        function generateReport() {
+            const type = document.getElementById('report-type').value;
+            const month = parseInt(document.getElementById('report-month').value);
+            const year = parseInt(document.getElementById('report-year').value);
+            
+            let filteredExpenses = [];
+            
+            if (type === 'monthly') {
+                filteredExpenses = expenses.filter(e => {
+                    const d = new Date(e.date);
+                    return d.getMonth() + 1 === month && d.getFullYear() === year;
+                });
+            } else {
+                filteredExpenses = expenses.filter(e => {
+                    const d = new Date(e.date);
+                    return d.getFullYear() === year;
+                });
+            }
+            
+            if (filteredExpenses.length === 0) {
+                reportResults.innerHTML = '<p>No expenses found for the selected period.</p>';
+                return;
+            }
+            
+            const total = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            // Group by category
+            const byCategory = {};
+            filteredExpenses.forEach(e => {
+                if (!byCategory[e.type]) byCategory[e.type] = 0;
+                byCategory[e.type] += e.amount;
+            });
+            
+            let html = `
+                <div class="filter-section">
+                    <h4>Report Summary</h4>
+                    <div class="data-summary">
+                        <div class="summary-item">
+                            <div class="label">Total Expenses</div>
+                            <div class="value">$${total.toFixed(2)}</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="label">Number of Expenses</div>
+                            <div class="value">${filteredExpenses.length}</div>
+                        </div>
+                    </div>
+                    
+                    <h4 style="margin-top: 20px;">Expenses by Category</h4>
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Category</th>
+                                <th>Amount</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            for (const category in byCategory) {
+                const percentage = ((byCategory[category] / total) * 100).toFixed(1);
+                html += `
+                    <tr>
+                        <td>${capitalizeFirst(category)}</td>
+                        <td>$${byCategory[category].toFixed(2)}</td>
+                        <td>${percentage}%</td>
+                    </tr>
+                `;
+            }
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            reportResults.innerHTML = html;
+        }
+
+        function exportToPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            const vehicle = vehicles.find(v => v.id === selectedVehicleId);
+            if (!vehicle) return;
+            
+            doc.setFontSize(18);
+            doc.text('Vehicle Expense Report', 20, 20);
+            
+            doc.setFontSize(12);
+            doc.text(`Vehicle: ${vehicle.name}`, 20, 35);
+            doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 45);
+            
+            const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+            doc.text(`Total Expenses: $${total.toFixed(2)}`, 20, 55);
+            
+            const tableData = expenses.map(e => [
+                formatDate(e.date),
+                capitalizeFirst(e.type),
+                `$${e.amount.toFixed(2)}`
+            ]);
+            
+            doc.autoTable({
+                startY: 70,
+                head: [['Date', 'Type', 'Amount']],
+                body: tableData,
+                theme: 'grid'
+            });
+            
+            doc.save(`vehicle_report_${new Date().toISOString().split('T')[0]}.pdf`);
+            showNotification('PDF downloaded!', 'success');
+        }
+
+        // ==================== UTILITY FUNCTIONS ====================
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleDateString();
+        }
+
+        function capitalizeFirst(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
+
+        function formatServiceType(type) {
+            const types = {
+                'oil_change': 'Oil Change',
+                'tire_rotation': 'Tire Rotation',
+                'brake_service': 'Brake Service',
+                'general': 'General Service'
+            };
+            return types[type] || type;
+        }
+
+        function getVehicleIcon(type) {
+            const icons = {
+                'car': 'car',
+                'suv': 'truck-monster',
+                'truck': 'truck',
+                'motorcycle': 'motorcycle'
+            };
+            return icons[type] || 'car';
+        }
+
+        function setCurrentDate() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('expense-date').value = today;
+            document.getElementById('trip-date').value = today;
+            document.getElementById('service-date').value = today;
+        }
+
+        function populateYearDropdown() {
+            const yearSelect = document.getElementById('report-year');
+            const currentYear = new Date().getFullYear();
+            
+            for (let year = currentYear; year >= currentYear - 5; year--) {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                if (year === currentYear) {
+                    option.selected = true;
+                }
+                yearSelect.appendChild(option);
+            }
+        }
+
+        function showNotification(message, type) {
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // ==================== EVENT LISTENERS ====================
+        function setupEventListeners() {
+            // Auth
+            guestLoginBtn.addEventListener('click', enableGuestMode);
+            signOutBtn.addEventListener('click', signOut);
+            
+            // Vehicle
+            addVehicleBtn.addEventListener('click', () => {
+                document.getElementById('vehicle-modal-title').textContent = 'Add New Vehicle';
+                document.getElementById('vehicle-id').value = '';
+                vehicleForm.reset();
+                addVehicleModal.style.display = 'flex';
+            });
+            
+            vehicleForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (document.getElementById('vehicle-id').value) {
+                    updateVehicle();
+                } else {
+                    addNewVehicle();
+                }
+            });
+            
+            // Service
+            addServiceBtn.addEventListener('click', () => {
+                document.getElementById('service-id').value = '';
+                serviceForm.reset();
+                setCurrentDate();
+                addServiceModal.style.display = 'flex';
+            });
+            
+            serviceForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (document.getElementById('service-id').value) {
+                    updateService();
+                } else {
+                    addNewService();
+                }
+            });
+            
+            // Expense
+            expenseType.addEventListener('change', () => {
+                fuelVolumeGroup.style.display = expenseType.value === 'fuel' ? 'block' : 'none';
+            });
+            
+            expenseForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (document.getElementById('expense-id').value) {
+                    updateExpense();
+                } else {
+                    addNewExpense();
+                }
+            });
+            
+            // Trip
+            tripForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (document.getElementById('trip-id').value) {
+                    updateTrip();
+                } else {
+                    addNewTrip();
+                }
+            });
+            
+            // Tabs
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabName = tab.getAttribute('data-tab');
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    
+                    panels.forEach(p => p.classList.remove('active'));
+                    document.getElementById(`${tabName}-panel`).classList.add('active');
+                });
+            });
+            
+            // Filters
+            applyExpenseFilter.addEventListener('click', renderExpenses);
+            
+            // Reports
+            generateReportBtn.addEventListener('click', generateReport);
+            exportReportBtn.addEventListener('click', exportToPDF);
+            
+            // Modals
+            closeModals.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+                });
+            });
+            
+            window.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal')) {
+                    e.target.style.display = 'none';
+                }
+            });
+        }
+
+        // Start the app
+        init();
     </script>
 </body>
 </html>
