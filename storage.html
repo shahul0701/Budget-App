@@ -1,46 +1,121 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Firebase Storage Diagnostic</title>
+    <title>Firestore Storage Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .step { margin: 20px 0; padding: 15px; border-left: 4px solid #007bff; background: #f8f9fa; }
-        .success { color: #28a745; }
-        .error { color: #dc3545; }
-        .info { color: #17a2b8; }
-        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
-        .bucket-option { margin: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; }
-        .bucket-option:hover { background: #f0f0f0; }
+        body { font-family: Arial; padding: 20px; max-width: 1200px; margin: 0 auto; background: #f5f5f5; }
+        .container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .admin-badge { background: #ffc107; color: #333; padding: 5px 10px; border-radius: 20px; font-size: 14px; margin-left: 10px; }
+        .summary { background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+        .stat-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #2196F3; position: relative; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #2196F3; }
+        .stat-label { color: #666; font-size: 14px; margin-top: 5px; }
+        .estimate-badge { position: absolute; top: 5px; right: 5px; background: #ffc107; color: #333; padding: 2px 6px; border-radius: 10px; font-size: 10px; }
+        .progress-bar { height: 30px; background: #eee; border-radius: 15px; margin: 20px 0; overflow: hidden; position: relative; }
+        .progress-fill { height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
+        .loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; z-index: 10; }
+        .loading-spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-right: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th { background: #f5f5f5; padding: 12px; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .highlight { background: #fff3e0; }
+        button { background: #2196F3; color: white; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+        button:hover { background: #1976D2; }
+        button.secondary { background: #4CAF50; }
+        .loading-text { color: #666; font-style: italic; }
+        .real-data { font-weight: bold; color: #4CAF50; font-size: 12px; margin-left: 5px; }
+        .last-updated { color: #666; font-size: 12px; margin-top: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Firebase Storage Diagnostic Tool</h1>
+        <h1>📊 Firestore Storage Dashboard</h1>
+        <p id="loginPrompt">Click below to analyze your storage</p>
         
-        <div id="output">
-            <div class="step">
-                <h3>Step 1: Checking Firebase Connection</h3>
-                <div id="step1">Loading...</div>
+        <button onclick="startAnalysis()">🔍 Analyze Storage</button>
+        
+        <div id="loading" style="display: none;" class="loading-text">
+            <span class="loading-spinner"></span> Loading...
+        </div>
+        
+        <div id="error" style="color: red; display: none;"></div>
+        
+        <div id="dashboard" style="display: none;">
+            <!-- User Info -->
+            <div id="userInfo" class="summary"></div>
+            
+            <!-- Instant Estimates (Shows immediately) -->
+            <div id="estimates">
+                <h2>⚡ Quick Estimate <span class="estimate-badge">Instant</span></h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="estimateTransactions">-</div>
+                        <div class="stat-label">Estimated Transactions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="estimateStorage">-</div>
+                        <div class="stat-label">Estimated Storage</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="estimatePercent">-</div>
+                        <div class="stat-label">Estimated % of 1GB</div>
+                    </div>
+                </div>
             </div>
             
-            <div class="step">
-                <h3>Step 2: Testing Different Bucket Names</h3>
-                <div id="step2">Waiting for step 1...</div>
+            <!-- Real Data (Loads progressively) -->
+            <div id="realData" style="opacity: 0.7;">
+                <h2>📈 Real Data <span class="loading-spinner" id="realDataSpinner"></span></h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="realTransactions">Loading...</div>
+                        <div class="stat-label">Actual Transactions <span id="transactionsStatus"></span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="realStorage">Loading...</div>
+                        <div class="stat-label">Actual Storage <span id="storageStatus"></span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="realCategories">Loading...</div>
+                        <div class="stat-label">Categories <span id="categoriesStatus"></span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="realDocs">Loading...</div>
+                        <div class="stat-label">Total Documents <span id="docsStatus"></span></div>
+                    </div>
+                </div>
+                
+                <!-- Progress Bar -->
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill">0%</div>
+                </div>
+                <p style="text-align: center; color: #666;">
+                    <span id="usedPercent">0%</span> of 1GB used | 
+                    Remaining: <span id="remainingSize">1 GB</span>
+                </p>
             </div>
             
-            <div class="step">
-                <h3>Step 3: Instructions</h3>
-                <div id="step3"></div>
+            <!-- Detailed Breakdown (Loads last) -->
+            <div id="breakdown" style="display: none;">
+                <h2>📦 Detailed Breakdown <span class="loading-spinner" id="breakdownSpinner"></span></h2>
+                <div id="breakdownContent"></div>
+            </div>
+            
+            <!-- Admin View Button (Shows after login) -->
+            <div id="adminSection" style="display: none;">
+                <button onclick="loadAllUsers()" class="secondary" id="adminBtn">👥 Load All Users Data (Admin)</button>
+                <div id="adminData" style="margin-top: 20px;"></div>
             </div>
         </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getStorage, ref, listAll, getMetadata, connectStorageEmulator } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getFirestore, collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -48,93 +123,229 @@
             projectId: "budget-app-1365f",
             storageBucket: "budget-app-1365f.firebasestorage.app",
             messagingSenderId: "1036194450411",
-            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-            measurementId: "G-YFFJL2H54X"
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae"
         };
 
-        async function testBucket(bucketName) {
-            try {
-                // Create a new app instance with different bucket
-                const testConfig = { ...firebaseConfig, storageBucket: bucketName };
-                const testApp = initializeApp(testConfig, `app-${Date.now()}`);
-                const testStorage = getStorage(testApp);
-                
-                // Try to list root
-                const testRef = ref(testStorage);
-                await listAll(testRef);
-                
-                return { success: true, bucket: bucketName };
-            } catch (error) {
-                return { success: false, bucket: bucketName, error: error.message };
-            }
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let currentUser = null;
+        let isAdmin = false;
+        const ADMIN_EMAIL = 'shahulsha254@gmail.com';
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-        async function init() {
-            const step1 = document.getElementById('step1');
-            const step2 = document.getElementById('step2');
-            const step3 = document.getElementById('step3');
+        // Show instant estimates based on common patterns
+        function showEstimates() {
+            // Assume 1500 transactions per user as average
+            const avgTransactionSize = 400; // bytes
+            const estimatedTransactions = 1500;
+            const estimatedStorage = estimatedTransactions * avgTransactionSize;
+            const estimatedMB = (estimatedStorage / (1024 * 1024)).toFixed(2);
+            const estimatedPercent = ((estimatedStorage / 1073741824) * 100).toFixed(2);
             
+            document.getElementById('estimateTransactions').textContent = estimatedTransactions.toLocaleString();
+            document.getElementById('estimateStorage').textContent = estimatedMB + ' MB';
+            document.getElementById('estimatePercent').textContent = estimatedPercent + '%';
+        }
+
+        // Progressive loading function
+        async function loadProgressively(userId) {
+            // First, get quick count from collection (fast)
             try {
-                // Step 1: Test basic connection
-                step1.innerHTML = 'Testing Firebase initialization...';
+                // Load transaction count first (fastest)
+                const transactionsRef = collection(db, 'users', userId, 'transactions');
+                const transactionsSnap = await getDocs(transactionsRef);
+                const transactionCount = transactionsSnap.size;
                 
-                const app = initializeApp(firebaseConfig);
-                const storage = getStorage(app);
+                document.getElementById('realTransactions').innerHTML = 
+                    `${transactionCount.toLocaleString()} <span class="real-data">✓</span>`;
+                document.getElementById('transactionsStatus').innerHTML = '✓ Real';
                 
-                step1.innerHTML = '<span class="success">✓ Firebase initialized successfully</span>';
+                // Update estimate with real count
+                const estimatedStorage = transactionCount * 400; // 400 bytes per transaction
+                const estimatedMB = (estimatedStorage / (1024 * 1024)).toFixed(2);
                 
-                // Step 2: Test different bucket names
-                step2.innerHTML = 'Testing possible bucket names...<br><br>';
+                document.getElementById('realStorage').innerHTML = 
+                    `${estimatedMB} MB (estimating) <span class="loading-spinner"></span>`;
                 
-                const possibleBuckets = [
-                    "budget-app-1365f.firebasestorage.app",  // Your current one
-                    "budget-app-1365f.appspot.com",          // Default format
-                    "gs://budget-app-1365f.firebasestorage.app",
-                    "gs://budget-app-1365f.appspot.com",
-                    `${firebaseConfig.projectId}.appspot.com`,
-                    `${firebaseConfig.projectId}.firebasestorage.app`,
-                ];
+                // Load categories (medium)
+                const categoriesRef = collection(db, 'users', userId, 'categories');
+                const categoriesSnap = await getDocs(categoriesRef);
+                document.getElementById('realCategories').innerHTML = 
+                    `${categoriesSnap.size} <span class="real-data">✓</span>`;
+                document.getElementById('categoriesStatus').innerHTML = '✓ Real';
                 
-                for (const bucket of possibleBuckets) {
-                    step2.innerHTML += `Testing: ${bucket}... `;
-                    const result = await testBucket(bucket);
-                    if (result.success) {
-                        step2.innerHTML += `<span class="success">✓ WORKING!</span><br>`;
-                        step3.innerHTML = `
-                            <div class="success">
-                                <h4>✅ Found working bucket!</h4>
-                                <p>Use this bucket name in your configuration:</p>
-                                <pre>storageBucket: "${bucket}"</pre>
-                            </div>
-                        `;
-                    } else {
-                        step2.innerHTML += `<span class="error">✗ Failed</span><br>`;
+                // Calculate real size (slower)
+                let totalBytes = 0;
+                let docsCount = 0;
+                
+                // Add user profile
+                const profileRef = doc(db, 'users', userId);
+                const profileSnap = await getDoc(profileRef);
+                if (profileSnap.exists()) {
+                    totalBytes += new Blob([JSON.stringify(profileSnap.data())]).size + 20;
+                    docsCount++;
+                }
+                
+                // Calculate transaction sizes
+                for (const doc of transactionsSnap.docs) {
+                    totalBytes += new Blob([JSON.stringify(doc.data())]).size + 20;
+                    docsCount++;
+                    
+                    // Update progress every 100 docs
+                    if (docsCount % 100 === 0) {
+                        const currentMB = (totalBytes / (1024 * 1024)).toFixed(2);
+                        document.getElementById('realStorage').innerHTML = 
+                            `${currentMB} MB (calculating... ${docsCount} docs) <span class="loading-spinner"></span>`;
                     }
                 }
                 
-                // Step 3: Show instructions
-                if (!step3.innerHTML) {
-                    step3.innerHTML = `
-                        <div class="error">
-                            <h4>❌ No working bucket found</h4>
-                            <p>Please check:</p>
-                            <ol>
-                                <li>Go to <a href="https://console.firebase.google.com/project/${firebaseConfig.projectId}/storage" target="_blank">Firebase Console → Storage</a></li>
-                                <li>Check if Storage is enabled (click "Get Started" if not)</li>
-                                <li>Look at the bucket name shown at the top of the page</li>
-                                <li>Copy that exact bucket name and update your config</li>
-                            </ol>
-                            <p>Your current bucket name: <strong>${firebaseConfig.storageBucket}</strong></p>
-                        </div>
-                    `;
+                // Calculate category sizes
+                for (const doc of categoriesSnap.docs) {
+                    totalBytes += new Blob([JSON.stringify(doc.data())]).size + 20;
+                    docsCount++;
                 }
                 
+                // Final update
+                const totalMB = (totalBytes / (1024 * 1024)).toFixed(2);
+                const percentUsed = ((totalBytes / 1073741824) * 100).toFixed(4);
+                const remainingBytes = 1073741824 - totalBytes;
+                
+                document.getElementById('realStorage').innerHTML = 
+                    `${totalMB} MB <span class="real-data">✓</span>`;
+                document.getElementById('realDocs').innerHTML = 
+                    `${docsCount} <span class="real-data">✓</span>`;
+                document.getElementById('usedPercent').textContent = percentUsed + '%';
+                document.getElementById('remainingSize').textContent = formatBytes(remainingBytes);
+                document.getElementById('progressFill').style.width = Math.min(percentUsed, 100) + '%';
+                document.getElementById('progressFill').textContent = percentUsed + '%';
+                
+                // Hide spinners
+                document.getElementById('realDataSpinner').style.display = 'none';
+                document.getElementById('realData').style.opacity = '1';
+                
+                // Show breakdown
+                document.getElementById('breakdown').style.display = 'block';
+                document.getElementById('breakdownSpinner').style.display = 'none';
+                
+                // Show breakdown content
+                document.getElementById('breakdownContent').innerHTML = `
+                    <table>
+                        <tr><th>Data Type</th><th>Count</th><th>Size</th></tr>
+                        <tr><td>Profile</td><td>1</td><td>${formatBytes(totalBytes - (transactionCount * 400) - (categoriesSnap.size * 300))}</td></tr>
+                        <tr><td>Transactions</td><td>${transactionCount}</td><td>${formatBytes(transactionCount * 400)}</td></tr>
+                        <tr><td>Categories</td><td>${categoriesSnap.size}</td><td>${formatBytes(categoriesSnap.size * 300)}</td></tr>
+                    </table>
+                `;
+                
             } catch (error) {
-                step1.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+                console.error('Progressive loading error:', error);
             }
         }
 
-        init();
+        window.startAnalysis = async function() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            
+            try {
+                // Sign in
+                const email = prompt('Enter your email:', 'shahulsha254@gmail.com');
+                const password = prompt('Enter your password:');
+                
+                if (!email || !password) {
+                    throw new Error('Email and password required');
+                }
+                
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                currentUser = userCredential.user;
+                isAdmin = currentUser.email === ADMIN_EMAIL;
+                
+                // Show dashboard immediately
+                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+                
+                // Show user info
+                document.getElementById('userInfo').innerHTML = `
+                    <strong>Logged in as:</strong> ${currentUser.email} 
+                    ${isAdmin ? '<span class="admin-badge">Admin</span>' : ''}
+                `;
+                
+                // Show instant estimates
+                showEstimates();
+                
+                // Show admin button if applicable
+                if (isAdmin) {
+                    document.getElementById('adminSection').style.display = 'block';
+                }
+                
+                // Start progressive loading
+                await loadProgressively(currentUser.uid);
+                
+            } catch (error) {
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = 'Error: ' + error.message;
+                document.getElementById('loading').style.display = 'none';
+            }
+        };
+
+        window.loadAllUsers = async function() {
+            if (!isAdmin) return;
+            
+            document.getElementById('adminBtn').disabled = true;
+            document.getElementById('adminBtn').innerHTML = '<span class="loading-spinner"></span> Loading users...';
+            
+            try {
+                const usersSnap = await getDocs(collection(db, 'users'));
+                let html = '<h3>All Users Storage</h3><table><tr><th>Email</th><th>Status</th></tr>';
+                
+                for (const userDoc of usersSnap.docs) {
+                    html += `
+                        <tr>
+                            <td>${userDoc.data().email || 'Unknown'}</td>
+                            <td><span class="loading-spinner"></span> Loading...</td>
+                        </tr>
+                    `;
+                }
+                html += '</table>';
+                
+                document.getElementById('adminData').innerHTML = html;
+                
+                // Now load each user's data progressively
+                let index = 0;
+                for (const userDoc of usersSnap.docs) {
+                    setTimeout(async () => {
+                        try {
+                            const transactionsRef = collection(db, 'users', userDoc.id, 'transactions');
+                            const transactionsSnap = await getDocs(transactionsRef);
+                            
+                            // Update this row
+                            const rows = document.querySelectorAll('#adminData table tr');
+                            if (rows[index + 1]) {
+                                rows[index + 1].cells[1].innerHTML = 
+                                    `${transactionsSnap.size} transactions ✓`;
+                            }
+                        } catch (e) {
+                            console.log('Error loading user:', userDoc.id);
+                        }
+                        index++;
+                    }, index * 500); // Load one user every 500ms
+                }
+                
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+            
+            document.getElementById('adminBtn').disabled = false;
+            document.getElementById('adminBtn').innerHTML = '👥 Load All Users Data (Admin)';
+        };
     </script>
 </body>
 </html>
