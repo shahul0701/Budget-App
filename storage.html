@@ -3,27 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Firebase Storage Usage</title>
+    <title>Firebase Storage Diagnostic</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
         .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .file-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
-        .total { font-size: 24px; color: #007bff; margin: 20px 0; }
-        .loading { text-align: center; padding: 40px; color: #666; }
-        .error { color: #dc3545; padding: 20px; background: #f8d7da; border-radius: 5px; }
+        .step { margin: 20px 0; padding: 15px; border-left: 4px solid #007bff; background: #f8f9fa; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #17a2b8; }
+        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
+        .bucket-option { margin: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; }
+        .bucket-option:hover { background: #f0f0f0; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Firebase Storage Usage</h1>
-        <div id="content">
-            <div class="loading">Loading storage data...</div>
+        <h1>Firebase Storage Diagnostic Tool</h1>
+        
+        <div id="output">
+            <div class="step">
+                <h3>Step 1: Checking Firebase Connection</h3>
+                <div id="step1">Loading...</div>
+            </div>
+            
+            <div class="step">
+                <h3>Step 2: Testing Different Bucket Names</h3>
+                <div id="step2">Waiting for step 1...</div>
+            </div>
+            
+            <div class="step">
+                <h3>Step 3: Instructions</h3>
+                <div id="step3"></div>
+            </div>
         </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getStorage, ref, listAll, getMetadata } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getStorage, ref, listAll, getMetadata, connectStorageEmulator } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -35,95 +52,89 @@
             measurementId: "G-YFFJL2H54X"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const storage = getStorage(app);
-
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        async function loadStorageData() {
-            const contentDiv = document.getElementById('content');
-            
+        async function testBucket(bucketName) {
             try {
-                // Try to list files from storage root
-                const storageRef = ref(storage);
-                const result = await listAll(storageRef);
+                // Create a new app instance with different bucket
+                const testConfig = { ...firebaseConfig, storageBucket: bucketName };
+                const testApp = initializeApp(testConfig, `app-${Date.now()}`);
+                const testStorage = getStorage(testApp);
                 
-                let totalSize = 0;
-                let files = [];
+                // Try to list root
+                const testRef = ref(testStorage);
+                await listAll(testRef);
                 
-                // Get metadata for each file
-                for (const item of result.items) {
-                    try {
-                        const metadata = await getMetadata(item);
-                        totalSize += metadata.size;
-                        files.push({
-                            name: item.name,
-                            size: metadata.size
-                        });
-                    } catch (e) {
-                        console.log('Error getting metadata for:', item.name);
-                    }
-                }
-                
-                // Display results
-                let html = `
-                    <div class="total">Total Storage: ${formatBytes(totalSize)}</div>
-                    <div>Total Files: ${files.length}</div>
-                    <h3>Files:</h3>
-                `;
-                
-                if (files.length === 0) {
-                    html += '<p>No files found in storage root</p>';
-                } else {
-                    files.forEach(file => {
-                        html += `
-                            <div class="file-item">
-                                <span>${file.name}</span>
-                                <span>${formatBytes(file.size)}</span>
-                            </div>
-                        `;
-                    });
-                }
-                
-                contentDiv.innerHTML = html;
-                
+                return { success: true, bucket: bucketName };
             } catch (error) {
-                console.error('Error:', error);
-                
-                // Handle specific error
-                if (error.code === 'storage/unauthorized') {
-                    contentDiv.innerHTML = `
-                        <div class="error">
-                            <h3>Permission Denied</h3>
-                            <p>You need to update your Firebase Storage rules.</p>
-                            <p>Go to Firebase Console → Storage → Rules and set:</p>
-                            <pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if true;  // This allows public access for testing
-    }
-  }
-}
-                            </pre>
-                            <p><strong>⚠️ Warning:</strong> This allows public access. Use only for testing!</p>
-                        </div>
-                    `;
-                } else {
-                    contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
-                }
+                return { success: false, bucket: bucketName, error: error.message };
             }
         }
 
-        // Load data when page loads
-        loadStorageData();
+        async function init() {
+            const step1 = document.getElementById('step1');
+            const step2 = document.getElementById('step2');
+            const step3 = document.getElementById('step3');
+            
+            try {
+                // Step 1: Test basic connection
+                step1.innerHTML = 'Testing Firebase initialization...';
+                
+                const app = initializeApp(firebaseConfig);
+                const storage = getStorage(app);
+                
+                step1.innerHTML = '<span class="success">✓ Firebase initialized successfully</span>';
+                
+                // Step 2: Test different bucket names
+                step2.innerHTML = 'Testing possible bucket names...<br><br>';
+                
+                const possibleBuckets = [
+                    "budget-app-1365f.firebasestorage.app",  // Your current one
+                    "budget-app-1365f.appspot.com",          // Default format
+                    "gs://budget-app-1365f.firebasestorage.app",
+                    "gs://budget-app-1365f.appspot.com",
+                    `${firebaseConfig.projectId}.appspot.com`,
+                    `${firebaseConfig.projectId}.firebasestorage.app`,
+                ];
+                
+                for (const bucket of possibleBuckets) {
+                    step2.innerHTML += `Testing: ${bucket}... `;
+                    const result = await testBucket(bucket);
+                    if (result.success) {
+                        step2.innerHTML += `<span class="success">✓ WORKING!</span><br>`;
+                        step3.innerHTML = `
+                            <div class="success">
+                                <h4>✅ Found working bucket!</h4>
+                                <p>Use this bucket name in your configuration:</p>
+                                <pre>storageBucket: "${bucket}"</pre>
+                            </div>
+                        `;
+                    } else {
+                        step2.innerHTML += `<span class="error">✗ Failed</span><br>`;
+                    }
+                }
+                
+                // Step 3: Show instructions
+                if (!step3.innerHTML) {
+                    step3.innerHTML = `
+                        <div class="error">
+                            <h4>❌ No working bucket found</h4>
+                            <p>Please check:</p>
+                            <ol>
+                                <li>Go to <a href="https://console.firebase.google.com/project/${firebaseConfig.projectId}/storage" target="_blank">Firebase Console → Storage</a></li>
+                                <li>Check if Storage is enabled (click "Get Started" if not)</li>
+                                <li>Look at the bucket name shown at the top of the page</li>
+                                <li>Copy that exact bucket name and update your config</li>
+                            </ol>
+                            <p>Your current bucket name: <strong>${firebaseConfig.storageBucket}</strong></p>
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                step1.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+        }
+
+        init();
     </script>
 </body>
 </html>
