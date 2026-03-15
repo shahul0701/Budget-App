@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Storage Usage Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .storage-info {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .stat-item {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stat-label {
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 24px;
+            color: #007bff;
+        }
+        .stat-unit {
+            font-size: 14px;
+            color: #999;
+            margin-left: 5px;
+        }
+        .file-list {
+            margin-top: 30px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .file-name {
+            color: #333;
+        }
+        .file-size {
+            color: #666;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            color: #dc3545;
+            padding: 20px;
+            background-color: #f8d7da;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .refresh-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        .refresh-btn:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Firebase Storage Usage Monitor</h1>
+        
+        <div id="storageInfo" class="storage-info">
+            <div class="loading">Loading storage information...</div>
+        </div>
+        
+        <div id="fileList" class="file-list">
+            <h2>Files in Storage</h2>
+            <div class="loading">Loading files...</div>
+        </div>
+        
+        <button class="refresh-btn" onclick="loadStorageData()">Refresh Data</button>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        // Import Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getStorage, ref, listAll, getMetadata } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
+
+        // Your Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+            authDomain: "budget-app-1365f.firebaseapp.com",
+            projectId: "budget-app-1365f",
+            storageBucket: "budget-app-1365f.firebasestorage.app",
+            messagingSenderId: "1036194450411",
+            appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+            measurementId: "G-YFFJL2H54X"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        const storage = getStorage(app);
+
+        // Make storage available globally for the button click
+        window.storage = storage;
+
+        // Format bytes to human readable format
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        // Load storage data
+        window.loadStorageData = async function() {
+            const storageInfo = document.getElementById('storageInfo');
+            const fileListDiv = document.getElementById('fileList');
+            
+            storageInfo.innerHTML = '<div class="loading">Loading storage information...</div>';
+            fileListDiv.innerHTML = '<h2>Files in Storage</h2><div class="loading">Loading files...</div>';
+            
+            try {
+                // Create a reference to the root of your storage
+                const storageRef = ref(storage);
+                
+                // List all items in the root directory
+                const result = await listAll(storageRef);
+                
+                let totalSize = 0;
+                let fileCount = 0;
+                const files = [];
+                
+                // Function to recursively list all files
+                async function listAllFiles(dirRef, path = '') {
+                    const dirResult = await listAll(dirRef);
+                    
+                    // Process files in current directory
+                    for (const item of dirResult.items) {
+                        try {
+                            const metadata = await getMetadata(item);
+                            const size = metadata.size;
+                            totalSize += size;
+                            fileCount++;
+                            
+                            files.push({
+                                name: path + item.name,
+                                size: size,
+                                contentType: metadata.contentType || 'Unknown',
+                                updated: metadata.updated
+                            });
+                        } catch (err) {
+                            console.error('Error getting metadata for:', item.name, err);
+                        }
+                    }
+                    
+                    // Process subdirectories recursively
+                    for (const prefix of dirResult.prefixes) {
+                        await listAllFiles(prefix, path + prefix.name + '/');
+                    }
+                }
+                
+                // Start listing from root
+                await listAllFiles(storageRef);
+                
+                // Sort files by size (largest first)
+                files.sort((a, b) => b.size - a.size);
+                
+                // Update storage info
+                storageInfo.innerHTML = `
+                    <div class="stat-item">
+                        <div class="stat-label">Total Storage Used</div>
+                        <div class="stat-value">${formatBytes(totalSize)}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Total Files</div>
+                        <div class="stat-value">${fileCount}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Average File Size</div>
+                        <div class="stat-value">${fileCount > 0 ? formatBytes(totalSize / fileCount) : '0 Bytes'}</div>
+                    </div>
+                `;
+                
+                // Update file list
+                if (files.length > 0) {
+                    let fileListHTML = '<h2>Files in Storage</h2>';
+                    files.forEach(file => {
+                        fileListHTML += `
+                            <div class="file-item">
+                                <span class="file-name">${file.name}</span>
+                                <span class="file-size">${formatBytes(file.size)}</span>
+                            </div>
+                        `;
+                    });
+                    fileListDiv.innerHTML = fileListHTML;
+                } else {
+                    fileListDiv.innerHTML = '<h2>Files in Storage</h2><p>No files found in storage.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error loading storage data:', error);
+                storageInfo.innerHTML = `<div class="error">Error loading storage data: ${error.message}</div>`;
+                fileListDiv.innerHTML = '<h2>Files in Storage</h2><div class="error">Error loading files</div>';
+            }
+        }
+
+        // Load data when page loads
+        window.addEventListener('load', loadStorageData);
+    </script>
+</body>
+</html>
