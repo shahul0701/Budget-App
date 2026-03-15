@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Transaction Manager - Festival Edition</title>
+  <title>Transaction Manager - Smart Festival Edition</title>
 
   <!-- CSS libs -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -106,7 +106,7 @@
       --animation-element: 'newyear';
     }
 
-    /* Dark mode base (kept for compatibility) */
+    /* Dark mode base */
     [data-theme="dark"] {
       --purple-1: #8b66cc;
       --purple-2: #7d5ddb;
@@ -135,8 +135,8 @@
       overflow-x: hidden;
     }
 
-    /* Festival Animations */
-    body::before {
+    /* Festival Animations - Only active when themes are enabled */
+    body.festival-active::before {
       content: '';
       position: fixed;
       top: 0;
@@ -150,7 +150,7 @@
     }
 
     /* Diwali Lights Animation */
-    [data-theme="diwali"] body::before {
+    [data-theme="diwali"].festival-active body::before {
       content: '';
       background: radial-gradient(circle at 20% 20%, #ffaa00 0%, transparent 20%),
                   radial-gradient(circle at 80% 30%, #ff5500 0%, transparent 25%),
@@ -166,7 +166,7 @@
     }
 
     /* Christmas Snow Animation */
-    [data-theme="christmas"] body::before {
+    [data-theme="christmas"].festival-active body::before {
       content: '❄️❄️❄️';
       font-size: 24px;
       color: white;
@@ -181,7 +181,7 @@
     }
 
     /* Holi Color Splash Animation */
-    [data-theme="holi"] body::before {
+    [data-theme="holi"].festival-active body::before {
       content: '';
       background: radial-gradient(circle at 30% 40%, #ff4d4d 0%, transparent 30%),
                   radial-gradient(circle at 70% 60%, #ffaa00 0%, transparent 35%),
@@ -197,7 +197,7 @@
     }
 
     /* Halloween Pumpkins Animation */
-    [data-theme="halloween"] body::before {
+    [data-theme="halloween"].festival-active body::before {
       content: '🎃🎃🎃';
       font-size: 30px;
       color: #ff7518;
@@ -212,7 +212,7 @@
     }
 
     /* New Year Fireworks Animation */
-    [data-theme="newyear"] body::before {
+    [data-theme="newyear"].festival-active body::before {
       content: '🎆✨🎇';
       font-size: 28px;
       color: #f7c201;
@@ -308,7 +308,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Existing styles below (keeping all original styles) */
     .page {
       max-width:1200px;
       margin:36px auto;
@@ -609,7 +608,7 @@
       height: 1rem;
     }
     
-    /* Theme toggle - Festival Toggle */
+    /* Festival Toggle Button */
     .festival-toggle {
       background: var(--theme-gradient);
       border: none;
@@ -623,15 +622,14 @@
       align-items: center;
       gap: 8px;
       transition: all 0.3s ease;
-      animation: festivalGlow 2s ease-in-out infinite;
     }
     
-    @keyframes festivalGlow {
-      0%, 100% { box-shadow: 0 0 5px var(--theme-glow); }
-      50% { box-shadow: 0 0 20px var(--theme-glow); }
+    .festival-toggle.disabled {
+      opacity: 0.5;
+      background: #6c757d;
     }
     
-    .festival-toggle:hover {
+    .festival-toggle:hover:not(.disabled) {
       transform: scale(1.05);
       box-shadow: 0 0 30px var(--theme-glow);
     }
@@ -1280,7 +1278,7 @@
           <button id="quickAddBtn" class="btn btn-light btn-sm text-primary ms-2"><i class="fa fa-bolt me-1"></i> Quick Add</button>
           <button id="splitIncomeBtn" class="btn btn-light btn-sm text-primary ms-2"><i class="fa fa-share-alt me-1"></i> Split Income</button>
           <button id="festivalToggle" class="festival-toggle">
-            <i class="fa fa-magic"></i> Festival
+            <i class="fa fa-magic"></i> Festival Theme <span id="festivalStatus">ON</span>
           </button>
           <div style="width:1px;height:36px;background:rgba(255,255,255,0.12); margin-left:8px;"></div>
           <div style="display:flex;align-items:center; gap:10px; margin-left:8px;">
@@ -1552,8 +1550,6 @@
                 • "bank balances"
                 
                 💡 **Try asking in your own words!** I understand dates, amounts, banks, accounts, and descriptions.
-
-                <span class="insight-badge insight-info">Try a search query!</span>
               </div>
               <div class="chat-message-time">Just now</div>
             </div>
@@ -1891,7 +1887,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, where, limit
+      getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, where, limit
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -1920,15 +1916,16 @@
     let balanceVisible = false;
     let isSubmitting = false;
     let lastVoucherNumber = 0;
-    let currentTheme = 'default'; // Now for festival themes
+    let currentTheme = 'default';
     let transactionsChartInstance = null;
     let selectedTransactions = new Set();
     let hasLoadedSavedState = false;
     let currentView = 'table';
     
-    // Festival themes array
+    // Festival themes
     const festivalThemes = ['default', 'diwali', 'christmas', 'holi', 'halloween', 'newyear'];
     let currentFestivalIndex = 0;
+    let festivalEnabled = true; // User can toggle this
     
     // Grid view pagination
     let gridCurrentPage = 1;
@@ -1957,6 +1954,7 @@
     const homeBtn = document.getElementById("homeBtn");
     const coaBtn = document.getElementById("coaBtn");
     const festivalToggle = document.getElementById("festivalToggle");
+    const festivalStatus = document.getElementById("festivalStatus");
     const exportCSV = document.getElementById("exportCSV");
     const exportPDF = document.getElementById("exportPDF");
     const advancedFiltersBtn = document.getElementById("advancedFiltersBtn");
@@ -2102,6 +2100,34 @@
       loadingBackdrop.style.display = "none";
     }
 
+    // Festival date detection - automatically activates theme 1 month before festival
+    function detectUpcomingFestival() {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1; // 1-12
+      const currentDay = now.getDate();
+      
+      // Festival dates (simplified - you can adjust these)
+      const festivals = [
+        { name: 'diwali', month: 10, day: 24 }, // Diwali in October/November
+        { name: 'christmas', month: 12, day: 25 },
+        { name: 'holi', month: 3, day: 8 }, // Holi in March
+        { name: 'halloween', month: 10, day: 31 },
+        { name: 'newyear', month: 1, day: 1 }
+      ];
+      
+      // Check if any festival is within 30 days
+      for (const festival of festivals) {
+        const festivalDate = new Date(now.getFullYear(), festival.month - 1, festival.day);
+        const daysUntil = Math.ceil((festivalDate - now) / (1000 * 60 * 60 * 24));
+        
+        if (daysUntil >= 0 && daysUntil <= 30) {
+          return festival.name;
+        }
+      }
+      
+      return 'default';
+    }
+
     // Auth handling
     onAuthStateChanged(auth, async user => {
       if (user) {
@@ -2116,14 +2142,39 @@
           // Load theme preference
           loadThemePreference();
           
+          // Automatically detect and set festival theme (user can override)
+          if (festivalEnabled) {
+            const detectedFestival = detectUpcomingFestival();
+            if (detectedFestival !== 'default') {
+              currentFestivalIndex = festivalThemes.indexOf(detectedFestival);
+              currentTheme = detectedFestival;
+              applyFestivalTheme(detectedFestival);
+              
+              // Show notification about automatic theme
+              setTimeout(() => {
+                Swal.fire({
+                  icon: 'info',
+                  title: `${detectedFestival.charAt(0).toUpperCase() + detectedFestival.slice(1)} Theme Activated!`,
+                  text: 'Festival theme automatically enabled based on upcoming festival. You can disable it using the Festival Toggle button.',
+                  timer: 3000,
+                  showConfirmButton: true
+                });
+              }, 1000);
+            }
+          }
+          
           // Load COA data and transactions in parallel
           await Promise.all([loadCOAData(), loadTransactions()]);
           
           loadAppState();
           applyFilters();
           
-          // Ensure all views are updated
-          updateAllViews();
+          // Initialize calendar
+          setTimeout(() => {
+            if (currentView === 'calendar') {
+              initializeCalendar();
+            }
+          }, 500);
           
           hideLoading();
         } catch (error) {
@@ -2153,39 +2204,59 @@
     floatingAdd.addEventListener("click", () => openAddModal());
     floatingHelp.addEventListener("click", () => openAIChat());
     
-    // Festival theme toggle
+    // Festival theme toggle - user can enable/disable
     festivalToggle.addEventListener("click", () => {
-      currentFestivalIndex = (currentFestivalIndex + 1) % festivalThemes.length;
-      currentTheme = festivalThemes[currentFestivalIndex];
-      applyFestivalTheme(currentTheme);
+      festivalEnabled = !festivalEnabled;
       
-      // Show festival name
-      const festivalNames = {
-        'default': 'Default',
-        'diwali': 'Diwali 🪔',
-        'christmas': 'Christmas 🎄',
-        'holi': 'Holi 🌈',
-        'halloween': 'Halloween 🎃',
-        'newyear': 'New Year 🎆'
-      };
+      if (festivalEnabled) {
+        // Cycle through themes
+        currentFestivalIndex = (currentFestivalIndex + 1) % festivalThemes.length;
+        currentTheme = festivalThemes[currentFestivalIndex];
+        applyFestivalTheme(currentTheme);
+        festivalStatus.textContent = 'ON';
+        festivalToggle.classList.remove('disabled');
+        
+        const festivalNames = {
+          'default': 'Default',
+          'diwali': 'Diwali 🪔',
+          'christmas': 'Christmas 🎄',
+          'holi': 'Holi 🌈',
+          'halloween': 'Halloween 🎃',
+          'newyear': 'New Year 🎆'
+        };
+        
+        Swal.fire({
+          icon: 'success',
+          title: festivalNames[currentTheme] + ' Theme Applied!',
+          text: 'Enjoy the festive animations and colors!',
+          timer: 1500,
+          showConfirmButton: false
+        });
+      } else {
+        // Disable festival theme - revert to default
+        currentTheme = 'default';
+        applyFestivalTheme('default');
+        festivalStatus.textContent = 'OFF';
+        festivalToggle.classList.add('disabled');
+        
+        Swal.fire({
+          icon: 'info',
+          title: 'Festival Theme Disabled',
+          text: 'You can re-enable it anytime using this button.',
+          timer: 1500,
+          showConfirmButton: false
+        });
+      }
       
-      Swal.fire({
-        icon: 'success',
-        title: festivalNames[currentTheme] + ' Theme Applied!',
-        text: 'Enjoy the festive animations and colors!',
-        timer: 1500,
-        showConfirmButton: false
-      });
-      
-      // Re-render chart with new theme colors
       if (transactionsChartInstance) {
         renderTransactionsChart();
       }
       
-      // Reinitialize calendar with new theme
       if (calendar) {
         calendar.destroy();
-        initializeCalendar();
+        if (currentView === 'calendar') {
+          initializeCalendar();
+        }
       }
       
       saveAppState();
@@ -2329,7 +2400,7 @@
         loadingModal.hide();
         transactionModal.hide();
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
       } catch (err) {
         loadingModal.hide();
         console.error("saveTransaction", err);
@@ -2351,7 +2422,7 @@
         loadingModal.hide();
         Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
         confirmDeleteModal.hide();
       } catch (err) {
         loadingModal.hide();
@@ -2465,7 +2536,6 @@
       });
     }
 
-    // Optimized transaction loading
     async function loadTransactions() {
       try {
         transactionsTableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 small-muted">Loading transactions...</td></tr>`;
@@ -2510,11 +2580,15 @@
       }
     }
 
-    // Update all views after data changes
     function updateAllViews() {
       buildTable();
       updateGridView();
-      updateCalendarView();
+      if (calendar) {
+        calendar.destroy();
+        if (currentView === 'calendar') {
+          initializeCalendar();
+        }
+      }
       updateStats();
       updateBankBalances();
       updateQuickStats();
@@ -2884,7 +2958,6 @@
         return d >= start && d <= end;
       }
 
-      // Date filter
       if (dateFilter.value !== "all") {
         let start, end;
         switch (dateFilter.value) {
@@ -2918,19 +2991,16 @@
         }
       }
 
-      // Type filter
       if (typeFilter.value !== "all") {
         filteredTransactions = filteredTransactions.filter(t => t.TYPE === typeFilter.value);
       }
 
-      // Bank filter
       if (bankFilter.value !== "all") {
         filteredTransactions = filteredTransactions.filter(t => 
           (t.BANK_NAME || t.MODE || "") === bankFilter.value
         );
       }
 
-      // Search filter
       if (searchDesc.value.trim()) {
         const term = searchDesc.value.trim().toLowerCase();
         filteredTransactions = filteredTransactions.filter(t => 
@@ -2941,7 +3011,6 @@
         );
       }
       
-      // Amount filters
       if (minAmount.value) {
         const min = parseFloat(minAmount.value);
         filteredTransactions = filteredTransactions.filter(t => {
@@ -2958,7 +3027,6 @@
         });
       }
       
-      // Sorting
       switch (sortBy.value) {
         case "date-asc":
           filteredTransactions.sort((a, b) => new Date(a.DATE) - new Date(b.DATE));
@@ -2977,7 +3045,7 @@
             return amountA - amountB;
           });
           break;
-        default: // date-desc
+        default:
           filteredTransactions.sort((a, b) => new Date(b.DATE) - new Date(a.DATE));
           break;
       }
@@ -2988,7 +3056,12 @@
       updateStats();
       
       updateGridView();
-      updateCalendarView();
+      if (calendar) {
+        calendar.destroy();
+        if (currentView === 'calendar') {
+          initializeCalendar();
+        }
+      }
       updateViewInfo();
       
       saveAppState();
@@ -3058,7 +3131,6 @@
       
       transactionsTableBody.innerHTML = html;
 
-      // Event delegation for table actions
       transactionsTableBody.addEventListener("click", function(e) {
         const target = e.target;
         const button = target.closest("button");
@@ -3080,7 +3152,6 @@
         }
       });
 
-      // Checkbox event delegation
       transactionsTableBody.addEventListener("change", function(e) {
         if (e.target.classList.contains("row-checkbox")) {
           const id = e.target.getAttribute("data-id");
@@ -3332,7 +3403,6 @@
       saveTransactionBtn.innerHTML = 'Save Transaction';
     }
 
-    // File attachment handling
     formATTACHFILE.addEventListener("change", async function () {
       const file = this.files[0];
       if (!file) return;
@@ -3447,7 +3517,6 @@
       typeSelect.addEventListener("change", updateFieldVisibility);
     }
 
-    // Enhanced Quick Add processing for multiple transactions
     async function processQuickAdd() {
       const text = quickAddInput.value.trim();
       if (!text) {
@@ -3455,7 +3524,6 @@
         return;
       }
 
-      // Split by lines and filter empty lines
       const lines = text.split('\n').filter(line => line.trim().length > 0);
       
       if (lines.length === 0) {
@@ -3483,7 +3551,6 @@
             }
 
             if (parsedData.type === "Transfer") {
-              // Handle transfer as two transactions
               const fromTx = {
                 DATE: parsedData.date || new Date().toISOString().split('T')[0],
                 SINO: await getNextVoucherNumber("Transfer"),
@@ -3515,7 +3582,7 @@
               
               await addDoc(collection(db, "users", currentUser.uid, "transactions"), fromTx);
               await addDoc(collection(db, "users", currentUser.uid, "transactions"), toTx);
-              successCount += 2; // Count both transactions
+              successCount += 2;
             } else {
               const voucherNumber = await getNextVoucherNumber(parsedData.voucherType);
               const txData = {
@@ -3561,7 +3628,7 @@
         
         quickAddModal.hide();
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
         
       } catch (err) {
         loadingModal.hide();
@@ -3697,11 +3764,16 @@
       return bankText;
     }
 
-    // Festival Theme Functions
     function applyFestivalTheme(theme) {
       document.documentElement.setAttribute('data-theme', theme);
       
-      // Update toggle button icon based on theme
+      // Add/remove festival-active class based on whether festival is enabled
+      if (festivalEnabled && theme !== 'default') {
+        document.body.classList.add('festival-active');
+      } else {
+        document.body.classList.remove('festival-active');
+      }
+      
       const festivalIcons = {
         'default': 'fa-magic',
         'diwali': 'fa-lightbulb',
@@ -3711,24 +3783,34 @@
         'newyear': 'fa-glass-cheers'
       };
       
-      festivalToggle.innerHTML = `<i class="fa ${festivalIcons[theme] || 'fa-magic'}"></i> ${theme.charAt(0).toUpperCase() + theme.slice(1)}`;
+      festivalToggle.innerHTML = `<i class="fa ${festivalIcons[theme] || 'fa-magic'}"></i> Festival Theme <span id="festivalStatus">${festivalEnabled ? 'ON' : 'OFF'}</span>`;
       
       localStorage.setItem('festivalTheme', theme);
+      localStorage.setItem('festivalEnabled', festivalEnabled);
     }
     
     function loadThemePreference() {
       const savedTheme = localStorage.getItem('festivalTheme');
+      const savedEnabled = localStorage.getItem('festivalEnabled');
+      
+      if (savedEnabled !== null) {
+        festivalEnabled = savedEnabled === 'true';
+      }
+      
       if (savedTheme && festivalThemes.includes(savedTheme)) {
         currentTheme = savedTheme;
         currentFestivalIndex = festivalThemes.indexOf(savedTheme);
         applyFestivalTheme(savedTheme);
       } else {
-        // Default to first theme
         applyFestivalTheme('default');
+      }
+      
+      festivalStatus.textContent = festivalEnabled ? 'ON' : 'OFF';
+      if (!festivalEnabled) {
+        festivalToggle.classList.add('disabled');
       }
     }
     
-    // Export functions
     function exportToCSV() {
       if (filteredTransactions.length === 0) {
         Swal.fire({ icon: 'warning', title: 'No Data', text: 'There are no transactions to export.' });
@@ -3773,7 +3855,6 @@
       window.print();
     }
     
-    // Save/Load app state
     function saveAppState() {
       const state = {
         currentPage: currentPage,
@@ -3789,7 +3870,8 @@
         sortBy: sortBy.value,
         balanceVisible: balanceVisible,
         currentView: currentView,
-        festivalTheme: currentTheme
+        festivalTheme: currentTheme,
+        festivalEnabled: festivalEnabled
       };
       localStorage.setItem('budgetAppState', JSON.stringify(state));
     }
@@ -3816,7 +3898,16 @@
         if (state.festivalTheme && festivalThemes.includes(state.festivalTheme)) {
           currentTheme = state.festivalTheme;
           currentFestivalIndex = festivalThemes.indexOf(state.festivalTheme);
-          applyFestivalTheme(state.festivalTheme);
+        }
+        
+        if (state.festivalEnabled !== undefined) {
+          festivalEnabled = state.festivalEnabled;
+        }
+        
+        applyFestivalTheme(currentTheme);
+        festivalStatus.textContent = festivalEnabled ? 'ON' : 'OFF';
+        if (!festivalEnabled) {
+          festivalToggle.classList.add('disabled');
         }
         
         if (dateFilter.value === "custom") {
@@ -3840,7 +3931,6 @@
       return `${year}-${month}-${day}`;
     }
 
-    // Multiple Selection Functions
     function selectAllTransactions() {
       const pageTransactions = filteredTransactions.slice(
         (currentPage - 1) * rowsPerPage,
@@ -3918,7 +4008,7 @@
         selectedTransactions.clear();
         confirmBulkDeleteModal.hide();
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
       } catch (err) {
         loadingModal.hide();
         console.error("bulkDeleteTransactions", err);
@@ -3970,7 +4060,7 @@
         selectedTransactions.clear();
         bulkEditModal.hide();
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
       } catch (err) {
         loadingModal.hide();
         console.error("bulkEditTransactions", err);
@@ -3978,7 +4068,6 @@
       }
     }
 
-    // Split Income Functions
     function openSplitIncomeModal() {
       splitIncomeAmount.value = "";
       splitIncomeDescription.value = "";
@@ -4223,7 +4312,7 @@
         
         splitIncomeModal.hide();
         await loadTransactions();
-        updateAllViews(); // Ensure all views are updated
+        updateAllViews();
       } catch (err) {
         loadingModal.hide();
         console.error("saveSplitTransactions", err);
@@ -4231,7 +4320,6 @@
       }
     }
 
-    // View Switching Functions
     function switchView(view) {
       currentView = view;
       
@@ -4249,10 +4337,8 @@
       
       bulkActions.style.display = view === 'table' ? 'flex' : 'none';
       
-      if (view === 'calendar' && !calendar) {
+      if (view === 'calendar') {
         initializeCalendar();
-      } else if (view === 'calendar' && calendar) {
-        calendar.render();
       }
       
       if (view === 'grid') {
@@ -4263,7 +4349,6 @@
       saveAppState();
     }
     
-    // Grid View Functions
     function updateGridView() {
       if (currentView !== 'grid') return;
       
@@ -4457,7 +4542,6 @@
       }
     }
     
-    // Calendar View Functions
     function initializeCalendar() {
       const calendarEl = calendarViewContainer;
       
@@ -4538,13 +4622,6 @@
       calendar.render();
     }
     
-    function updateCalendarView() {
-      if (currentView === 'calendar' && calendar) {
-        calendar.destroy();
-        initializeCalendar();
-      }
-    }
-    
     function updateViewInfo() {
       let info = '';
       const filteredCount = filteredTransactions.length;
@@ -4569,7 +4646,6 @@
       viewInfo.textContent = info;
     }
     
-    // AI Chat Functions
     function openAIChat() {
       aiChatModal.show();
     }
@@ -4637,24 +4713,63 @@
     function processAIMessage(message) {
       const lowerMessage = message.toLowerCase();
       
-      if (lowerMessage.includes('top expense') || lowerMessage.includes('biggest expense')) {
-        addChatMessage("📊 **Top Expenses**\n\nI'd analyze your top expenses here based on your transaction data.", 'assistant');
-      } else if (lowerMessage.includes('income') && lowerMessage.includes('expense')) {
-        addChatMessage("💰 **Income vs Expenses**\n\nI'd show you an income vs expense breakdown here.", 'assistant');
-      } else if (lowerMessage.includes('balance')) {
-        addChatMessage("🏦 **Bank Balances**\n\nI'd show you your current bank balances here.", 'assistant');
-      } else if (lowerMessage.includes('help')) {
+      // Simple AI responses based on user queries
+      if (lowerMessage.includes('today')) {
+        const today = new Date().toISOString().split('T')[0];
+        const todaysTx = filteredTransactions.filter(tx => tx.DATE === today);
+        
+        if (todaysTx.length === 0) {
+          addChatMessage("📅 No transactions found for today.", 'assistant');
+        } else {
+          let response = `📅 Found ${todaysTx.length} transaction(s) for today:\n\n`;
+          todaysTx.forEach((tx, i) => {
+            const amount = (parseFloat(tx.INCOME) || 0) + (parseFloat(tx.EXPENSE) || 0);
+            response += `${i+1}. ${tx.TYPE}: $${amount.toFixed(2)} - ${tx.DESCRIPTION || 'No description'}\n`;
+          });
+          addChatMessage(response, 'assistant');
+        }
+      }
+      else if (lowerMessage.includes('expense') && lowerMessage.includes('month')) {
+        const now = new Date();
+        const monthTx = filteredTransactions.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear() && tx.TYPE === 'Expense';
+        });
+        
+        const total = monthTx.reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
+        addChatMessage(`📊 Total expenses this month: $${total.toFixed(2)} from ${monthTx.length} transactions.`, 'assistant');
+      }
+      else if (lowerMessage.includes('income') && lowerMessage.includes('month')) {
+        const now = new Date();
+        const monthTx = filteredTransactions.filter(tx => {
+          const txDate = new Date(tx.DATE);
+          return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear() && tx.TYPE === 'Income';
+        });
+        
+        const total = monthTx.reduce((sum, tx) => sum + (parseFloat(tx.INCOME) || 0), 0);
+        addChatMessage(`💰 Total income this month: $${total.toFixed(2)} from ${monthTx.length} transactions.`, 'assistant');
+      }
+      else if (lowerMessage.includes('balance') || lowerMessage.includes('bank')) {
+        const bankBalances = calculateBankBalances();
+        let response = "🏦 Current Bank Balances:\n\n";
+        Object.entries(bankBalances).forEach(([bank, balance]) => {
+          response += `${bank}: $${balance.toFixed(2)}\n`;
+        });
+        addChatMessage(response, 'assistant');
+      }
+      else if (lowerMessage.includes('help') || lowerMessage.includes('what can you do')) {
         const helpText = `🔍 **I can help you with:**\n\n` +
           `• "Show me today's transactions"\n` +
-          `• "Find expenses from SBI"\n` +
+          `• "Find expenses from [bank name]"\n` +
           `• "What's my income this month?"\n` +
-          `• "Show me the latest 5 transactions"\n` +
+          `• "Show me bank balances"\n` +
           `• "How much did I spend on fuel?"\n` +
           `• "Transactions over $500"\n\n` +
           `Just ask in natural language!`;
         addChatMessage(helpText, 'assistant');
-      } else {
-        addChatMessage(`🤔 I understand you're asking: "${message}"\n\nI'm analyzing your transactions. In the full version, I'd provide detailed insights based on your question.`, 'assistant');
+      }
+      else {
+        addChatMessage(`🤔 I understand you're asking about "${message}". Try asking about today's transactions, monthly income/expenses, or bank balances!`, 'assistant');
       }
     }
   </script>
