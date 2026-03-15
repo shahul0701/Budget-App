@@ -77,6 +77,13 @@
             border-radius: 5px;
             margin: 20px 0;
         }
+        .success {
+            color: #28a745;
+            padding: 20px;
+            background-color: #d4edda;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
         .refresh-btn {
             background-color: #007bff;
             color: white;
@@ -90,11 +97,35 @@
         .refresh-btn:hover {
             background-color: #0056b3;
         }
+        .login-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        .login-btn:hover {
+            background-color: #218838;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Firebase Storage Usage Monitor</h1>
+        
+        <div id="authStatus" class="status"></div>
+        <div id="loginSection" style="display: none;">
+            <button class="login-btn" onclick="signInAnonymously()">Sign In Anonymously</button>
+            <p style="color: #666; font-size: 14px;">Note: You need to be signed in to view storage contents</p>
+        </div>
         
         <div id="storageInfo" class="storage-info">
             <div class="loading">Loading storage information...</div>
@@ -105,7 +136,7 @@
             <div class="loading">Loading files...</div>
         </div>
         
-        <button class="refresh-btn" onclick="loadStorageData()">Refresh Data</button>
+        <button class="refresh-btn" onclick="loadStorageData()" id="refreshBtn" disabled>Refresh Data</button>
     </div>
 
     <!-- Firebase SDKs -->
@@ -114,6 +145,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getStorage, ref, listAll, getMetadata } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // Your Firebase configuration
         const firebaseConfig = {
@@ -130,9 +162,11 @@
         const app = initializeApp(firebaseConfig);
         const analytics = getAnalytics(app);
         const storage = getStorage(app);
+        const auth = getAuth(app);
 
-        // Make storage available globally for the button click
+        // Make functions available globally
         window.storage = storage;
+        window.auth = auth;
 
         // Format bytes to human readable format
         function formatBytes(bytes, decimals = 2) {
@@ -147,10 +181,55 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
+        // Sign in anonymously
+        window.signInAnonymously = async function() {
+            try {
+                const authStatus = document.getElementById('authStatus');
+                authStatus.innerHTML = '<div class="loading">Signing in...</div>';
+                
+                await signInAnonymously(auth);
+                
+                // The onAuthStateChanged will handle the UI update
+            } catch (error) {
+                console.error('Sign-in error:', error);
+                document.getElementById('authStatus').innerHTML = `<div class="error">Sign-in failed: ${error.message}</div>`;
+            }
+        };
+
+        // Check authentication state
+        onAuthStateChanged(auth, (user) => {
+            const authStatus = document.getElementById('authStatus');
+            const loginSection = document.getElementById('loginSection');
+            const refreshBtn = document.getElementById('refreshBtn');
+            
+            if (user) {
+                // User is signed in
+                authStatus.innerHTML = `<div class="success">✓ Signed in as: ${user.uid}</div>`;
+                loginSection.style.display = 'none';
+                refreshBtn.disabled = false;
+                loadStorageData(); // Auto-load data when signed in
+            } else {
+                // User is signed out
+                authStatus.innerHTML = '<div class="error">✗ Not signed in. Please sign in to view storage.</div>';
+                loginSection.style.display = 'block';
+                refreshBtn.disabled = true;
+                
+                // Clear previous data
+                document.getElementById('storageInfo').innerHTML = '<div class="loading">Please sign in to view storage information</div>';
+                document.getElementById('fileList').innerHTML = '<h2>Files in Storage</h2><div class="loading">Please sign in to view files</div>';
+            }
+        });
+
         // Load storage data
         window.loadStorageData = async function() {
             const storageInfo = document.getElementById('storageInfo');
             const fileListDiv = document.getElementById('fileList');
+            
+            // Check if user is authenticated
+            if (!auth.currentUser) {
+                storageInfo.innerHTML = '<div class="error">Please sign in first</div>';
+                return;
+            }
             
             storageInfo.innerHTML = '<div class="loading">Loading storage information...</div>';
             fileListDiv.innerHTML = '<h2>Files in Storage</h2><div class="loading">Loading files...</div>';
@@ -168,30 +247,41 @@
                 
                 // Function to recursively list all files
                 async function listAllFiles(dirRef, path = '') {
-                    const dirResult = await listAll(dirRef);
-                    
-                    // Process files in current directory
-                    for (const item of dirResult.items) {
-                        try {
-                            const metadata = await getMetadata(item);
-                            const size = metadata.size;
-                            totalSize += size;
-                            fileCount++;
-                            
-                            files.push({
-                                name: path + item.name,
-                                size: size,
-                                contentType: metadata.contentType || 'Unknown',
-                                updated: metadata.updated
-                            });
-                        } catch (err) {
-                            console.error('Error getting metadata for:', item.name, err);
+                    try {
+                        const dirResult = await listAll(dirRef);
+                        
+                        // Process files in current directory
+                        for (const item of dirResult.items) {
+                            try {
+                                const metadata = await getMetadata(item);
+                                const size = metadata.size;
+                                totalSize += size;
+                                fileCount++;
+                                
+                                files.push({
+                                    name: path + item.name,
+                                    size: size,
+                                    contentType: metadata.contentType || 'Unknown',
+                                    updated: metadata.updated
+                                });
+                            } catch (err) {
+                                console.error('Error getting metadata for:', item.name, err);
+                                files.push({
+                                    name: path + item.name,
+                                    size: 0,
+                                    contentType: 'Error reading metadata',
+                                    updated: 'Unknown'
+                                });
+                            }
                         }
-                    }
-                    
-                    // Process subdirectories recursively
-                    for (const prefix of dirResult.prefixes) {
-                        await listAllFiles(prefix, path + prefix.name + '/');
+                        
+                        // Process subdirectories recursively
+                        for (const prefix of dirResult.prefixes) {
+                            await listAllFiles(prefix, path + prefix.name + '/');
+                        }
+                    } catch (err) {
+                        console.error('Error listing directory:', path, err);
+                        throw err;
                     }
                 }
                 
@@ -223,7 +313,7 @@
                     files.forEach(file => {
                         fileListHTML += `
                             <div class="file-item">
-                                <span class="file-name">${file.name}</span>
+                                <span class="file-name">${file.name || 'Unnamed file'}</span>
                                 <span class="file-size">${formatBytes(file.size)}</span>
                             </div>
                         `;
@@ -235,13 +325,21 @@
                 
             } catch (error) {
                 console.error('Error loading storage data:', error);
-                storageInfo.innerHTML = `<div class="error">Error loading storage data: ${error.message}</div>`;
-                fileListDiv.innerHTML = '<h2>Files in Storage</h2><div class="error">Error loading files</div>';
+                
+                let errorMessage = error.message;
+                if (error.code === 'storage/unauthorized') {
+                    errorMessage = 'You don\'t have permission to access this storage. Please check your Firebase Storage rules.';
+                } else if (error.code === 'storage/unknown') {
+                    errorMessage = 'An unknown error occurred. Please check if your storage bucket exists and is properly configured.';
+                }
+                
+                storageInfo.innerHTML = `<div class="error">Error loading storage data: ${errorMessage}</div>`;
+                fileListDiv.innerHTML = '<h2>Files in Storage</h2><div class="error">Error loading files. Make sure you are signed in and have proper permissions.</div>';
             }
         }
 
-        // Load data when page loads
-        window.addEventListener('load', loadStorageData);
+        // Initial check
+        console.log('Firebase initialized. Waiting for authentication...');
     </script>
 </body>
 </html>
