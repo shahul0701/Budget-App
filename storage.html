@@ -97,7 +97,25 @@
         .refresh-btn:hover {
             background-color: #0056b3;
         }
-        .login-btn {
+        .refresh-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .login-form {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .login-form input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .login-form button {
             background-color: #28a745;
             color: white;
             border: none;
@@ -105,15 +123,24 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
-            margin: 10px;
+            margin-right: 10px;
         }
-        .login-btn:hover {
+        .login-form button:hover {
             background-color: #218838;
         }
-        .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
+        .login-form button.secondary {
+            background-color: #6c757d;
+        }
+        .login-form button.secondary:hover {
+            background-color: #5a6268;
+        }
+        .admin-badge {
+            background-color: #ffc107;
+            color: #333;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -122,21 +149,33 @@
         <h1>Firebase Storage Usage Monitor</h1>
         
         <div id="authStatus" class="status"></div>
+        
         <div id="loginSection" style="display: none;">
-            <button class="login-btn" onclick="signInAnonymously()">Sign In Anonymously</button>
-            <p style="color: #666; font-size: 14px;">Note: You need to be signed in to view storage contents</p>
+            <div class="login-form">
+                <h3>Sign In</h3>
+                <p>Use your existing login credentials from the budget app</p>
+                <input type="email" id="emailInput" placeholder="Email" value="shahulsha254@gmail.com">
+                <input type="password" id="passwordInput" placeholder="Password">
+                <button onclick="signInWithEmail()">Sign In with Email</button>
+                <button class="secondary" onclick="signInAnonymously()">Sign In Anonymously (Limited Access)</button>
+            </div>
+        </div>
+        
+        <div id="userInfo" style="display: none;">
+            <div class="success" id="userGreeting"></div>
         </div>
         
         <div id="storageInfo" class="storage-info">
-            <div class="loading">Loading storage information...</div>
+            <div class="loading">Please sign in to view storage information</div>
         </div>
         
         <div id="fileList" class="file-list">
             <h2>Files in Storage</h2>
-            <div class="loading">Loading files...</div>
+            <div class="loading">Please sign in to view files</div>
         </div>
         
         <button class="refresh-btn" onclick="loadStorageData()" id="refreshBtn" disabled>Refresh Data</button>
+        <button class="refresh-btn" onclick="signOut()" id="signOutBtn" style="background-color: #dc3545; margin-left: 10px;" disabled>Sign Out</button>
     </div>
 
     <!-- Firebase SDKs -->
@@ -145,7 +184,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getStorage, ref, listAll, getMetadata } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // Your Firebase configuration
         const firebaseConfig = {
@@ -181,18 +220,41 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
-        // Sign in anonymously
-        window.signInAnonymously = async function() {
+        // Sign in with email
+        window.signInWithEmail = async function() {
+            const email = document.getElementById('emailInput').value;
+            const password = document.getElementById('passwordInput').value;
+            
             try {
                 const authStatus = document.getElementById('authStatus');
                 authStatus.innerHTML = '<div class="loading">Signing in...</div>';
                 
-                await signInAnonymously(auth);
-                
-                // The onAuthStateChanged will handle the UI update
+                await signInWithEmailAndPassword(auth, email, password);
             } catch (error) {
                 console.error('Sign-in error:', error);
                 document.getElementById('authStatus').innerHTML = `<div class="error">Sign-in failed: ${error.message}</div>`;
+            }
+        };
+
+        // Sign in anonymously
+        window.signInAnonymously = async function() {
+            try {
+                const authStatus = document.getElementById('authStatus');
+                authStatus.innerHTML = '<div class="loading">Signing in anonymously...</div>';
+                
+                await signInAnonymously(auth);
+            } catch (error) {
+                console.error('Anonymous sign-in error:', error);
+                document.getElementById('authStatus').innerHTML = `<div class="error">Anonymous sign-in failed: ${error.message}</div>`;
+            }
+        };
+
+        // Sign out
+        window.signOut = async function() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error('Sign-out error:', error);
             }
         };
 
@@ -200,19 +262,36 @@
         onAuthStateChanged(auth, (user) => {
             const authStatus = document.getElementById('authStatus');
             const loginSection = document.getElementById('loginSection');
+            const userInfo = document.getElementById('userInfo');
+            const userGreeting = document.getElementById('userGreeting');
             const refreshBtn = document.getElementById('refreshBtn');
+            const signOutBtn = document.getElementById('signOutBtn');
             
             if (user) {
+                // Check if user is admin (based on email)
+                const isAdmin = user.email === 'shahulsha254@gmail.com';
+                
                 // User is signed in
-                authStatus.innerHTML = `<div class="success">✓ Signed in as: ${user.uid}</div>`;
+                userInfo.style.display = 'block';
+                userGreeting.innerHTML = `
+                    ✓ Signed in as: ${user.email || 'Anonymous User'} (UID: ${user.uid})
+                    ${isAdmin ? '<span class="admin-badge">Admin</span>' : ''}
+                `;
+                
+                authStatus.innerHTML = '';
                 loginSection.style.display = 'none';
                 refreshBtn.disabled = false;
-                loadStorageData(); // Auto-load data when signed in
+                signOutBtn.disabled = false;
+                
+                // Auto-load data when signed in
+                loadStorageData();
             } else {
                 // User is signed out
+                userInfo.style.display = 'none';
                 authStatus.innerHTML = '<div class="error">✗ Not signed in. Please sign in to view storage.</div>';
                 loginSection.style.display = 'block';
                 refreshBtn.disabled = true;
+                signOutBtn.disabled = true;
                 
                 // Clear previous data
                 document.getElementById('storageInfo').innerHTML = '<div class="loading">Please sign in to view storage information</div>';
@@ -338,7 +417,6 @@
             }
         }
 
-        // Initial check
         console.log('Firebase initialized. Waiting for authentication...');
     </script>
 </body>
