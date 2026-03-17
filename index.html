@@ -796,7 +796,6 @@
     }
     
     .banner {
-      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
       color: white;
       padding: 16px 20px;
       border-radius: 12px;
@@ -865,19 +864,19 @@
     }
     
     .banner.info {
-      background: linear-gradient(135deg, var(--info), #64b5f6);
+      background: linear-gradient(135deg, #2196f3, #64b5f6);
     }
     
     .banner.success {
-      background: linear-gradient(135deg, var(--success), #81c784);
+      background: linear-gradient(135deg, #4caf50, #81c784);
     }
     
     .banner.warning {
-      background: linear-gradient(135deg, var(--warning), #ffb74d);
+      background: linear-gradient(135deg, #ff9800, #ffb74d);
     }
     
     .banner.danger {
-      background: linear-gradient(135deg, var(--danger), #e57373);
+      background: linear-gradient(135deg, #f44336, #e57373);
     }
     
     /* Auto-scroll indicator */
@@ -1495,6 +1494,22 @@
       .btn, .btn-demo {
         padding: 12px;
         font-size: 14px;
+      }
+      
+      .banner-container {
+        top: 60px;
+      }
+      
+      .banner {
+        padding: 12px 16px;
+      }
+      
+      .banner-title {
+        font-size: 14px;
+      }
+      
+      .banner-message {
+        font-size: 12px;
       }
     }
     
@@ -2457,45 +2472,6 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
 
-    // Banner System
-    function showBanner(type, title, message, duration = 5000) {
-      const bannerContainer = document.getElementById('bannerContainer');
-      bannerContainer.innerHTML = ''; // Clear existing banner
-      
-      const banner = document.createElement('div');
-      banner.className = `banner ${type}`;
-      
-      const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-exclamation-circle',
-        warning: 'fa-exclamation-triangle',
-        info: 'fa-info-circle'
-      };
-      
-      banner.innerHTML = `
-        <div class="banner-icon">
-          <i class="fas ${icons[type] || 'fa-bell'}"></i>
-        </div>
-        <div class="banner-content">
-          <div class="banner-title">${title}</div>
-          <div class="banner-message">${message}</div>
-        </div>
-        <button class="banner-close" onclick="this.parentElement.remove()">
-          <i class="fas fa-times"></i>
-        </button>
-      `;
-      
-      bannerContainer.appendChild(banner);
-      
-      // Auto-close after duration
-      setTimeout(() => {
-        if (banner.parentElement) {
-          banner.style.animation = 'slideDown 0.3s reverse';
-          setTimeout(() => banner.remove(), 300);
-        }
-      }, duration);
-    }
-
     // Welcome Popup Functions
     window.closeWelcomePopup = function() {
       document.getElementById('welcomePopup').classList.remove('active');
@@ -2840,9 +2816,6 @@
           
           // Show welcome banner
           showBanner('success', `Welcome ${email.split('@')[0]}!`, 'You have successfully logged in', 4000);
-          
-          // Redirect to home.html after successful login
-          window.location.href = "home.html";
         }, 1500);
         
       } catch (error) {
@@ -2935,9 +2908,6 @@
           
           showToast('success', 'Welcome to Budget App!', 'Your account has been created successfully');
           showBanner('success', `Welcome ${name}!`, 'Your account has been created successfully', 5000);
-          
-          // Redirect to home.html after successful signup
-          window.location.href = "home.html";
         }, 1500);
         
       } catch (error) {
@@ -3310,6 +3280,221 @@
         window.scrollTo(0, 0);
       }
     });
+
+    // Banner Display Component
+    class BannerDisplay {
+      constructor() {
+        this.container = document.getElementById('bannerContainer');
+        this.activeBanners = [];
+        this.currentBannerIndex = 0;
+        this.interval = null;
+        this.init();
+      }
+
+      init() {
+        // Load banners from localStorage
+        this.loadBannersFromStorage();
+
+        // Set up periodic refresh (every minute to check schedule changes)
+        setInterval(() => {
+          this.refreshBanners();
+        }, 60000);
+      }
+
+      loadBannersFromStorage() {
+        try {
+          const saved = localStorage.getItem('banners');
+          if (saved) {
+            const banners = JSON.parse(saved);
+            const now = new Date();
+            const activeBanners = banners.filter(banner => {
+              if (!banner.active) return false;
+              if (banner.scheduleStart && new Date(banner.scheduleStart) > now) return false;
+              if (banner.scheduleEnd && new Date(banner.scheduleEnd) < now) return false;
+              return true;
+            });
+            this.updateBanners(activeBanners);
+          }
+        } catch (e) {
+          console.error('Error loading banners:', e);
+        }
+      }
+
+      updateBanners(banners) {
+        this.activeBanners = banners;
+        this.currentBannerIndex = 0;
+        this.clearBanner();
+        this.showNextBanner();
+      }
+
+      refreshBanners() {
+        this.loadBannersFromStorage();
+      }
+
+      clearBanner() {
+        if (this.container) {
+          this.container.innerHTML = '';
+        }
+      }
+
+      showNextBanner() {
+        if (this.activeBanners.length === 0 || !this.container) {
+          return;
+        }
+
+        const banner = this.activeBanners[this.currentBannerIndex];
+        this.displayBanner(banner);
+        
+        // Track view locally
+        this.trackViewLocally(banner.id);
+
+        // Rotate to next banner after duration
+        setTimeout(() => {
+          this.currentBannerIndex = (this.currentBannerIndex + 1) % this.activeBanners.length;
+          this.showNextBanner();
+        }, (banner.duration || 5) * 1000);
+      }
+
+      trackViewLocally(bannerId) {
+        try {
+          const saved = localStorage.getItem('banners');
+          if (saved) {
+            const banners = JSON.parse(saved);
+            const banner = banners.find(b => b.id === bannerId);
+            if (banner) {
+              banner.views = (banner.views || 0) + 1;
+              localStorage.setItem('banners', JSON.stringify(banners));
+            }
+          }
+        } catch (e) {
+          console.error('Error tracking view:', e);
+        }
+      }
+
+      displayBanner(banner) {
+        if (!this.container) return;
+        
+        this.container.innerHTML = '';
+        
+        const bannerEl = document.createElement('div');
+        bannerEl.className = `banner ${banner.type}`;
+        
+        // Apply custom gradient if exists
+        let gradientStyle = '';
+        if (banner.gradient === 'custom' && banner.customColors) {
+          gradientStyle = `background: linear-gradient(135deg, ${banner.customColors.start}, ${banner.customColors.end});`;
+        } else {
+          // Use preset gradients
+          const gradients = {
+            primary: 'linear-gradient(135deg, #6200ee, #03dac6)',
+            secondary: 'linear-gradient(135deg, #f093fb, #f5576c)',
+            sunset: 'linear-gradient(135deg, #ff6b6b, #feca57)',
+            ocean: 'linear-gradient(135deg, #48c6ef, #6f86d6)',
+            forest: 'linear-gradient(135deg, #11998e, #38ef7d)',
+            info: 'linear-gradient(135deg, #2196f3, #64b5f6)',
+            success: 'linear-gradient(135deg, #4caf50, #81c784)',
+            warning: 'linear-gradient(135deg, #ff9800, #ffb74d)',
+            danger: 'linear-gradient(135deg, #f44336, #e57373)'
+          };
+          gradientStyle = `background: ${gradients[banner.gradient] || gradients[banner.type] || gradients.primary};`;
+        }
+        
+        bannerEl.setAttribute('style', gradientStyle);
+        
+        bannerEl.innerHTML = `
+          <div class="banner-icon">
+            <i class="fas ${banner.icon || 'fa-bell'}"></i>
+          </div>
+          <div class="banner-content">
+            <div class="banner-title">${this.escapeHtml(banner.title)}</div>
+            <div class="banner-message">${this.escapeHtml(banner.message)}</div>
+          </div>
+          <button class="banner-close" onclick="this.parentElement.remove(); window.bannerDisplay?.trackClick('${banner.id}')">
+            <i class="fas fa-times"></i>
+          </button>
+        `;
+        
+        // Add click tracking
+        bannerEl.querySelector('.banner-close').addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.trackClick(banner.id);
+        });
+        
+        // Track clicks on banner itself (not close button)
+        bannerEl.addEventListener('click', (e) => {
+          if (!e.target.closest('.banner-close')) {
+            this.trackClick(banner.id);
+          }
+        });
+        
+        this.container.appendChild(bannerEl);
+      }
+
+      trackClick(bannerId) {
+        try {
+          const saved = localStorage.getItem('banners');
+          if (saved) {
+            const banners = JSON.parse(saved);
+            const banner = banners.find(b => b.id === bannerId);
+            if (banner) {
+              banner.clicks = (banner.clicks || 0) + 1;
+              localStorage.setItem('banners', JSON.stringify(banners));
+            }
+          }
+        } catch (e) {
+          console.error('Error tracking click:', e);
+        }
+      }
+
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+    }
+
+    // Initialize banner display
+    window.bannerDisplay = new BannerDisplay();
+
+    // Show banner function
+    window.showBanner = function(type, title, message, duration = 5000) {
+      const bannerContainer = document.getElementById('bannerContainer');
+      if (!bannerContainer) return;
+      
+      // Don't clear container - let the banner display component handle it
+      // Just add a temporary banner if needed
+      const banner = document.createElement('div');
+      banner.className = `banner ${type}`;
+      
+      const icons = {
+        success: 'fa-check-circle',
+        error: 'fa-exclamation-circle',
+        warning: 'fa-exclamation-triangle',
+        info: 'fa-info-circle'
+      };
+      
+      banner.innerHTML = `
+        <div class="banner-icon">
+          <i class="fas ${icons[type] || 'fa-bell'}"></i>
+        </div>
+        <div class="banner-content">
+          <div class="banner-title">${title}</div>
+          <div class="banner-message">${message}</div>
+        </div>
+        <button class="banner-close" onclick="this.parentElement.remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      `;
+      
+      bannerContainer.appendChild(banner);
+      
+      setTimeout(() => {
+        if (banner.parentElement) {
+          banner.style.animation = 'slideDown 0.3s reverse';
+          setTimeout(() => banner.remove(), 300);
+        }
+      }, duration);
+    };
 
     // Make functions globally available
     window.showBanner = showBanner;
