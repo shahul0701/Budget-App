@@ -704,6 +704,26 @@
       background: #e8f5e9;
       color: #4caf50;
     }
+
+    /* Main App Link */
+    .main-app-link {
+      background: var(--success);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 50px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    .main-app-link:hover {
+      background: #3d8b40;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+    }
   </style>
 </head>
 <body>
@@ -715,6 +735,9 @@
         Banner Management System
       </h1>
       <div class="admin-actions">
+        <a href="index.html" class="main-app-link" target="_blank">
+          <i class="fas fa-external-link-alt"></i> View Main App
+        </a>
         <button class="btn btn-outline" onclick="exportBanners()">
           <i class="fas fa-download"></i> Export
         </button>
@@ -766,6 +789,16 @@
         <div class="stat-info">
           <h3 id="avgCTR">0%</h3>
           <p>Avg. CTR</p>
+        </div>
+      </div>
+      
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="fas fa-clock"></i>
+        </div>
+        <div class="stat-info">
+          <h3 id="activeBanners">0</h3>
+          <p>Active Now</p>
         </div>
       </div>
     </div>
@@ -964,74 +997,161 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
+    // Banner Service - Shared between admin and main app
+    class BannerService {
+      constructor() {
+        this.banners = [];
+        this.storageKey = 'banners';
+        this.listeners = [];
+        this.loadBanners();
+      }
+
+      // Load banners from localStorage
+      loadBanners() {
+        const saved = localStorage.getItem(this.storageKey);
+        if (saved) {
+          try {
+            this.banners = JSON.parse(saved);
+          } catch (e) {
+            this.banners = [];
+          }
+        } else {
+          // Default banners if none exist
+          this.banners = [
+            {
+              id: 'default-1',
+              type: 'info',
+              title: 'Welcome to Budget App!',
+              message: 'Take control of your finances today',
+              icon: 'fa-info-circle',
+              duration: 5,
+              position: 'top',
+              active: true,
+              views: 0,
+              clicks: 0,
+              createdAt: new Date().toISOString(),
+              gradient: 'primary'
+            },
+            {
+              id: 'default-2',
+              type: 'success',
+              title: 'New Feature Available',
+              message: 'Check out our new reporting tools',
+              icon: 'fa-rocket',
+              duration: 4,
+              position: 'top',
+              active: true,
+              views: 0,
+              clicks: 0,
+              createdAt: new Date().toISOString(),
+              gradient: 'secondary'
+            }
+          ];
+          this.saveBanners();
+        }
+        return this.banners;
+      }
+
+      // Save banners to localStorage
+      saveBanners() {
+        localStorage.setItem(this.storageKey, JSON.stringify(this.banners));
+        this.notifyListeners();
+      }
+
+      // Get all active banners based on current time and status
+      getActiveBanners() {
+        const now = new Date();
+        return this.banners.filter(banner => {
+          // Check if banner is active
+          if (!banner.active) return false;
+
+          // Check schedule if exists
+          if (banner.scheduleStart) {
+            const startDate = new Date(banner.scheduleStart);
+            if (startDate > now) return false;
+          }
+
+          if (banner.scheduleEnd) {
+            const endDate = new Date(banner.scheduleEnd);
+            if (endDate < now) return false;
+          }
+
+          return true;
+        });
+      }
+
+      // Track banner view
+      trackView(bannerId) {
+        const banner = this.banners.find(b => b.id === bannerId);
+        if (banner) {
+          banner.views = (banner.views || 0) + 1;
+          this.saveBanners();
+        }
+      }
+
+      // Track banner click
+      trackClick(bannerId) {
+        const banner = this.banners.find(b => b.id === bannerId);
+        if (banner) {
+          banner.clicks = (banner.clicks || 0) + 1;
+          this.saveBanners();
+        }
+      }
+
+      // Add listener for banner changes
+      addListener(callback) {
+        this.listeners.push(callback);
+        callback(this.getActiveBanners());
+      }
+
+      // Notify all listeners of changes
+      notifyListeners() {
+        const activeBanners = this.getActiveBanners();
+        this.listeners.forEach(callback => callback(activeBanners));
+      }
+
+      // Get banner by ID
+      getBanner(id) {
+        return this.banners.find(b => b.id === id);
+      }
+
+      // Create new banner
+      createBanner(bannerData) {
+        const newBanner = {
+          id: Date.now().toString(),
+          ...bannerData,
+          views: 0,
+          clicks: 0,
+          createdAt: new Date().toISOString()
+        };
+        this.banners.push(newBanner);
+        this.saveBanners();
+        return newBanner;
+      }
+
+      // Update banner
+      updateBanner(id, bannerData) {
+        const index = this.banners.findIndex(b => b.id === id);
+        if (index !== -1) {
+          this.banners[index] = { ...this.banners[index], ...bannerData };
+          this.saveBanners();
+        }
+      }
+
+      // Delete banner
+      deleteBanner(id) {
+        this.banners = this.banners.filter(b => b.id !== id);
+        this.saveBanners();
+      }
+    }
+
+    // Create global instance
+    const bannerService = new BannerService();
+    
     // Banner Data Store
-    let banners = [];
+    let banners = bannerService.banners;
     let currentEditId = null;
     let chart = null;
-    
-    // Load banners from localStorage
-    function loadBanners() {
-      const saved = localStorage.getItem('banners');
-      if (saved) {
-        banners = JSON.parse(saved);
-      } else {
-        // Sample banners
-        banners = [
-          {
-            id: '1',
-            type: 'success',
-            title: 'Welcome to Budget App!',
-            message: 'Start managing your finances today',
-            icon: 'fa-rocket',
-            duration: 5,
-            position: 'top',
-            active: true,
-            views: 1250,
-            clicks: 85,
-            createdAt: new Date().toISOString(),
-            gradient: 'primary'
-          },
-          {
-            id: '2',
-            type: 'info',
-            title: 'New Feature Available',
-            message: 'Check out our new reporting tools',
-            icon: 'fa-star',
-            duration: 4,
-            position: 'top',
-            active: true,
-            views: 850,
-            clicks: 42,
-            createdAt: new Date().toISOString(),
-            gradient: 'secondary'
-          },
-          {
-            id: '3',
-            type: 'warning',
-            title: 'Maintenance Notice',
-            message: 'Scheduled maintenance on Sunday',
-            icon: 'fa-exclamation-triangle',
-            duration: 6,
-            position: 'top',
-            active: false,
-            views: 430,
-            clicks: 12,
-            createdAt: new Date().toISOString(),
-            gradient: 'sunset',
-            scheduleStart: new Date(Date.now() + 86400000).toISOString()
-          }
-        ];
-      }
-      updateStats();
-      renderBanners();
-    }
-    
-    // Save banners to localStorage
-    function saveBanners() {
-      localStorage.setItem('banners', JSON.stringify(banners));
-      updateStats();
-      renderBanners();
-    }
     
     // Update statistics
     function updateStats() {
@@ -1039,12 +1159,14 @@
       const totalViews = banners.reduce((sum, b) => sum + (b.views || 0), 0);
       const totalClicks = banners.reduce((sum, b) => sum + (b.clicks || 0), 0);
       const avgCTR = totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(1) : 0;
+      const activeNow = bannerService.getActiveBanners().length;
       
       document.getElementById('totalBanners').textContent = total;
       document.getElementById('totalViews').textContent = totalViews.toLocaleString();
       document.getElementById('totalClicks').textContent = totalClicks.toLocaleString();
       document.getElementById('avgCTR').textContent = avgCTR + '%';
-      document.getElementById('bannerCount').textContent = `(${total} banners)`;
+      document.getElementById('activeBanners').textContent = activeNow;
+      document.getElementById('bannerCount').textContent = `(${total} banners, ${activeNow} active)`;
     }
     
     // Update live preview
@@ -1135,20 +1257,20 @@
       
       if (currentEditId) {
         // Update existing banner
-        const index = banners.findIndex(b => b.id === currentEditId);
-        if (index !== -1) {
-          banners[index] = bannerData;
-        }
+        bannerService.updateBanner(currentEditId, bannerData);
         showToast('success', 'Banner Updated', 'Banner has been updated successfully');
       } else {
         // Create new banner
-        banners.push(bannerData);
+        bannerService.createBanner(bannerData);
         showToast('success', 'Banner Created', 'New banner has been created successfully');
       }
       
-      saveBanners();
+      // Refresh banners from service
+      banners = bannerService.banners;
+      
       resetForm();
       renderBanners();
+      updateStats();
     }
     
     // Edit banner
@@ -1180,10 +1302,11 @@
     // Delete banner
     function deleteBanner(id) {
       if (confirm('Are you sure you want to delete this banner?')) {
-        banners = banners.filter(b => b.id !== id);
-        saveBanners();
+        bannerService.deleteBanner(id);
+        banners = bannerService.banners;
         showToast('success', 'Banner Deleted', 'Banner has been deleted successfully');
         renderBanners();
+        updateStats();
       }
     }
     
@@ -1192,9 +1315,10 @@
       const banner = banners.find(b => b.id === id);
       if (banner) {
         banner.active = !banner.active;
-        saveBanners();
+        bannerService.updateBanner(id, { active: banner.active });
         showToast('info', 'Status Updated', `Banner is now ${banner.active ? 'active' : 'inactive'}`);
         renderBanners();
+        updateStats();
       }
     }
     
@@ -1480,9 +1604,13 @@
           try {
             const imported = JSON.parse(e.target.result);
             if (Array.isArray(imported)) {
-              banners = [...banners, ...imported];
-              saveBanners();
+              imported.forEach(banner => {
+                bannerService.createBanner(banner);
+              });
+              banners = bannerService.banners;
               showToast('success', 'Import Complete', `Imported ${imported.length} banners`);
+              renderBanners();
+              updateStats();
             } else {
               showToast('error', 'Import Failed', 'Invalid file format');
             }
@@ -1503,7 +1631,9 @@
     document.getElementById('searchBanner').addEventListener('input', renderBanners);
     
     // Initialize
-    loadBanners();
+    banners = bannerService.banners;
+    updateStats();
+    renderBanners();
     updatePreview();
     
     // Make functions globally available
