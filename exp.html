@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.0.2/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Expense Tracker Pro</title>
@@ -456,6 +459,7 @@
             border-radius: 12px;
             font-size: 11px;
             font-weight: bold;
+            text-align: center;
         }
 
         .mode-badge.cash {
@@ -627,7 +631,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.4);
+            background: rgba(0, 0, 0, 0.5);
             justify-content: center;
             align-items: center;
             z-index: 9999;
@@ -644,9 +648,10 @@
             flex-direction: column;
             gap: 18px;
             position: relative;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             font-size: 14px;
             border-left: 10px solid var(--success);
+            margin: auto;
         }
 
         .create-mode .modal-content {
@@ -1630,19 +1635,18 @@
             display: none;
         }
 
-        /* Loading Overlay */
+        /* Loading Overlay - Fixed Centering */
         .loading-overlay {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             display: flex;
             justify-content: center;
             align-items: center;
             z-index: 10001;
-            display: none;
         }
 
         .loading-spinner {
@@ -1652,12 +1656,22 @@
             border-top: 5px solid var(--accent-primary);
             border-radius: 50%;
             animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
         }
 
         .loading-text {
             color: white;
-            margin-top: 10px;
-            font-size: 14px;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .loading-box {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            min-width: 200px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
         }
 
         /* Bulk edit modals */
@@ -1683,11 +1697,35 @@
             margin-top: 2px;
         }
 
-        /* Bank indicator in mode */
-        .bank-indicator {
-            font-size: 10px;
-            color: rgba(255,255,255,0.8);
-            margin-left: 4px;
+        /* OCR Progress */
+        .ocr-progress {
+            margin: 20px 0;
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            display: none;
+        }
+
+        .ocr-progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .ocr-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--warning), #ff9800);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .ocr-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
         }
     </style>
 </head>
@@ -2126,35 +2164,41 @@
         </div>
     </div>
     
-    <!-- Statement Upload Modal -->
+    <!-- Statement Upload Modal with OCR -->
     <div id="statementUploadModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 800px;">
             <span class="close-btn" id="closeStatementModal">&times;</span>
-            <h2><i class="fas fa-file-invoice-dollar"></i> Upload Bank Statement</h2>
+            <h2><i class="fas fa-file-invoice-dollar"></i> Upload Bank Statement with OCR</h2>
             
             <div class="bank-select-section">
                 <h3><i class="fas fa-university"></i> Select Bank Account</h3>
                 <select id="statementBankSelect" style="width: 100%; padding: 10px; margin: 10px 0;">
                     <option value="">Select Bank Account</option>
                 </select>
-                <p style="color: var(--text-secondary); font-size: 12px;">
-                    <i class="fas fa-info-circle"></i> Select the bank account this statement belongs to.
-                </p>
             </div>
             
             <div class="statement-upload-area" id="statementDropZone">
                 <i class="fas fa-file-pdf" style="font-size: 48px; color: var(--warning); margin-bottom: 15px;"></i>
                 <h3>Drag & Drop Bank Statement</h3>
-                <p>Supported formats: CSV, PDF, XLS, XLSX</p>
+                <p>Supported formats: PDF, JPG, PNG, XLS, XLSX, CSV</p>
+                <p><small><i class="fas fa-magic"></i> OCR will extract text from images/PDFs</small></p>
                 <label class="upload-btn" style="background: var(--warning);">
                     <i class="fas fa-upload"></i> Browse Statement Files
-                    <input type="file" id="statementInput" accept=".csv,.pdf,.xls,.xlsx" style="display: none;" />
+                    <input type="file" id="statementInput" accept=".csv,.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif" style="display: none;" />
                 </label>
                 <p class="file-name" id="statementFileName">No file selected</p>
             </div>
             
+            <div class="ocr-progress" id="ocrProgress">
+                <h4><i class="fas fa-microscope"></i> OCR Processing</h4>
+                <div class="ocr-progress-bar">
+                    <div class="ocr-progress-fill" id="ocrProgressFill"></div>
+                </div>
+                <div class="ocr-status" id="ocrStatus">Initializing OCR...</div>
+            </div>
+            
             <div class="statement-preview" id="statementPreview">
-                <h4><i class="fas fa-eye"></i> Statement Preview</h4>
+                <h4><i class="fas fa-eye"></i> Extracted Transactions</h4>
                 <div id="statementPreviewContent"></div>
             </div>
             
@@ -2183,7 +2227,7 @@
     
     <!-- Reconciliation Modal -->
     <div id="reconciliationModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 800px;">
             <span class="close-btn" id="closeReconciliationModal">&times;</span>
             <h2><i class="fas fa-balance-scale"></i> Account Reconciliation</h2>
             
@@ -2392,9 +2436,9 @@
     
     <p id="dateRangeDisplay" class="range-display"></p>
     
-    <!-- Loading Overlay -->
-    <div id="loadingOverlay" class="loading-overlay">
-        <div style="text-align: center;">
+    <!-- Loading Overlay - Fixed Centering -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-box">
             <div class="loading-spinner"></div>
             <div class="loading-text" id="loadingMessage">Processing, please wait...</div>
         </div>
@@ -2525,6 +2569,9 @@
         const statementPreview = document.getElementById("statementPreview");
         const statementPreviewContent = document.getElementById("statementPreviewContent");
         const autoMatchRules = document.getElementById("autoMatchRules");
+        const ocrProgress = document.getElementById("ocrProgress");
+        const ocrProgressFill = document.getElementById("ocrProgressFill");
+        const ocrStatus = document.getElementById("ocrStatus");
         
         // Batch action elements
         const batchActionsBar = document.getElementById("batchActionsBar");
@@ -2642,6 +2689,9 @@
         
         // Batch selection
         let selectedTransactionIds = new Set();
+
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
         // Theme functionality
         function initTheme() {
@@ -3538,18 +3588,196 @@
             }
         }
 
-        function handleStatementFileSelect(file) {
+        // OCR Statement Processing
+        async function handleStatementFileSelect(file) {
             if (!file) return;
-            const allowedTypes = ['.csv', '.pdf', '.xls', '.xlsx'];
+            statementFileName.textContent = file.name;
+            
             const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+            const allowedTypes = ['.csv', '.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.gif'];
+            
             if (!allowedTypes.includes(fileExt)) {
-                Swal.fire({ icon: 'error', title: 'Error', text: 'Please select a CSV, PDF, XLS, or XLSX file' });
+                Swal.fire({ icon: 'error', title: 'Error', text: 'Please select a valid file format' });
                 return;
             }
-            statementFileName.textContent = file.name;
-            if (fileExt === '.csv') previewCSVFile(file);
-            else if (fileExt === '.pdf') previewPDFFile(file);
-            else if (fileExt === '.xls' || fileExt === '.xlsx') previewExcelFile(file);
+
+            processStatementBtn.disabled = false;
+            
+            // Show OCR progress for images
+            if (fileExt === '.jpg' || fileExt === '.jpeg' || fileExt === '.png' || fileExt === '.gif') {
+                ocrProgress.style.display = 'block';
+                await processImageWithOCR(file);
+            } else if (fileExt === '.pdf') {
+                ocrProgress.style.display = 'block';
+                await processPDFWithOCR(file);
+            } else {
+                ocrProgress.style.display = 'none';
+                // Handle CSV/Excel files normally
+                if (fileExt === '.csv') {
+                    previewCSVFile(file);
+                } else if (fileExt === '.xls' || fileExt === '.xlsx') {
+                    previewExcelFile(file);
+                }
+            }
+        }
+
+        async function processImageWithOCR(file) {
+            ocrStatus.textContent = 'Preprocessing image...';
+            ocrProgressFill.style.width = '20%';
+            
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const imageUrl = e.target.result;
+                    
+                    // Create image element
+                    const img = new Image();
+                    img.src = imageUrl;
+                    
+                    await new Promise(resolve => { img.onload = resolve; });
+                    
+                    ocrStatus.textContent = 'Running OCR...';
+                    ocrProgressFill.style.width = '50%';
+                    
+                    // Use Tesseract.js for OCR
+                    const { data: { text } } = await Tesseract.recognize(
+                        img,
+                        'eng',
+                        {
+                            logger: m => {
+                                if (m.status === 'recognizing text') {
+                                    ocrProgressFill.style.width = `${50 + (m.progress * 30)}%`;
+                                }
+                            }
+                        }
+                    );
+                    
+                    ocrStatus.textContent = 'Parsing transaction data...';
+                    ocrProgressFill.style.width = '90%';
+                    
+                    // Parse the extracted text to find transaction patterns
+                    const transactions = parseOCRText(text);
+                    
+                    displayExtractedTransactions(transactions);
+                    
+                    ocrStatus.textContent = 'OCR Complete!';
+                    ocrProgressFill.style.width = '100%';
+                    
+                    setTimeout(() => {
+                        ocrProgress.style.display = 'none';
+                    }, 2000);
+                };
+                reader.readAsDataURL(file);
+            } catch (error) {
+                console.error('OCR Error:', error);
+                Swal.fire({ icon: 'error', title: 'OCR Failed', text: 'Could not extract text from image: ' + error.message });
+                ocrProgress.style.display = 'none';
+            }
+        }
+
+        async function processPDFWithOCR(file) {
+            ocrStatus.textContent = 'Loading PDF...';
+            ocrProgressFill.style.width = '10%';
+            
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const pdfData = new Uint8Array(e.target.result);
+                    
+                    ocrStatus.textContent = 'Parsing PDF...';
+                    ocrProgressFill.style.width = '30%';
+                    
+                    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+                    let fullText = '';
+                    
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        ocrStatus.textContent = `Processing page ${i}/${pdf.numPages}...`;
+                        ocrProgressFill.style.width = `${30 + (i / pdf.numPages * 50)}%`;
+                        
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).join(' ');
+                        fullText += pageText + '\n';
+                    }
+                    
+                    ocrStatus.textContent = 'Parsing transaction data...';
+                    ocrProgressFill.style.width = '90%';
+                    
+                    const transactions = parseOCRText(fullText);
+                    displayExtractedTransactions(transactions);
+                    
+                    ocrStatus.textContent = 'PDF Processing Complete!';
+                    ocrProgressFill.style.width = '100%';
+                    
+                    setTimeout(() => {
+                        ocrProgress.style.display = 'none';
+                    }, 2000);
+                };
+                reader.readAsArrayBuffer(file);
+            } catch (error) {
+                console.error('PDF Error:', error);
+                Swal.fire({ icon: 'error', title: 'PDF Processing Failed', text: error.message });
+                ocrProgress.style.display = 'none';
+            }
+        }
+
+        function parseOCRText(text) {
+            // Simple pattern matching for bank transactions
+            const lines = text.split('\n');
+            const transactions = [];
+            
+            // Common patterns in bank statements
+            const datePattern = /\d{2}[-\/]\d{2}[-\/]\d{2,4}|\d{4}[-\/]\d{2}[-\/]\d{2}/;
+            const amountPattern = /[\$\€\£\₹]?\s*\d+[,.]?\d*\s?(?:cr|dr)?/i;
+            
+            for (const line of lines) {
+                if (line.trim().length < 10) continue;
+                
+                const dateMatch = line.match(datePattern);
+                const amountMatch = line.match(amountPattern);
+                
+                if (dateMatch && amountMatch) {
+                    const amount = parseFloat(amountMatch[0].replace(/[^\d.-]/g, '')) || 0;
+                    const description = line.replace(dateMatch[0], '').replace(amountMatch[0], '').trim();
+                    
+                    transactions.push({
+                        statementDate: dateMatch[0].replace(/\//g, '-'), // Normalize date format
+                        description: description || 'Unknown transaction',
+                        amount: amount,
+                        type: line.toLowerCase().includes('cr') ? 'credit' : 'debit',
+                        status: 'unmatched'
+                    });
+                }
+            }
+            
+            return transactions;
+        }
+
+        function displayExtractedTransactions(transactions) {
+            if (transactions.length === 0) {
+                statementPreviewContent.innerHTML = '<p style="text-align:center;color:var(--danger);">No transactions could be extracted from the file.</p>';
+            } else {
+                let html = '<table class="statement-transactions-table">';
+                html += '<tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr>';
+                
+                transactions.slice(0, 20).forEach(tx => {
+                    html += `<tr>
+                        <td>${escapeHtml(tx.statementDate || '')}</td>
+                        <td>${escapeHtml(tx.description || '')}</td>
+                        <td>$${Math.abs(tx.amount || 0).toFixed(2)}</td>
+                        <td><span class="match-status ${tx.type === 'credit' ? 'matched' : 'unmatched'}">${tx.type || 'unknown'}</span></td>
+                    </tr>`;
+                });
+                
+                if (transactions.length > 20) {
+                    html += `<tr><td colspan="4" style="text-align:center;">... and ${transactions.length - 20} more transactions</td></tr>`;
+                }
+                
+                html += '</table>';
+                statementPreviewContent.innerHTML = html;
+            }
+            
+            statementPreview.style.display = 'block';
         }
 
         function previewCSVFile(file) {
@@ -3574,25 +3802,12 @@
             reader.readAsText(file);
         }
 
-        function previewPDFFile(file) {
-            statementPreviewContent.innerHTML = `
-                <div style="text-align: center; padding: 20px;">
-                    <i class="fas fa-file-pdf" style="font-size: 48px; color: var(--danger);"></i>
-                    <p>PDF file: ${escapeHtml(file.name)}</p>
-                    <p>Size: ${(file.size / 1024).toFixed(2)} KB</p>
-                    <p><small>PDF preview requires PDF.js library. The file will be processed for transaction data.</small></p>
-                </div>
-            `;
-            statementPreview.style.display = 'block';
-        }
-
         function previewExcelFile(file) {
             statementPreviewContent.innerHTML = `
                 <div style="text-align: center; padding: 20px;">
                     <i class="fas fa-file-excel" style="font-size: 48px; color: var(--success);"></i>
                     <p>Excel file: ${escapeHtml(file.name)}</p>
                     <p>Size: ${(file.size / 1024).toFixed(2)} KB</p>
-                    <p><small>Excel file will be processed for transaction data.</small></p>
                 </div>
             `;
             statementPreview.style.display = 'block';
@@ -3643,6 +3858,7 @@
         async function parseStatementFile(file, bankAccount) {
             const fileExt = '.' + file.name.split('.').pop().toLowerCase();
             const transactions = [];
+            
             if (fileExt === '.csv') {
                 const text = await file.text();
                 const lines = text.split('\n').filter(line => line.trim());
@@ -3661,7 +3877,13 @@
                     };
                     transactions.push(tx);
                 }
+            } else if (fileExt === '.jpg' || fileExt === '.jpeg' || fileExt === '.png' || fileExt === '.gif' || fileExt === '.pdf') {
+                // Use OCR extracted transactions
+                const text = await extractTextFromFile(file);
+                const parsed = parseOCRText(text);
+                transactions.push(...parsed.map(tx => ({ ...tx, bankAccount, status: 'unmatched' })));
             } else {
+                // Mock for Excel and other formats
                 transactions.push({
                     bankAccount,
                     statementDate: new Date().toISOString().split('T')[0],
@@ -3674,6 +3896,47 @@
                 });
             }
             return transactions;
+        }
+
+        async function extractTextFromFile(file) {
+            const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+            
+            if (fileExt === '.pdf') {
+                const reader = new FileReader();
+                return new Promise((resolve, reject) => {
+                    reader.onload = async (e) => {
+                        try {
+                            const pdfData = new Uint8Array(e.target.result);
+                            const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+                            let text = '';
+                            
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const content = await page.getTextContent();
+                                text += content.items.map(item => item.str).join(' ') + '\n';
+                            }
+                            resolve(text);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                });
+            } else {
+                // For images, use Tesseract
+                const reader = new FileReader();
+                return new Promise((resolve, reject) => {
+                    reader.onload = async (e) => {
+                        try {
+                            const { data: { text } } = await Tesseract.recognize(e.target.result, 'eng');
+                            resolve(text);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
         }
 
         async function autoMatchTransactions(statementTransactions, rules) {
@@ -3907,6 +4170,8 @@
             statementPreview.style.display = "none";
             statementPreviewContent.innerHTML = "";
             autoMatchRules.style.display = "none";
+            ocrProgress.style.display = "none";
+            ocrProgressFill.style.width = "0%";
             processStatementBtn.disabled = true;
             statementInput.value = "";
         }
@@ -4921,32 +5186,35 @@
             
             if (isImage) {
                 return `
-                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(filename)}" class="btn-view">
-                        <i class="fas ${iconClass}"></i> View
-                    </a>
-                    <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn-download">
-                        <i class="fas fa-download"></i>
-                    </a>
-                    <br>
-                    <small style="color:#666; font-size:11px;">${displayName}</small>
+                    <div class="attachment-cell">
+                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(filename)}" class="btn-view">
+                            <i class="fas ${iconClass}"></i> View
+                        </a>
+                        <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn-download">
+                            <i class="fas fa-download"></i>
+                        </a>
+                        <small style="color:#666; font-size:10px;">${displayName}</small>
+                    </div>
                 `;
             } else {
                 return `
-                    <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn-view">
-                        <i class="fas ${iconClass}"></i> Download
-                    </a>
-                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-download" title="View in new tab">
-                        <i class="fas fa-external-link-alt"></i>
-                    </a>
-                    <br>
-                    <small style="color:#666; font-size:11px;">${displayName}</small>
+                    <div class="attachment-cell">
+                        <a href="${escapeHtml(url)}" download="${escapeHtml(filename)}" class="btn-view">
+                            <i class="fas ${iconClass}"></i> Download
+                        </a>
+                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-download" title="View in new tab">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <small style="color:#666; font-size:10px;">${displayName}</small>
+                    </div>
                 `;
             }
         }
 
+        // FIXED: Mode display - shows just "Bank" not the bank name
         function getModeBadge(mode, bankName) {
             if (mode === 'Bank') {
-                return `<span class="mode-badge bank">Bank <span class="bank-indicator">(${escapeHtml(bankName || 'N/A')})</span></span>`;
+                return `<span class="mode-badge bank">Bank</span>`;
             } else if (mode === 'Cash') {
                 return `<span class="mode-badge cash">Cash</span>`;
             } else if (mode === 'Transfer') {
