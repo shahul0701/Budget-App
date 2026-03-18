@@ -3702,37 +3702,41 @@ budgetWarningProceed.addEventListener('click', async () => {
 
 // Save transaction with budget warning
 // Save transaction with budget warning - FIXED
+// FIXED: Save transaction with budget warning
 async function saveTransactionWithWarning(transactionData) {
   const warnings = checkBudgetLimits(transactionData);
   
   if (warnings.length > 0) {
     return new Promise((resolve) => {
-      // Store the transaction data and resolve function
       pendingTransaction = {
         data: transactionData,
         callback: async (data) => {
-          await executeSaveTransaction(data);
-          resolve(true); // THIS WAS MISSING - resolves the promise
+          await executeSaveTransaction(data, true); // Show success message
+          resolve(true);
         }
       };
       
-      // Show the warning modal
       showBudgetWarning(warnings);
     });
   } else {
-    await executeSaveTransaction(transactionData);
+    await executeSaveTransaction(transactionData, true); // Show success message
     return true;
   }
 }
    // FIXED: Execute save function
-async function executeSaveTransaction(txData) {
+// FIXED: Execute save function with optional success message
+async function executeSaveTransaction(txData, showSuccessMessage = true) {
   try {
     if (txIdInput.value) {
       await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
-      Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully', timer: 1500 });
+      if (showSuccessMessage) {
+        Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully', timer: 1500 });
+      }
     } else {
       await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-      Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully', timer: 1500 });
+      if (showSuccessMessage) {
+        Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully', timer: 1500 });
+      }
     }
     
     await loadTransactionsWithRetry();
@@ -3812,30 +3816,31 @@ async function executeSaveTransaction(txData) {
       }
     });
 
-    confirmDeleteBtn.addEventListener("click", async () => {
-      if (!txToDelete) return;
-      
-      try {
-        loadingMessage.textContent = "Deleting transaction...";
-        loadingModal.show();
-        
-        await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
-        
-        loadingModal.hide();
-        Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully' });
-        await loadTransactionsWithRetry();
-        updateBudgetSummary();
-        confirmDeleteModal.hide();
-      } catch (err) {
-        loadingModal.hide();
-        console.error("deleteTransaction", err);
-        Swal.fire({ 
-          icon: 'error', 
-          title: 'Error', 
-          text: 'Failed to delete transaction. Please try again.' 
-        });
-      }
+   // FIXED: Delete confirmation button
+confirmDeleteBtn.addEventListener("click", async () => {
+  if (!txToDelete) return;
+  
+  try {
+    loadingMessage.textContent = "Deleting transaction...";
+    loadingModal.show();
+    
+    await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txToDelete));
+    
+    loadingModal.hide();
+    Swal.fire({ icon: 'success', title: 'Deleted', text: 'Transaction deleted successfully', timer: 1500 });
+    await loadTransactionsWithRetry();
+    updateBudgetSummary();
+    confirmDeleteModal.hide();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("deleteTransaction", err);
+    Swal.fire({ 
+      icon: 'error', 
+      title: 'Error', 
+      text: 'Failed to delete transaction. Please try again.' 
     });
+  }
+});
 
     tableViewBtn.addEventListener("click", () => switchView('table'));
     gridViewBtn.addEventListener("click", () => switchView('grid'));
@@ -5408,37 +5413,39 @@ async function executeSaveTransaction(txData) {
       confirmBulkDeleteModal.show();
     }
 
-    async function processBulkDelete() {
-      const count = selectedTransactions.size;
-      if (count === 0) return;
-      
-      try {
-        loadingMessage.textContent = `Deleting ${count} transactions...`;
-        loadingModal.show();
-        
-        const deletePromises = Array.from(selectedTransactions).map(id => 
-          deleteDoc(doc(db, "users", currentUser.uid, "transactions", id))
-        );
-        
-        await Promise.all(deletePromises);
-        
-        loadingModal.hide();
-        Swal.fire({ 
-          icon: 'success', 
-          title: 'Deleted', 
-          text: `${count} transaction${count !== 1 ? 's' : ''} deleted successfully` 
-        });
-        
-        selectedTransactions.clear();
-        confirmBulkDeleteModal.hide();
-        await loadTransactionsWithRetry();
-        updateBudgetSummary();
-      } catch (err) {
-        loadingModal.hide();
-        console.error("bulkDeleteTransactions", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transactions. Please try again.' });
-      }
-    }
+   // FIXED: Process bulk delete
+async function processBulkDelete() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  try {
+    loadingMessage.textContent = `Deleting ${count} transactions...`;
+    loadingModal.show();
+    
+    const deletePromises = Array.from(selectedTransactions).map(id => 
+      deleteDoc(doc(db, "users", currentUser.uid, "transactions", id))
+    );
+    
+    await Promise.all(deletePromises);
+    
+    loadingModal.hide();
+    Swal.fire({ 
+      icon: 'success', 
+      title: 'Deleted', 
+      text: `${count} transaction${count !== 1 ? 's' : ''} deleted successfully`,
+      timer: 1500 
+    });
+    
+    selectedTransactions.clear();
+    confirmBulkDeleteModal.hide();
+    await loadTransactionsWithRetry();
+    updateBudgetSummary();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("bulkDeleteTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transactions. Please try again.' });
+  }
+}
 
     function openBulkEditModal() {
       const count = selectedTransactions.size;
@@ -5449,48 +5456,50 @@ async function executeSaveTransaction(txData) {
       bulkEditModal.show();
     }
 
-    async function processBulkEdit() {
-      const count = selectedTransactions.size;
-      if (count === 0) return;
+    // FIXED: Process bulk edit
+async function processBulkEdit() {
+  const count = selectedTransactions.size;
+  if (count === 0) return;
+  
+  const field = bulkEditField.value;
+  const value = bulkEditValue.value.trim();
+  
+  if (!value) {
+    Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a value' });
+    return;
+  }
+  
+  try {
+    loadingMessage.textContent = `Updating ${count} transactions...`;
+    loadingModal.show();
+    
+    const updatePromises = Array.from(selectedTransactions).map(id => {
+      const updateData = {};
+      updateData[field] = value;
       
-      const field = bulkEditField.value;
-      const value = bulkEditValue.value.trim();
-      
-      if (!value) {
-        Swal.fire({ icon: 'warning', title: 'Validation Error', text: 'Please enter a value' });
-        return;
-      }
-      
-      try {
-        loadingMessage.textContent = `Updating ${count} transactions...`;
-        loadingModal.show();
-        
-        const updatePromises = Array.from(selectedTransactions).map(id => {
-          const updateData = {};
-          updateData[field] = value;
-          
-          return updateDoc(doc(db, "users", currentUser.uid, "transactions", id), updateData);
-        });
-        
-        await Promise.all(updatePromises);
-        
-        loadingModal.hide();
-        Swal.fire({ 
-          icon: 'success', 
-          title: 'Updated', 
-          text: `${count} transaction${count !== 1 ? 's' : ''} updated successfully` 
-        });
-        
-        selectedTransactions.clear();
-        bulkEditModal.hide();
-        await loadTransactionsWithRetry();
-        updateBudgetSummary();
-      } catch (err) {
-        loadingModal.hide();
-        console.error("bulkEditTransactions", err);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions. Please try again.' });
-      }
-    }
+      return updateDoc(doc(db, "users", currentUser.uid, "transactions", id), updateData);
+    });
+    
+    await Promise.all(updatePromises);
+    
+    loadingModal.hide();
+    Swal.fire({ 
+      icon: 'success', 
+      title: 'Updated', 
+      text: `${count} transaction${count !== 1 ? 's' : ''} updated successfully`,
+      timer: 1500 
+    });
+    
+    selectedTransactions.clear();
+    bulkEditModal.hide();
+    await loadTransactionsWithRetry();
+    updateBudgetSummary();
+  } catch (err) {
+    loadingModal.hide();
+    console.error("bulkEditTransactions", err);
+    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions. Please try again.' });
+  }
+}
 
     function openSplitIncomeModal() {
       splitIncomeAmount.value = "";
