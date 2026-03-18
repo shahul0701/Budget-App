@@ -2946,29 +2946,28 @@
       return warnings;
     }
 
-    function showBudgetWarning(warnings, transactionData, callback) {
-      pendingTransaction = { data: transactionData, callback };
-      budgetWarnings = warnings;
-      
-      let html = '';
-      warnings.forEach(w => {
-        html += `
-          <div class="budget-warning-item">
-            <div>
-              <strong>${escapeHtml(w.category)}</strong><br>
-              <small>Current: ${formatCurrency(w.current)} | Limit: ${formatCurrency(w.limit)}</small>
-            </div>
-            <div class="text-right">
-              <span class="badge bg-warning">${w.percentage}%</span><br>
-              <small class="text-danger">Overshoot: ${formatCurrency(w.overshoot)}</small>
-            </div>
-          </div>
-        `;
-      });
-      
-      budgetWarningList.innerHTML = html;
-      budgetWarningModal.style.display = 'flex';
-    }
+    function showBudgetWarning(warnings) {
+  budgetWarnings = warnings;
+  
+  let html = '';
+  warnings.forEach(w => {
+    html += `
+      <div class="budget-warning-item">
+        <div>
+          <strong>${escapeHtml(w.category)}</strong><br>
+          <small>Current: ${formatCurrency(w.current)} | Limit: ${formatCurrency(w.limit)}</small>
+        </div>
+        <div class="text-right">
+          <span class="badge bg-warning">${w.percentage}%</span><br>
+          <small class="text-danger">Overshoot: ${formatCurrency(w.overshoot)}</small>
+        </div>
+      </div>
+    `;
+  });
+  
+  budgetWarningList.innerHTML = html;
+  budgetWarningModal.style.display = 'flex';
+}
 
     function hideBudgetWarning() {
       budgetWarningModal.style.display = 'none';
@@ -2976,16 +2975,37 @@
       budgetWarnings = [];
     }
 
-    budgetWarningCancel.addEventListener('click', () => {
-      hideBudgetWarning();
-    });
+   budgetWarningCancel.addEventListener('click', () => {
+  budgetWarningModal.style.display = 'none';
+  pendingTransaction = null;
+  budgetWarnings = [];
+  
+  // Re-enable save button if modal was shown during save
+  if (isSubmitting) {
+    resetSaveButton();
+    loadingModal.hide();
+  }
+});
 
-    budgetWarningProceed.addEventListener('click', async () => {
-      if (pendingTransaction) {
-        hideBudgetWarning();
-        await pendingTransaction.callback(pendingTransaction.data);
-      }
-    });
+budgetWarningProceed.addEventListener('click', async () => {
+  if (pendingTransaction) {
+    budgetWarningModal.style.display = 'none';
+    
+    try {
+      await pendingTransaction.callback(pendingTransaction.data);
+    } catch (err) {
+      console.error("Error saving after warning:", err);
+      Swal.fire({ 
+        icon: 'error', 
+        title: 'Error', 
+        text: 'Failed to save transaction. Please try again.' 
+      });
+    } finally {
+      pendingTransaction = null;
+      budgetWarnings = [];
+    }
+  }
+});
 
     // Auth handling with retry logic
     onAuthStateChanged(auth, async user => {
@@ -3669,23 +3689,29 @@
       }
     });
 
-    // Save transaction with budget warning
-    async function saveTransactionWithWarning(transactionData) {
-      const warnings = checkBudgetLimits(transactionData);
+// Save transaction with budget warning
+async function saveTransactionWithWarning(transactionData) {
+  const warnings = checkBudgetLimits(transactionData);
+  
+  if (warnings.length > 0) {
+    return new Promise((resolve) => {
+      // Store the transaction data and resolve function
+      pendingTransaction = {
+        data: transactionData,
+        callback: async (data) => {
+          await executeSaveTransaction(data);
+          resolve(true);
+        }
+      };
       
-      if (warnings.length > 0) {
-        return new Promise((resolve) => {
-          showBudgetWarning(warnings, transactionData, async (data) => {
-            await executeSaveTransaction(data);
-            resolve(true);
-          });
-        });
-      } else {
-        await executeSaveTransaction(transactionData);
-        return true;
-      }
-    }
-
+      // Show the warning modal
+      showBudgetWarning(warnings);
+    });
+  } else {
+    await executeSaveTransaction(transactionData);
+    return true;
+  }
+}
     async function executeSaveTransaction(txData) {
       try {
         if (txIdInput.value) {
