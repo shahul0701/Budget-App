@@ -2975,31 +2975,42 @@
       budgetWarnings = [];
     }
 
-   budgetWarningCancel.addEventListener('click', () => {
+  // FIXED: Budget warning cancel button
+budgetWarningCancel.addEventListener('click', () => {
   budgetWarningModal.style.display = 'none';
   pendingTransaction = null;
   budgetWarnings = [];
   
-  // Re-enable save button if modal was shown during save
-  if (isSubmitting) {
-    resetSaveButton();
-    loadingModal.hide();
-  }
+  // Re-enable save button
+  resetSaveButton();
+  loadingModal.hide();
 });
 
+// FIXED: Budget warning proceed button
 budgetWarningProceed.addEventListener('click', async () => {
   if (pendingTransaction) {
     budgetWarningModal.style.display = 'none';
     
     try {
+      loadingMessage.textContent = "Saving transaction...";
+      loadingModal.show();
+      
       await pendingTransaction.callback(pendingTransaction.data);
+      
+      // Success message is already shown in executeSaveTransaction
+      loadingModal.hide();
+      transactionModal.hide();
+      resetSaveButton();
+      
     } catch (err) {
+      loadingModal.hide();
       console.error("Error saving after warning:", err);
       Swal.fire({ 
         icon: 'error', 
         title: 'Error', 
         text: 'Failed to save transaction. Please try again.' 
       });
+      resetSaveButton();
     } finally {
       pendingTransaction = null;
       budgetWarnings = [];
@@ -3690,6 +3701,7 @@ budgetWarningProceed.addEventListener('click', async () => {
     });
 
 // Save transaction with budget warning
+// Save transaction with budget warning - FIXED
 async function saveTransactionWithWarning(transactionData) {
   const warnings = checkBudgetLimits(transactionData);
   
@@ -3700,7 +3712,7 @@ async function saveTransactionWithWarning(transactionData) {
         data: transactionData,
         callback: async (data) => {
           await executeSaveTransaction(data);
-          resolve(true);
+          resolve(true); // THIS WAS MISSING - resolves the promise
         }
       };
       
@@ -3712,23 +3724,29 @@ async function saveTransactionWithWarning(transactionData) {
     return true;
   }
 }
-    async function executeSaveTransaction(txData) {
-      try {
-        if (txIdInput.value) {
-          await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
-          Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully' });
-        } else {
-          await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
-          Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully' });
-        }
-        
-        await loadTransactionsWithRetry();
-        updateBudgetSummary();
-      } catch (err) {
-        console.error("saveTransaction", err);
-        throw err;
-      }
+   // FIXED: Execute save function
+async function executeSaveTransaction(txData) {
+  try {
+    if (txIdInput.value) {
+      await updateDoc(doc(db, "users", currentUser.uid, "transactions", txIdInput.value), txData);
+      Swal.fire({ icon: 'success', title: 'Updated', text: 'Transaction updated successfully', timer: 1500 });
+    } else {
+      await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+      Swal.fire({ icon: 'success', title: 'Added', text: 'Transaction added successfully', timer: 1500 });
     }
+    
+    await loadTransactionsWithRetry();
+    updateBudgetSummary();
+    
+    // Hide loading modal
+    loadingModal.hide();
+    
+  } catch (err) {
+    console.error("saveTransaction", err);
+    throw err;
+  }
+}
+
 
     saveTransactionBtn.addEventListener("click", async () => {
       if (isSubmitting) return;
