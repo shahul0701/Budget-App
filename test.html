@@ -337,6 +337,7 @@
         .batch-actions-buttons {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         .batch-action-btn {
@@ -1584,6 +1585,49 @@
         #customDateRange {
             display: none;
         }
+
+        /* New styles for batch edit */
+        .batch-edit-dropdown {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px;
+            min-width: 150px;
+        }
+
+        .bulk-edit-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10001;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            color: white;
+            margin-top: 10px;
+            font-size: 16px;
+        }
     </style>
 </head>
 <body>
@@ -1700,6 +1744,15 @@
             </button>
             <button class="batch-action-btn" id="batchUnreconcileBtn">
                 <i class="fas fa-clock"></i> Mark Unreconciled
+            </button>
+            <button class="batch-action-btn" id="batchModeBtn">
+                <i class="fas fa-credit-card"></i> Change Mode
+            </button>
+            <button class="batch-action-btn" id="batchBankBtn">
+                <i class="fas fa-university"></i> Change Bank
+            </button>
+            <button class="batch-action-btn" id="batchAccountBtn">
+                <i class="fas fa-book"></i> Change Account
             </button>
             <button class="batch-action-btn danger" id="batchDeleteBtn">
                 <i class="fas fa-trash"></i> Delete
@@ -2218,14 +2271,71 @@
             </div>
         </div>
     </div>
+
+    <!-- Bulk Edit Mode Modal -->
+    <div id="bulkEditModeModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close" id="closeBulkModeModal">&times;</span>
+            <h3>Change Mode for Selected Transactions</h3>
+            <div style="margin: 20px 0;">
+                <label>Select Mode:</label>
+                <select id="bulkModeSelect" class="batch-edit-dropdown" style="width: 100%;">
+                    <option value="">Select Mode</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Bank">Bank</option>
+                    <option value="Transfer">Transfer</option>
+                </select>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button id="cancelBulkModeBtn" style="background:#6c757d;">Cancel</button>
+                <button id="applyBulkModeBtn" style="background:var(--accent-primary);">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Edit Bank Modal -->
+    <div id="bulkEditBankModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close" id="closeBulkBankModal">&times;</span>
+            <h3>Change Bank for Selected Transactions</h3>
+            <div style="margin: 20px 0;">
+                <label>Select Bank:</label>
+                <select id="bulkBankSelect" class="batch-edit-dropdown" style="width: 100%;">
+                    <option value="">Select Bank</option>
+                </select>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button id="cancelBulkBankBtn" style="background:#6c757d;">Cancel</button>
+                <button id="applyBulkBankBtn" style="background:var(--accent-primary);">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Edit Account Modal -->
+    <div id="bulkEditAccountModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close" id="closeBulkAccountModal">&times;</span>
+            <h3>Change Account Header for Selected Transactions</h3>
+            <div style="margin: 20px 0;">
+                <label>Select Account:</label>
+                <select id="bulkAccountSelect" class="batch-edit-dropdown" style="width: 100%;">
+                    <option value="">Select Account</option>
+                </select>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button id="cancelBulkAccountBtn" style="background:#6c757d;">Cancel</button>
+                <button id="applyBulkAccountBtn" style="background:var(--accent-primary);">Apply</button>
+            </div>
+        </div>
+    </div>
     
     <p id="dateRangeDisplay" class="range-display"></p>
     
-    <!-- Loading Modal (Hidden by default) -->
-    <div id="loadingModal" class="loading-modal">
-        <div class="loading-content">
-            <i class="fa fa-spinner fa-spin" style="font-size:40px;"></i>
-            <p>Loading, please wait…</p>
+    <!-- Loading Overlay (Hidden by default) -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text" id="loadingMessage">Processing, please wait...</div>
         </div>
     </div>
 
@@ -2299,13 +2409,17 @@
     const unmatchedTransactionsList = document.getElementById("unmatchedTransactionsList");
     
     const tableBody = document.getElementById("transactionsTableBody");
-    const loadingModal = document.getElementById("loadingModal");
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    const loadingMessage = document.getElementById("loadingMessage");
     const modal = document.getElementById("transactionModal");
     const csvModal = document.getElementById("csvUploadModal");
     const statementModal = document.getElementById("statementUploadModal");
     const reconciliationModal = document.getElementById("reconciliationModal");
     const coaModal = document.getElementById("coaModal");
     const tagBatchModal = document.getElementById("tagBatchModal");
+    const bulkEditModeModal = document.getElementById("bulkEditModeModal");
+    const bulkEditBankModal = document.getElementById("bulkEditBankModal");
+    const bulkEditAccountModal = document.getElementById("bulkEditAccountModal");
     const form = document.getElementById("transactionForm");
     const coaForm = document.getElementById("coaForm");
     const applyFiltersBtn = document.getElementById("applyFiltersBtn");
@@ -2316,6 +2430,9 @@
     const closeReconciliationBtn = document.getElementById("closeReconciliationModal");
     const closeCoaBtn = document.getElementById("closeCoaModal");
     const closeTagModal = document.getElementById("closeTagModal");
+    const closeBulkModeModal = document.getElementById("closeBulkModeModal");
+    const closeBulkBankModal = document.getElementById("closeBulkBankModal");
+    const closeBulkAccountModal = document.getElementById("closeBulkAccountModal");
     const cancelCsvBtn = document.getElementById("cancelCsvBtn");
     const cancelStatementBtn = document.getElementById("cancelStatementBtn");
     const cancelReconciliationBtn = document.getElementById("cancelReconciliationBtn");
@@ -2338,7 +2455,6 @@
     const summaryExpense = document.getElementById("summaryExpense");
     const downloadSampleCsv = document.getElementById("downloadSampleCsv");
     const formSubmitLoading = document.getElementById("formSubmitLoading");
-    const loadingMessage = document.getElementById("loadingMessage");
     const submitFormBtn = document.getElementById("submitFormBtn");
     const addStarterAccountsBtn = document.getElementById("addStarterAccountsBtn");
     const submitCoaBtn = document.getElementById("submitCoaBtn");
@@ -2354,9 +2470,23 @@
     const selectedCountSpan = document.getElementById("selectedCount");
     const batchReconcileBtn = document.getElementById("batchReconcileBtn");
     const batchUnreconcileBtn = document.getElementById("batchUnreconcileBtn");
+    const batchModeBtn = document.getElementById("batchModeBtn");
+    const batchBankBtn = document.getElementById("batchBankBtn");
+    const batchAccountBtn = document.getElementById("batchAccountBtn");
     const batchDeleteBtn = document.getElementById("batchDeleteBtn");
     const batchTagBtn = document.getElementById("batchTagBtn");
     const batchCancelBtn = document.getElementById("batchCancelBtn");
+    
+    // Bulk edit elements
+    const bulkModeSelect = document.getElementById("bulkModeSelect");
+    const applyBulkModeBtn = document.getElementById("applyBulkModeBtn");
+    const cancelBulkModeBtn = document.getElementById("cancelBulkModeBtn");
+    const bulkBankSelect = document.getElementById("bulkBankSelect");
+    const applyBulkBankBtn = document.getElementById("applyBulkBankBtn");
+    const cancelBulkBankBtn = document.getElementById("cancelBulkBankBtn");
+    const bulkAccountSelect = document.getElementById("bulkAccountSelect");
+    const applyBulkAccountBtn = document.getElementById("applyBulkAccountBtn");
+    const cancelBulkAccountBtn = document.getElementById("cancelBulkAccountBtn");
     
     // Tag batch elements
     const batchTags = document.getElementById("batchTags");
@@ -2441,6 +2571,8 @@
     let unmatchedTransactions = [];
     let matchedTransactions = [];
     let bankStatements = [];
+    let accountsList = [];
+    let bankAccountsList = [];
     
     // Sorting variables
     let currentSortField = 'date';
@@ -2478,6 +2610,16 @@
 
     themeToggle.addEventListener('click', toggleTheme);
 
+    // Show loading overlay
+    function showLoading(message = "Processing, please wait...") {
+        loadingMessage.textContent = message;
+        loadingOverlay.style.display = "flex";
+    }
+
+    function hideLoading() {
+        loadingOverlay.style.display = "none";
+    }
+
     // Auth state change
     onAuthStateChanged(auth, async user => {
         if (user) {
@@ -2491,6 +2633,7 @@
             await loadTransactions();
             await populateBankAccounts();
             await loadBankStatements();
+            await loadAllAccountsForBulkEdit();
         } else {
             alert("Please login first.");
             window.location.href = "index.html";
@@ -2635,6 +2778,25 @@
         }
     });
 
+    // Close modals when clicking outside
+    window.addEventListener('click', (e) => {
+        if (e.target === bulkEditModeModal) bulkEditModeModal.style.display = 'none';
+        if (e.target === bulkEditBankModal) bulkEditBankModal.style.display = 'none';
+        if (e.target === bulkEditAccountModal) bulkEditAccountModal.style.display = 'none';
+        if (e.target === tagBatchModal) tagBatchModal.style.display = 'none';
+        if (e.target === coaModal) coaModal.style.display = 'none';
+    });
+
+    // Bulk edit modal close buttons
+    closeBulkModeModal.addEventListener('click', () => bulkEditModeModal.style.display = 'none');
+    closeBulkBankModal.addEventListener('click', () => bulkEditBankModal.style.display = 'none');
+    closeBulkAccountModal.addEventListener('click', () => bulkEditAccountModal.style.display = 'none');
+    cancelBulkModeBtn.addEventListener('click', () => bulkEditModeModal.style.display = 'none');
+    cancelBulkBankBtn.addEventListener('click', () => bulkEditBankModal.style.display = 'none');
+    cancelBulkAccountBtn.addEventListener('click', () => bulkEditAccountModal.style.display = 'none');
+    closeTagModal.addEventListener('click', () => tagBatchModal.style.display = 'none');
+    cancelTagBtn.addEventListener('click', () => tagBatchModal.style.display = 'none');
+
     // Tag functionality
     let currentTags = [];
 
@@ -2773,6 +2935,9 @@
     // Batch operations
     batchReconcileBtn.addEventListener('click', () => batchUpdateReconciled(true));
     batchUnreconcileBtn.addEventListener('click', () => batchUpdateReconciled(false));
+    batchModeBtn.addEventListener('click', openBulkModeModal);
+    batchBankBtn.addEventListener('click', openBulkBankModal);
+    batchAccountBtn.addEventListener('click', openBulkAccountModal);
 
     async function batchUpdateReconciled(reconciled) {
         if (selectedTransactionIds.size === 0) return;
@@ -2782,7 +2947,7 @@
             icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes'
         });
         if (!result.isConfirmed) return;
-        loadingModal.style.display = 'flex';
+        showLoading(`Updating ${selectedTransactionIds.size} transaction(s)...`);
         try {
             const batch = writeBatch(db);
             selectedTransactionIds.forEach(id => {
@@ -2797,9 +2962,143 @@
             console.error("Error updating transactions:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions: ' + error.message });
         } finally {
-            loadingModal.style.display = 'none';
+            hideLoading();
         }
     }
+
+    function openBulkModeModal() {
+        if (selectedTransactionIds.size === 0) return;
+        bulkModeSelect.value = "";
+        bulkEditModeModal.style.display = 'flex';
+    }
+
+    applyBulkModeBtn.addEventListener('click', async () => {
+        const newMode = bulkModeSelect.value;
+        if (!newMode) {
+            Swal.fire({ icon: 'warning', title: 'No Selection', text: 'Please select a mode' });
+            return;
+        }
+        bulkEditModeModal.style.display = 'none';
+        const result = await Swal.fire({
+            title: 'Change Mode',
+            text: `Change mode to "${newMode}" for ${selectedTransactionIds.size} transaction(s)?`,
+            icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes'
+        });
+        if (!result.isConfirmed) return;
+        showLoading(`Updating mode for ${selectedTransactionIds.size} transaction(s)...`);
+        try {
+            const batch = writeBatch(db);
+            selectedTransactionIds.forEach(id => {
+                const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+                batch.update(txRef, { MODE: newMode });
+            });
+            await batch.commit();
+            Swal.fire({ icon: 'success', title: 'Success', text: `Updated ${selectedTransactionIds.size} transaction(s)`, timer: 1500, showConfirmButton: false });
+            await loadTransactions();
+            clearSelection();
+        } catch (error) {
+            console.error("Error updating transactions:", error);
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions: ' + error.message });
+        } finally {
+            hideLoading();
+        }
+    });
+
+    function openBulkBankModal() {
+        if (selectedTransactionIds.size === 0) return;
+        populateBulkBankSelect();
+        bulkEditBankModal.style.display = 'flex';
+    }
+
+    function populateBulkBankSelect() {
+        bulkBankSelect.innerHTML = '<option value="">Select Bank</option>';
+        bankAccountsList.forEach(bank => {
+            const option = document.createElement('option');
+            option.value = bank;
+            option.textContent = bank;
+            bulkBankSelect.appendChild(option);
+        });
+    }
+
+    applyBulkBankBtn.addEventListener('click', async () => {
+        const newBank = bulkBankSelect.value;
+        if (!newBank) {
+            Swal.fire({ icon: 'warning', title: 'No Selection', text: 'Please select a bank' });
+            return;
+        }
+        bulkEditBankModal.style.display = 'none';
+        const result = await Swal.fire({
+            title: 'Change Bank',
+            text: `Change bank to "${newBank}" for ${selectedTransactionIds.size} transaction(s)?`,
+            icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes'
+        });
+        if (!result.isConfirmed) return;
+        showLoading(`Updating bank for ${selectedTransactionIds.size} transaction(s)...`);
+        try {
+            const batch = writeBatch(db);
+            selectedTransactionIds.forEach(id => {
+                const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+                batch.update(txRef, { BANK_NAME: newBank });
+            });
+            await batch.commit();
+            Swal.fire({ icon: 'success', title: 'Success', text: `Updated ${selectedTransactionIds.size} transaction(s)`, timer: 1500, showConfirmButton: false });
+            await loadTransactions();
+            clearSelection();
+        } catch (error) {
+            console.error("Error updating transactions:", error);
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions: ' + error.message });
+        } finally {
+            hideLoading();
+        }
+    });
+
+    function openBulkAccountModal() {
+        if (selectedTransactionIds.size === 0) return;
+        populateBulkAccountSelect();
+        bulkEditAccountModal.style.display = 'flex';
+    }
+
+    function populateBulkAccountSelect() {
+        bulkAccountSelect.innerHTML = '<option value="">Select Account</option>';
+        accountsList.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account;
+            option.textContent = account;
+            bulkAccountSelect.appendChild(option);
+        });
+    }
+
+    applyBulkAccountBtn.addEventListener('click', async () => {
+        const newAccount = bulkAccountSelect.value;
+        if (!newAccount) {
+            Swal.fire({ icon: 'warning', title: 'No Selection', text: 'Please select an account' });
+            return;
+        }
+        bulkEditAccountModal.style.display = 'none';
+        const result = await Swal.fire({
+            title: 'Change Account',
+            text: `Change account header to "${newAccount}" for ${selectedTransactionIds.size} transaction(s)?`,
+            icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes'
+        });
+        if (!result.isConfirmed) return;
+        showLoading(`Updating account for ${selectedTransactionIds.size} transaction(s)...`);
+        try {
+            const batch = writeBatch(db);
+            selectedTransactionIds.forEach(id => {
+                const txRef = doc(db, "users", currentUser.uid, "transactions", id);
+                batch.update(txRef, { ACCOUNT_HEADER: newAccount });
+            });
+            await batch.commit();
+            Swal.fire({ icon: 'success', title: 'Success', text: `Updated ${selectedTransactionIds.size} transaction(s)`, timer: 1500, showConfirmButton: false });
+            await loadTransactions();
+            clearSelection();
+        } catch (error) {
+            console.error("Error updating transactions:", error);
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to update transactions: ' + error.message });
+        } finally {
+            hideLoading();
+        }
+    });
 
     batchDeleteBtn.addEventListener('click', async () => {
         if (selectedTransactionIds.size === 0) return;
@@ -2808,7 +3107,7 @@
             icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', cancelButtonColor: '#3085d6', confirmButtonText: 'Yes, delete them'
         });
         if (!result.isConfirmed) return;
-        loadingModal.style.display = 'flex';
+        showLoading(`Deleting ${selectedTransactionIds.size} transaction(s)...`);
         try {
             const batch = writeBatch(db);
             selectedTransactionIds.forEach(id => {
@@ -2823,22 +3122,21 @@
             console.error("Error deleting transactions:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transactions: ' + error.message });
         } finally {
-            loadingModal.style.display = 'none';
+            hideLoading();
         }
     });
 
     batchTagBtn.addEventListener('click', () => {
         if (selectedTransactionIds.size === 0) return;
+        batchTags.value = '';
         tagBatchModal.style.display = 'flex';
     });
-
-    closeTagModal.addEventListener('click', () => { tagBatchModal.style.display = 'none'; batchTags.value = ''; });
-    cancelTagBtn.addEventListener('click', () => { tagBatchModal.style.display = 'none'; batchTags.value = ''; });
 
     applyTagBtn.addEventListener('click', async () => {
         const tags = batchTags.value.split(',').map(t => t.trim()).filter(t => t);
         if (tags.length === 0) return;
-        loadingModal.style.display = 'flex';
+        tagBatchModal.style.display = 'none';
+        showLoading(`Adding tags to ${selectedTransactionIds.size} transaction(s)...`);
         try {
             const batch = writeBatch(db);
             selectedTransactionIds.forEach(id => {
@@ -2854,13 +3152,11 @@
             Swal.fire({ icon: 'success', title: 'Success', text: `Added tags to ${selectedTransactionIds.size} transaction(s)`, timer: 1500, showConfirmButton: false });
             await loadTransactions();
             clearSelection();
-            tagBatchModal.style.display = 'none';
-            batchTags.value = '';
         } catch (error) {
             console.error("Error adding tags:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to add tags: ' + error.message });
         } finally {
-            loadingModal.style.display = 'none';
+            hideLoading();
         }
     });
 
@@ -2895,20 +3191,43 @@
         }
     }
 
+    // Enhanced export to CSV with attachment links
     function exportToCSV() {
         if (filteredTransactions.length === 0) {
             Swal.fire({ icon: 'info', title: 'No Data', text: 'No transactions to export' });
             return;
         }
-        const headers = ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'VOUCHER TYPE', 'TYPE', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'NOTES', 'BALANCE', 'CURRENCY', 'RECONCILED', 'TAGS'];
+        const headers = ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'VOUCHER TYPE', 'TYPE', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'NOTES', 'BALANCE', 'CURRENCY', 'ATTACHMENT_URL', 'RECONCILED', 'TAGS'];
         const csvRows = [headers.join(',')];
         filteredTransactions.forEach(tx => {
+            // Escape fields that might contain commas or quotes
+            const escapeField = (field) => {
+                if (field === null || field === undefined) return '';
+                const stringField = String(field);
+                if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
+                    return '"' + stringField.replace(/"/g, '""') + '"';
+                }
+                return stringField;
+            };
+            
             const row = [
-                `"${tx.SINO || ''}"`, `"${tx.DATE || ''}"`, `"${tx.TIME || ''}"`, `"${tx.ACCOUNT_HEADER || ''}"`,
-                `"${tx.MODE || ''}"`, `"${tx.BANK_NAME || ''}"`, `"${tx.VOUCHER_TYPE || ''}"`, `"${tx.TYPE || ''}"`,
-                tx.INCOME || 0, tx.EXPENSE || 0, `"${(tx.DESCRIPTION || '').replace(/"/g, '""')}"`,
-                `"${(tx.NOTES || '').replace(/"/g, '""')}"`, tx.BALANCE || 0, `"${tx.CURRENCY || 'USD'}"`,
-                tx.RECONCILED ? 'TRUE' : 'FALSE', `"${tx.TAGS || ''}"`
+                escapeField(tx.SINO || ''),
+                escapeField(tx.DATE || ''),
+                escapeField(tx.TIME || ''),
+                escapeField(tx.ACCOUNT_HEADER || ''),
+                escapeField(tx.MODE || ''),
+                escapeField(tx.BANK_NAME || ''),
+                escapeField(tx.VOUCHER_TYPE || ''),
+                escapeField(tx.TYPE || ''),
+                tx.INCOME || 0,
+                tx.EXPENSE || 0,
+                escapeField(tx.DESCRIPTION || ''),
+                escapeField(tx.NOTES || ''),
+                tx.BALANCE || 0,
+                escapeField(tx.CURRENCY || 'USD'),
+                escapeField(tx.ATTACHMENT || ''), // Export the attachment URL
+                tx.RECONCILED ? 'TRUE' : 'FALSE',
+                escapeField(tx.TAGS || '')
             ];
             csvRows.push(row.join(','));
         });
@@ -2943,6 +3262,21 @@
             loadAccountsForParking();
         } else {
             accountParkingSection.style.display = "none";
+        }
+    }
+
+    async function loadAllAccountsForBulkEdit() {
+        try {
+            const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"));
+            const snapshot = await getDocs(q);
+            accountsList = [];
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.name) accountsList.push(data.name);
+            });
+            accountsList.sort();
+        } catch (error) {
+            console.error("Error loading accounts for bulk edit:", error);
         }
     }
 
@@ -3004,7 +3338,7 @@
             icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes, park them'
         });
         if (!result.isConfirmed) return;
-        loadingModal.style.display = "flex";
+        showLoading(`Parking ${selectedIds.length} transaction(s)...`);
         try {
             const batch = writeBatch(db);
             for (const id of selectedIds) {
@@ -3019,7 +3353,7 @@
             console.error("Error parking transactions:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to park transactions: ' + error.message });
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     }
 
@@ -3040,7 +3374,7 @@
             icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes, park them all'
         });
         if (!result.isConfirmed) return;
-        loadingModal.style.display = "flex";
+        showLoading(`Parking ${allCheckboxes.length} transaction(s)...`);
         try {
             const batch = writeBatch(db);
             for (const cb of allCheckboxes) {
@@ -3055,7 +3389,7 @@
             console.error("Error parking transactions:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to park transactions: ' + error.message });
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     }
 
@@ -3214,7 +3548,7 @@
             Swal.fire({ icon: 'error', title: 'Error', text: 'Please select a statement file' });
             return;
         }
-        loadingModal.style.display = "flex";
+        showLoading("Processing statement...");
         try {
             const transactions = await parseStatementFile(file, bankAccount);
             const statementDoc = await addDoc(collection(db, "users", currentUser.uid, "bankStatements"), {
@@ -3241,7 +3575,7 @@
             console.error("Error processing statement:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to process statement: ' + error.message });
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     }
 
@@ -3418,7 +3752,7 @@
             icon: 'question', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes, complete it'
         });
         if (!result.isConfirmed) return;
-        loadingModal.style.display = "flex";
+        showLoading("Completing reconciliation...");
         try {
             const reconRef = doc(db, "users", currentUser.uid, "reconciliations", currentReconciliation.id);
             await updateDoc(reconRef, {
@@ -3435,7 +3769,7 @@
             console.error("Error completing reconciliation:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to complete reconciliation: ' + error.message });
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     }
 
@@ -3677,6 +4011,7 @@
                     NOTES: transaction.NOTES || '',
                     BALANCE: cleanNumber(transaction.BALANCE),
                     CURRENCY: transaction.CURRENCY || 'USD',
+                    ATTACHMENT: transaction.ATTACHMENT_URL || '', // Handle attachment URL from CSV
                     RECONCILED: reconciled,
                     TAGS: transaction.TAGS || '',
                     userId: currentUser.uid,
@@ -3759,6 +4094,7 @@
                 INCOME: income,
                 EXPENSE: expense,
                 BALANCE: cleanNumber(transaction["BALANCE"]),
+                ATTACHMENT_URL: transaction["ATTACHMENT_URL"] || "", // Handle attachment URL
                 RECONCILED: reconciled,
                 TAGS: transaction["TAGS"] || ""
             };
@@ -3782,10 +4118,10 @@
 
     function downloadSampleCsvFile() {
         const sampleData = [
-            ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'RECONCILED', 'TAGS'],
-            ['1', '2023-10-15', '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary', 'TRUE', 'income,monthly'],
-            ['2', '2023-10-16', '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries', 'FALSE', 'food,essential'],
-            ['3', '2023-10-17', '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill', 'TRUE', 'utilities']
+            ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'ATTACHMENT_URL', 'RECONCILED', 'TAGS'],
+            ['1', '2023-10-15', '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary', 'https://example.com/salary.pdf', 'TRUE', 'income,monthly'],
+            ['2', '2023-10-16', '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries', '', 'FALSE', 'food,essential'],
+            ['3', '2023-10-17', '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill', '', 'TRUE', 'utilities']
         ];
         const csvContent = sampleData.map(row => row.join(',')).join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -3803,6 +4139,7 @@
         try {
             const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"));
             const snapshot = await getDocs(q);
+            accountsList = [];
             formHEADER.innerHTML = '<option value="">Select Account</option><option value="add-new">➕ Add New Account...</option>';
             snapshot.forEach(doc => {
                 const data = doc.data();
@@ -3810,7 +4147,9 @@
                 option.value = data.name;
                 option.textContent = data.name;
                 formHEADER.appendChild(option);
+                if (data.name) accountsList.push(data.name);
             });
+            accountsList.sort();
         } catch (error) {
             console.error("Error loading accounts:", error);
             if (!handleFirestoreError(error, "load accounts")) {
@@ -3992,6 +4331,7 @@
         fromBankSelect.innerHTML = `<option value="">Select Bank</option>`;
         toBankSelect.innerHTML = `<option value="">Select Bank</option>`;
         statementBankSelect.innerHTML = `<option value="">Select Bank Account</option>`;
+        bankAccountsList = [];
         try {
             const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"), where("type", "==", "Asset"), where("category", "==", "Bank"));
             const snapshot = await getDocs(q);
@@ -4004,6 +4344,7 @@
             } else {
                 snapshot.forEach(doc => {
                     const data = doc.data();
+                    bankAccountsList.push(data.name);
                     const options = [bankFilter, formBANKNAME, fromBankSelect, toBankSelect, statementBankSelect];
                     options.forEach(select => {
                         const option = document.createElement("option");
@@ -4024,7 +4365,7 @@
     }
 
     async function loadTransactions() {
-        loadingModal.style.display = "flex";
+        showLoading("Loading transactions...");
         try {
             let q;
             try {
@@ -4055,7 +4396,7 @@
                 Swal.fire({ icon: 'error', title: 'Error', text: 'Error loading transactions. Please check console for details.' });
             }
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     }
 
@@ -4375,7 +4716,7 @@
         updateFilterStats();
     }
 
-    // FIXED: Complete sorting function that works for all columns
+    // Sorting function that works for all columns
     function sortTransactions() {
         filteredTransactions.sort((a, b) => {
             let aVal, bVal;
@@ -4472,12 +4813,15 @@
     }
 
     function getAttachmentHtml(url) {
+        if (!url || url.trim() === '') return '<span style="color:#999; font-style:italic;">No attachment</span>';
+        
         const urlParts = url.split('/');
         const filename = urlParts[urlParts.length - 1];
         const fileExtension = filename.split('.').pop().toLowerCase();
         const displayName = filename.length > 20 ? filename.substring(0, 17) + '...' : filename;
         let iconClass = 'fa-file';
         let isImage = false;
+        
         switch(fileExtension) {
             case 'pdf': iconClass = 'fa-file-pdf'; break;
             case 'doc': case 'docx': iconClass = 'fa-file-word'; break;
@@ -4489,6 +4833,7 @@
                 break;
             default: iconClass = 'fa-file';
         }
+        
         if (isImage) {
             return `
                 <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(filename)}" class="btn-view">
@@ -4541,13 +4886,8 @@
                 tags.forEach(tag => { if (tag) tagsHtml += `<span class="tag">${escapeHtml(tag)}</span>`; });
                 tagsHtml += '</div>';
             }
-            let attachmentCell = "";
-            if (d.ATTACHMENT && typeof d.ATTACHMENT === 'string' && d.ATTACHMENT.trim() !== "" && 
-                (d.ATTACHMENT.startsWith('http://') || d.ATTACHMENT.startsWith('https://'))) {
-                attachmentCell = getAttachmentHtml(d.ATTACHMENT);
-            } else {
-                attachmentCell = `<span style="color:#999; font-style:italic;">No attachment</span>`;
-            }
+            const attachmentCell = getAttachmentHtml(d.ATTACHMENT);
+            
             const row = document.createElement("tr");
             row.innerHTML = `
                 <td class="checkbox-column"><input type="checkbox" class="transaction-checkbox" value="${d.id}" ${selectedTransactionIds.has(d.id) ? 'checked' : ''}></td>
@@ -4756,6 +5096,7 @@
             icon: 'warning', showCancelButton: true, confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Yes, delete it!'
         });
         if (!result.isConfirmed) return;
+        showLoading("Deleting transaction...");
         try {
             await deleteDoc(doc(db, "users", currentUser.uid, "transactions", txId));
             Swal.fire({ icon: 'success', title: 'Success', text: 'Transaction deleted successfully!', timer: 1500, showConfirmButton: false });
@@ -4765,6 +5106,8 @@
             if (!handleFirestoreError(err, "delete transaction")) {
                 Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to delete transaction: ' + err.message });
             }
+        } finally {
+            hideLoading();
         }
     }
 
@@ -4772,7 +5115,7 @@
         const file = this.files[0];
         if (!file) return;
         try {
-            loadingModal.style.display = "flex";
+            showLoading("Uploading file...");
             const formData = new FormData();
             formData.append("file", file);
             formData.append("upload_preset", "my_app_uploads");
@@ -4785,7 +5128,7 @@
             console.error("Error uploading file:", error);
             Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to upload file: ' + error.message });
         } finally {
-            loadingModal.style.display = "none";
+            hideLoading();
         }
     });
 
