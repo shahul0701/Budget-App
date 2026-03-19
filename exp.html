@@ -4363,60 +4363,81 @@
             importSummary.style.display = 'block';
         }
 
-        async function importCsvTransactions() {
-            if (csvTransactions.length === 0) {
-                Swal.fire({ icon: 'error', title: 'Error', text: 'No valid transactions to import' });
-                return;
-            }
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressBar.textContent = '0%';
-            importCsvBtn.disabled = true;
-            cancelCsvBtn.disabled = true;
-            let importedCount = 0, errors = [];
-            for (let i = 0; i < csvTransactions.length; i++) {
-                const transaction = csvTransactions[i];
-                try {
-                    const reconciled = transaction.RECONCILED === true || transaction.RECONCILED === 'TRUE' || transaction.RECONCILED === 'true' || transaction.RECONCILED === '1';
-                    await addDoc(collection(db, "users", currentUser.uid, "transactions"), {
-                        SINO: transaction.SINO || (i + 1).toString(),
-                        DATE: transaction.DATE,
-                        TIME: transaction.TIME || '00:00',
-                        ACCOUNT_HEADER: transaction.ACCOUNT_HEADER || 'Uncategorized',
-                        MODE: transaction.MODE || 'Cash',
-                        BANK_NAME: transaction.BANK_NAME || '',
-                        VOUCHER_TYPE: transaction.VOUCHER_TYPE || '',
-                        TYPE: transaction.TYPE || (transaction.INCOME > 0 ? 'Income' : 'Expense'),
-                        INCOME: cleanNumber(transaction.INCOME),
-                        EXPENSE: cleanNumber(transaction.EXPENSE),
-                        DESCRIPTION: transaction.DESCRIPTION || '',
-                        NOTES: transaction.NOTES || '',
-                        BALANCE: cleanNumber(transaction.BALANCE),
-                        CURRENCY: transaction.CURRENCY || 'USD',
-                        ATTACHMENT: transaction.ATTACHMENT_URL || '',
-                        RECONCILED: reconciled,
-                        TAGS: transaction.TAGS || '',
-                        userId: currentUser.uid,
-                        createdAt: serverTimestamp()
-                    });
-                    importedCount++;
-                } catch (error) {
-                    errors.push(`Row ${i+1}: ${error.message}`);
-                    console.error("Error importing transaction:", error);
-                }
-                const progress = Math.round(((i + 1) / csvTransactions.length) * 100);
-                progressBar.style.width = `${progress}%`;
-                progressBar.textContent = `${progress}%`;
-            }
-            if (errors.length === 0) {
-                Swal.fire({ icon: 'success', title: 'Success', text: `Successfully imported ${importedCount} transactions`, timer: 2000, showConfirmButton: false });
-            } else {
-                Swal.fire({ title: 'Import Completed with Errors', html: `Imported ${importedCount} transactions successfully.<br>${errors.length} transactions failed:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`, icon: 'warning' });
-            }
-            await loadTransactions();
-            csvModal.style.display = "none";
-            resetCsvModal();
+// Also update the importCsvTransactions function to handle attachments better
+async function importCsvTransactions() {
+    if (csvTransactions.length === 0) {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No valid transactions to import' });
+        return;
+    }
+    
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    importCsvBtn.disabled = true;
+    cancelCsvBtn.disabled = true;
+    
+    let importedCount = 0, errors = [];
+    
+    for (let i = 0; i < csvTransactions.length; i++) {
+        const transaction = csvTransactions[i];
+        try {
+            const reconciled = transaction.RECONCILED === true || transaction.RECONCILED === 'TRUE' || transaction.RECONCILED === 'true' || transaction.RECONCILED === '1';
+            
+            // Prepare transaction data
+            const txData = {
+                SINO: transaction.SINO || (i + 1).toString(),
+                DATE: transaction.DATE,
+                TIME: transaction.TIME || '00:00',
+                ACCOUNT_HEADER: transaction.ACCOUNT_HEADER || 'Uncategorized',
+                MODE: transaction.MODE || 'Cash',
+                BANK_NAME: transaction.BANK_NAME || '',
+                VOUCHER_TYPE: transaction.VOUCHER_TYPE || '',
+                TYPE: transaction.TYPE || (transaction.INCOME > 0 ? 'Income' : 'Expense'),
+                INCOME: cleanNumber(transaction.INCOME),
+                EXPENSE: cleanNumber(transaction.EXPENSE),
+                DESCRIPTION: transaction.DESCRIPTION || '',
+                NOTES: transaction.NOTES || '',
+                BALANCE: cleanNumber(transaction.BALANCE),
+                CURRENCY: transaction.CURRENCY || 'USD',
+                ATTACHMENT: transaction.ATTACHMENT_URL || '', // Use the cleaned URL
+                RECONCILED: reconciled,
+                TAGS: transaction.TAGS || '',
+                userId: currentUser.uid,
+                createdAt: serverTimestamp()
+            };
+            
+            await addDoc(collection(db, "users", currentUser.uid, "transactions"), txData);
+            importedCount++;
+        } catch (error) {
+            errors.push(`Row ${i+1}: ${error.message}`);
+            console.error("Error importing transaction:", error);
         }
+        
+        const progress = Math.round(((i + 1) / csvTransactions.length) * 100);
+        progressBar.style.width = `${progress}%`;
+        progressBar.textContent = `${progress}%`;
+    }
+    
+    if (errors.length === 0) {
+        Swal.fire({ 
+            icon: 'success', 
+            title: 'Success', 
+            text: `Successfully imported ${importedCount} transactions`, 
+            timer: 2000, 
+            showConfirmButton: false 
+        });
+    } else {
+        Swal.fire({ 
+            title: 'Import Completed with Errors', 
+            html: `Imported ${importedCount} transactions successfully.<br>${errors.length} transactions had issues:<br><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>`, 
+            icon: 'warning' 
+        });
+    }
+    
+    await loadTransactions();
+    csvModal.style.display = "none";
+    resetCsvModal();
+}
 
         function resetCsvModal() {
             csvFileName.textContent = "No file selected";
@@ -4449,77 +4470,113 @@
             return 'Uncategorized';
         }
 
-        function parseCSV(csvText) {
-            const lines = csvText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-            if (lines.length < 2) return { transactions: [], errors: ["CSV file is empty or has only headers"] };
-            const headers = lines[0].split(",").map(h => h.trim().toUpperCase());
-            const transactions = [], errors = [];
-            for (let i = 1; i < lines.length; i++) {
-                const row = lines[i].split(",").map(r => r.trim());
-                if (row.length !== headers.length) {
-                    errors.push(`Row ${i+1}: Column count mismatch`);
-                    continue;
-                }
-                let transaction = {};
-                headers.forEach((header, index) => transaction[header] = row[index] || "");
-                const income = cleanNumber(transaction["INCOME"]);
-                const expense = cleanNumber(transaction["EXPENSE"]);
-                const reconciled = transaction["RECONCILED"] === 'TRUE' || transaction["RECONCILED"] === 'true' || transaction["RECONCILED"] === '1' || transaction["RECONCILED"] === true;
-                
-                // Validate date format (must be YYYY-MM-DD)
-                const date = transaction["DATE"] || "";
-                if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                    errors.push(`Row ${i+1}: DATE must be in YYYY-MM-DD format`);
-                    continue;
-                }
-                
-                const normalizedTransaction = {
-                    SINO: transaction["SINO"] || "",
-                    DATE: date,
-                    TIME: transaction["TIME"] || "",
-                    ACCOUNT_HEADER: transaction["ACCOUNT_HEADER"] || transaction["ACCOUNT HEADER"] || "",
-                    MODE: transaction["MODE"] || "",
-                    BANK_NAME: transaction["BANK_NAME"] || transaction["BANK NAME"] || "",
-                    DESCRIPTION: transaction["DESCRIPTION"] || "",
-                    INCOME: income,
-                    EXPENSE: expense,
-                    BALANCE: cleanNumber(transaction["BALANCE"]),
-                    ATTACHMENT_URL: transaction["ATTACHMENT_URL"] || "",
-                    RECONCILED: reconciled,
-                    TAGS: transaction["TAGS"] || ""
-                };
-                if (!normalizedTransaction.ACCOUNT_HEADER) {
-                    if (normalizedTransaction.DESCRIPTION) normalizedTransaction.ACCOUNT_HEADER = detectAccountHeaderFromDescription(normalizedTransaction.DESCRIPTION);
-                    else if (normalizedTransaction.MODE) normalizedTransaction.ACCOUNT_HEADER = normalizedTransaction.MODE === "CASH" ? "Cash Expense" : "Bank Expense";
-                    else normalizedTransaction.ACCOUNT_HEADER = "Uncategorized";
-                }
-                if (!normalizedTransaction.DATE) {
-                    errors.push(`Row ${i+1}: DATE is required`);
-                    continue;
-                }
-                if (income > 0 && expense > 0) {
-                    errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE`);
-                    continue;
-                }
-                transactions.push(normalizedTransaction);
-            }
-            return { transactions, errors };
+// Replace your existing parseCSV function with this updated version
+function parseCSV(csvText) {
+    const lines = csvText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return { transactions: [], errors: ["CSV file is empty or has only headers"] };
+    
+    // Check if first line might be a comment
+    let startLine = 0;
+    if (lines[0].startsWith('#')) {
+        startLine = 1;
+    }
+    
+    const headers = lines[startLine].split(",").map(h => h.trim().toUpperCase());
+    const transactions = [], errors = [];
+    
+    for (let i = startLine + 1; i < lines.length; i++) {
+        const row = lines[i].split(",").map(r => r.trim());
+        if (row.length !== headers.length) {
+            errors.push(`Row ${i+1}: Column count mismatch`);
+            continue;
         }
+        
+        let transaction = {};
+        headers.forEach((header, index) => transaction[header] = row[index] || "");
+        
+        const income = cleanNumber(transaction["INCOME"]);
+        const expense = cleanNumber(transaction["EXPENSE"]);
+        const reconciled = transaction["RECONCILED"] === 'TRUE' || transaction["RECONCILED"] === 'true' || transaction["RECONCILED"] === '1' || transaction["RECONCILED"] === true;
+        
+        // Validate date format (must be YYYY-MM-DD)
+        const date = transaction["DATE"] || "";
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            errors.push(`Row ${i+1}: DATE must be in YYYY-MM-DD format`);
+            continue;
+        }
+        
+        // Handle ATTACHMENT_URL - if it looks like base64 or is too long, treat as empty
+        let attachmentUrl = transaction["ATTACHMENT_URL"] || transaction["ATTACHMENT"] || "";
+        
+        // Check if it's a base64 string (starts with data:) or is too long (> 500 chars)
+        if (attachmentUrl.startsWith('data:') || attachmentUrl.length > 500) {
+            attachmentUrl = ""; // Clear invalid attachment data
+            errors.push(`Row ${i+1}: Attachment appears to be embedded data (base64) and has been removed. Please use file URLs only.`);
+        }
+        
+        // Validate URL format if present
+        if (attachmentUrl && !attachmentUrl.startsWith('http://') && !attachmentUrl.startsWith('https://')) {
+            errors.push(`Row ${i+1}: Attachment URL must start with http:// or https://`);
+            attachmentUrl = ""; // Clear invalid URL
+        }
+        
+        const normalizedTransaction = {
+            SINO: transaction["SINO"] || "",
+            DATE: date,
+            TIME: transaction["TIME"] || "",
+            ACCOUNT_HEADER: transaction["ACCOUNT_HEADER"] || transaction["ACCOUNT HEADER"] || "",
+            MODE: transaction["MODE"] || "",
+            BANK_NAME: transaction["BANK_NAME"] || transaction["BANK NAME"] || "",
+            DESCRIPTION: transaction["DESCRIPTION"] || "",
+            INCOME: income,
+            EXPENSE: expense,
+            BALANCE: cleanNumber(transaction["BALANCE"]),
+            ATTACHMENT_URL: attachmentUrl, // Now using cleaned URL
+            RECONCILED: reconciled,
+            TAGS: transaction["TAGS"] || ""
+        };
+        
+        if (!normalizedTransaction.ACCOUNT_HEADER) {
+            if (normalizedTransaction.DESCRIPTION) normalizedTransaction.ACCOUNT_HEADER = detectAccountHeaderFromDescription(normalizedTransaction.DESCRIPTION);
+            else if (normalizedTransaction.MODE) normalizedTransaction.ACCOUNT_HEADER = normalizedTransaction.MODE === "CASH" ? "Cash Expense" : "Bank Expense";
+            else normalizedTransaction.ACCOUNT_HEADER = "Uncategorized";
+        }
+        
+        if (!normalizedTransaction.DATE) {
+            errors.push(`Row ${i+1}: DATE is required`);
+            continue;
+        }
+        
+        if (income > 0 && expense > 0) {
+            errors.push(`Row ${i+1}: Cannot have both INCOME and EXPENSE`);
+            continue;
+        }
+        
+        transactions.push(normalizedTransaction);
+    }
+    return { transactions, errors };
+}
 
 // Update the sample CSV download function (around line 4120) with proper date format:
+// Update the sample CSV download to be clearer about attachments
 function downloadSampleCsvFile() {
     const today = new Date().toISOString().slice(0, 10);
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     
     const sampleData = [
-        ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'ATTACHMENT_URL', 'RECONCILED', 'TAGS'],
-        ['1', today, '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary', 'https://example.com/salary.pdf', 'TRUE', 'income,monthly'],
-        ['2', yesterday, '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries', '', 'FALSE', 'food,essential'],
-        ['3', lastWeek, '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill', '', 'TRUE', 'utilities']
+        ['SINO', 'DATE', 'TIME', 'ACCOUNT HEADER', 'MODE', 'BANK NAME', 'INCOME', 'EXPENSE', 'DESCRIPTION', 'NOTES', 'ATTACHMENT_URL', 'RECONCILED', 'TAGS'],
+        ['1', today, '09:30', 'Salary', 'Bank', 'Chase', '5000', '0', 'Monthly salary', 'March salary', 'https://example.com/salary.pdf', 'TRUE', 'income,monthly'],
+        ['2', yesterday, '14:15', 'Groceries', 'Cash', '', '0', '150.50', 'Weekly groceries', 'Whole Foods', '', 'FALSE', 'food,essential'],
+        ['3', lastWeek, '11:00', 'Electricity Bill', 'Bank', 'Bank of America', '0', '75.25', 'Monthly utility bill', 'March bill', '', 'TRUE', 'utilities']
     ];
     
-    let csvContent = '# IMPORTANT: DATE must be in YYYY-MM-DD format (e.g., 2026-03-19)\n';
+    let csvContent = '# IMPORTANT RULES:\n';
+    csvContent += '# 1. DATE must be in YYYY-MM-DD format (e.g., 2026-03-19)\n';
+    csvContent += '# 2. ATTACHMENT_URL must be a valid web URL starting with http:// or https://\n';
+    csvContent += '# 3. Do NOT include base64 data or file contents in the CSV\n';
+    csvContent += '# 4. For file attachments, upload files separately using the attachment button\n\n';
+    
     csvContent += sampleData.map(row => row.join(',')).join('\n');
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -4532,7 +4589,6 @@ function downloadSampleCsvFile() {
     link.click();
     document.body.removeChild(link);
 }
-
         async function loadAccounts() {
             try {
                 const q = query(collection(db, "users", currentUser.uid, "chartOfAccounts"));
