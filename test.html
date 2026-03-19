@@ -1081,7 +1081,13 @@
     auth.onAuthStateChanged((user) => {
         if (user) {
             currentUser = user;
-            loadUserStores();
+            console.log("User logged in:", user.uid);
+            // Always show modal on start if no store is selected
+            setTimeout(() => {
+                if (!currentStore) {
+                    loadUserStores();
+                }
+            }, 500);
         } else {
             window.location.href = 'index.html';
         }
@@ -1090,7 +1096,27 @@
     // Load user's stores
     async function loadUserStores() {
         try {
-            const snapshot = await db.collection('users').doc(currentUser.uid).collection('stores').get();
+            console.log("Loading stores for user:", currentUser.uid);
+            
+            // First, check if user document exists
+            const userDoc = await db.collection('users').doc(currentUser.uid).get();
+            
+            if (!userDoc.exists) {
+                // Create user document if it doesn't exist
+                await db.collection('users').doc(currentUser.uid).set({
+                    email: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            
+            // Now load stores
+            const snapshot = await db.collection('users')
+                .doc(currentUser.uid)
+                .collection('stores')
+                .get();
+            
+            console.log("Stores found:", snapshot.size);
             
             if (snapshot.empty) {
                 // No stores - show modal with add form
@@ -1102,12 +1128,14 @@
                     </div>
                 `;
                 document.getElementById('businessModal').classList.add('active');
+                document.getElementById('branchSelector').style.display = 'none';
             } else {
                 stores = snapshot.docs.map(doc => ({
                     id: doc.id,
                     ...doc.data()
                 }));
                 
+                console.log("Stores loaded:", stores);
                 displayStores();
                 
                 // Check for last selected store
@@ -1128,6 +1156,7 @@
                 
                 // If no last store, show modal
                 document.getElementById('businessModal').classList.add('active');
+                document.getElementById('branchSelector').style.display = 'none';
             }
         } catch (error) {
             console.error('Error loading stores:', error);
@@ -1258,11 +1287,16 @@
         document.getElementById('branchList').innerHTML = '';
     }
 
-    // Save new store
+    // Save new store - FIXED VERSION
     async function saveNewStore() {
         const name = document.getElementById('businessName').value.trim();
         if (!name) {
             showToast('Please enter business name', 'error');
+            return;
+        }
+
+        if (!currentUser) {
+            showToast('Please login first', 'error');
             return;
         }
 
@@ -1276,7 +1310,7 @@
             name: 'Main Branch',
             address: mainAddress || 'Head Office',
             isMain: true,
-            createdAt: new Date()
+            createdAt: new Date().toISOString()
         });
         
         // Add additional branches
@@ -1292,17 +1326,17 @@
                     name: nameInput.value.trim(),
                     address: addressInput?.value.trim() || '',
                     isMain: false,
-                    createdAt: new Date()
+                    createdAt: new Date().toISOString()
                 });
             }
         });
 
         const storeData = {
             name: name,
-            email: document.getElementById('businessEmail').value.trim(),
-            phone: document.getElementById('businessPhone').value.trim(),
-            gst: document.getElementById('businessGST').value.trim(),
-            address: mainAddress,
+            email: document.getElementById('businessEmail').value.trim() || '',
+            phone: document.getElementById('businessPhone').value.trim() || '',
+            gst: document.getElementById('businessGST').value.trim() || '',
+            address: mainAddress || '',
             branches: branches,
             icon: 'store',
             totalItems: 0,
@@ -1314,9 +1348,21 @@
         try {
             showToast('Creating business...', 'info');
             
-            const docRef = await db.collection('users').doc(currentUser.uid).collection('stores').add(storeData);
+            console.log("Saving store for user:", currentUser.uid);
+            console.log("Store data:", storeData);
             
+            // Save to Firestore
+            const docRef = await db.collection('users')
+                .doc(currentUser.uid)
+                .collection('stores')
+                .add(storeData);
+            
+            console.log("Store created with ID:", docRef.id);
+            
+            // Add the ID to the store data
             storeData.id = docRef.id;
+            
+            // Add to stores array
             stores.push(storeData);
             
             // Select this store
@@ -1332,7 +1378,7 @@
             hideBusinessModal();
             
             // Load dashboard data
-            loadDashboardData();
+            await loadDashboardData();
             updateBranchSelector();
             
             showToast('Business created successfully!', 'success');
@@ -1480,18 +1526,22 @@
 
     // Load dashboard data
     async function loadDashboardData() {
-        if (!currentStore) return;
+        if (!currentStore || !currentUser) return;
         
         try {
-            showToast('Loading dashboard data...', 'info');
+            console.log("Loading dashboard data for store:", currentStore.id);
             
             // Build queries
-            let salesQuery = db.collection('users').doc(currentUser.uid)
-                .collection('stores').doc(currentStore.id)
+            let salesQuery = db.collection('users')
+                .doc(currentUser.uid)
+                .collection('stores')
+                .doc(currentStore.id)
                 .collection('sales');
             
-            let inventoryQuery = db.collection('users').doc(currentUser.uid)
-                .collection('stores').doc(currentStore.id)
+            let inventoryQuery = db.collection('users')
+                .doc(currentUser.uid)
+                .collection('stores')
+                .doc(currentStore.id)
                 .collection('inventory');
             
             if (currentBranch) {
@@ -1510,6 +1560,8 @@
                 };
             });
             
+            console.log("Sales loaded:", salesData.length);
+            
             // Filter by date
             let filteredSales = salesData;
             if (startDate) {
@@ -1526,15 +1578,15 @@
                 ...doc.data()
             }));
             
+            console.log("Inventory loaded:", inventoryItems.length);
+            
             // Process data
             processData(filteredSales);
             updateCharts(filteredSales);
             updateTables();
             
-            showToast('Dashboard updated!', 'success');
-            
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Error loading dashboard data:', error);
             showToast('Error loading data: ' + error.message, 'error');
         }
     }
@@ -1600,7 +1652,7 @@
             salesByDate.set(date, (salesByDate.get(date) || 0) + (sale.total || 0));
         });
         
-        const sortedDates = Array.from(salesByDate.keys()).sort();
+        const sortedDates = Array.from(salesByDate.keys()).sort((a, b) => new Date(a) - new Date(b));
         const salesValues = sortedDates.map(date => salesByDate.get(date));
         
         if (salesChart) salesChart.destroy();
@@ -1780,7 +1832,7 @@
         }, 3000);
     }
 
-    // FIXED: Modal click handler
+    // Modal click handler
     window.addEventListener('click', function(event) {
         const modal = document.getElementById('businessModal');
         const addForm = document.getElementById('addStoreForm');
@@ -1796,6 +1848,7 @@
             // Only close if there are stores (not first time user)
             if (stores.length > 0) {
                 modal.classList.remove('active');
+                document.getElementById('branchSelector').style.display = 'flex';
             }
         }
     });
@@ -1807,12 +1860,7 @@
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
-        // Show business modal by default
-        setTimeout(() => {
-            if (!currentStore) {
-                document.getElementById('businessModal').classList.add('active');
-            }
-        }, 500);
+        console.log("Page loaded, waiting for auth...");
     });
 </script>
 </body>
