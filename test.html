@@ -779,7 +779,7 @@
 </head>
 <body>
     <!-- Business Selection Modal -->
-    <div id="businessModal" class="business-modal active">
+    <div id="businessModal" class="business-modal">
         <div class="business-modal-content">
             <div class="business-header">
                 <h2><i class="fas fa-store-alt"></i> Welcome to Inventory Pro</h2>
@@ -1098,6 +1098,8 @@
                             <div class="store-location">Click here to get started</div>
                         </div>
                     `;
+                    // Show modal for first time user
+                    document.getElementById('businessModal').classList.add('active');
                 } else {
                     stores = snapshot.docs.map(doc => ({
                         id: doc.id,
@@ -1121,6 +1123,9 @@
                             return;
                         }
                     }
+                    
+                    // If no last store, show modal
+                    document.getElementById('businessModal').classList.add('active');
                 }
             } catch (error) {
                 console.error('Error loading stores:', error);
@@ -1182,6 +1187,9 @@
         // Show add store form
         function showAddStoreForm() {
             console.log('Showing add store form');
+            // Prevent event bubbling
+            event?.stopPropagation();
+            
             document.getElementById('addStoreForm').classList.add('active');
             // Clear previous branches and add one default
             document.getElementById('branchList').innerHTML = '';
@@ -1191,6 +1199,9 @@
         // Add branch field
         function addBranchField() {
             console.log('Adding branch field');
+            // Prevent event bubbling
+            event?.stopPropagation();
+            
             const branchList = document.getElementById('branchList');
             const branchId = 'branch_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             
@@ -1320,6 +1331,10 @@
             }
             
             localStorage.setItem(`lastStore_${currentUser.uid}`, currentStore.id);
+            if (currentBranch) {
+                localStorage.setItem(`lastBranch_${currentUser.uid}`, currentBranch);
+            }
+            
             hideBusinessModal();
             loadDashboardData();
             updateBranchSelector();
@@ -1333,13 +1348,15 @@
 
         // Show business modal
         function showBusinessModal() {
-            loadUserStores();
+            loadUserStores(); // Reload stores
             document.getElementById('businessModal').classList.add('active');
             document.getElementById('branchSelector').style.display = 'none';
         }
 
         // Update branch selector
         function updateBranchSelector() {
+            if (!currentStore) return;
+            
             document.getElementById('currentStoreName').textContent = currentStore.name;
             
             const branchDropdown = document.getElementById('branchDropdown');
@@ -1366,8 +1383,17 @@
         // Change branch
         function changeBranch() {
             currentBranch = document.getElementById('branchDropdown').value || null;
-            localStorage.setItem(`lastBranch_${currentUser.uid}`, currentBranch || '');
+            if (currentBranch) {
+                localStorage.setItem(`lastBranch_${currentUser.uid}`, currentBranch);
+            } else {
+                localStorage.removeItem(`lastBranch_${currentUser.uid}`);
+            }
             loadDashboardData();
+            
+            // Update subtitle
+            const branch = currentStore.branches?.find(b => b.id === currentBranch);
+            document.getElementById('dashboardSubtitle').innerHTML = 
+                `Welcome to <strong>${currentStore.name}</strong> - ${branch ? branch.name : 'All Branches'}`;
         }
 
         // Set date filter
@@ -1714,14 +1740,27 @@
             }, 3000);
         }
 
-        // Close modal when clicking outside
+        // Close modal when clicking outside - FIXED VERSION
         window.onclick = function(event) {
-            if (event.target.classList.contains('business-modal')) {
+            const modal = document.getElementById('businessModal');
+            const addForm = document.getElementById('addStoreForm');
+            
+            // If clicking on modal background (not the content)
+            if (event.target === modal) {
+                // Only close if there are stores (not first time user)
                 if (stores.length > 0) {
-                    event.target.classList.remove('active');
+                    modal.classList.remove('active');
                 }
             }
+            
+            // Don't auto-close the add form when clicking outside
+            // Let the user close it manually with Cancel button
         };
+
+        // Prevent modal from closing when clicking inside the form
+        document.querySelector('.business-modal-content')?.addEventListener('click', function(event) {
+            event.stopPropagation();
+        });
     </script>
 </body>
 </html>
