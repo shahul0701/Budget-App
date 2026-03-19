@@ -10,7 +10,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <style>
-        /* Copy all your existing styles from the inventory page */
+        /* Copy all your existing styles here - keeping them exactly as in your dashboard */
         * {
             margin: 0;
             padding: 0;
@@ -464,6 +464,35 @@
         .toast.error { border-left: 5px solid var(--danger); }
         .toast.info { border-left: 5px solid var(--info); }
 
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 25px;
+            flex-wrap: wrap;
+        }
+
+        .page-btn {
+            padding: 8px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .page-btn:hover {
+            border-color: var(--primary);
+        }
+
+        .page-btn.active {
+            background: var(--gradient-primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .inventory-header {
@@ -591,7 +620,7 @@
                 <button class="close-modal" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="itemForm">
+                <form id="itemForm" onsubmit="event.preventDefault(); return false;">
                     <div class="form-group">
                         <label>Item Name *</label>
                         <input type="text" id="itemName" class="form-control" required>
@@ -638,13 +667,13 @@
                         </div>
                     </div>
 
+                    <!-- Branch Selection - This is the key part! -->
                     <div class="form-group">
                         <label>Branch *</label>
-                        <select id="itemBranch" class="form-control" required>
+                        <select id="itemBranch" class="form-control" required onchange="updateBranchInfo()">
                             <option value="">Select Branch</option>
-                            <!-- Branches will be loaded dynamically from the dashboard -->
                         </select>
-                        <small class="text-muted">Select which branch this item belongs to</small>
+                        <small class="text-muted" id="branchAddress"></small>
                     </div>
 
                     <div class="form-group">
@@ -703,7 +732,7 @@
         // Global variables
         let currentUser = null;
         let currentStore = null;
-        let currentBranch = null;
+        let currentBranch = null; // Currently selected branch for filtering
         let inventoryItems = [];
         let currentPage = 1;
         let itemsPerPage = 10;
@@ -735,7 +764,7 @@
                 const context = JSON.parse(storedContext);
                 console.log("Loaded business context:", context);
 
-                // Load store details
+                // Load store details with branches
                 const storeDoc = await db.collection('users')
                     .doc(currentUser.uid)
                     .collection('stores')
@@ -753,7 +782,8 @@
                     ...storeDoc.data()
                 };
                 
-                currentBranch = context.branch;
+                // Set current branch from context (could be null for "All Branches")
+                currentBranch = context.branch || null;
 
                 // Update UI with business info
                 updateBusinessInfo();
@@ -775,12 +805,16 @@
             document.getElementById('businessContext').style.display = 'flex';
             document.getElementById('currentBusinessName').textContent = currentStore.name;
             
-            // Find current branch name
-            const branch = currentStore.branches?.find(b => b.id === currentBranch);
-            document.getElementById('currentBranchName').textContent = branch ? branch.name : 'All Branches';
+            // Find current branch name for display
+            let branchDisplayName = 'All Branches';
+            if (currentBranch) {
+                const branch = currentStore.branches?.find(b => b.id === currentBranch);
+                branchDisplayName = branch ? branch.name : 'All Branches';
+            }
+            document.getElementById('currentBranchName').textContent = branchDisplayName;
             
             document.getElementById('inventorySubtitle').innerHTML = 
-                `Manage stock for <strong>${currentStore.name}</strong> - ${branch ? branch.name : 'All Branches'}`;
+                `Manage stock for <strong>${currentStore.name}</strong> - ${branchDisplayName}`;
         }
 
         // Load branches into dropdown and filter chips
@@ -800,6 +834,8 @@
                     const option = document.createElement('option');
                     option.value = branch.id;
                     option.textContent = `${branch.name} ${branch.address ? '- ' + branch.address : ''}`;
+                    
+                    // Auto-select if this matches current branch
                     if (branch.id === currentBranch) {
                         option.selected = true;
                     }
@@ -810,9 +846,14 @@
                     chip.className = 'branch-chip';
                     chip.setAttribute('onclick', `filterByBranch('${branch.id}')`);
                     chip.innerHTML = `<i class="fas fa-code-branch"></i> ${branch.name}`;
+                    
+                    // Mark as active if this is the current branch
                     if (branch.id === currentBranch) {
                         chip.classList.add('active');
+                        // Also remove active from "All Branches"
+                        filterChips.querySelector('.branch-chip').classList.remove('active');
                     }
+                    
                     filterChips.appendChild(chip);
                 });
             }
@@ -834,8 +875,10 @@
                 chips[0].classList.add('active'); // All Branches
                 currentBranch = null;
             } else {
+                // Find the chip that corresponds to this branch
+                const branch = currentStore.branches?.find(b => b.id === branchId);
                 const activeChip = Array.from(chips).find(chip => 
-                    chip.innerHTML.includes(currentStore.branches?.find(b => b.id === branchId)?.name || '')
+                    chip.innerHTML.includes(branch?.name || '')
                 );
                 if (activeChip) activeChip.classList.add('active');
                 currentBranch = branchId;
@@ -845,12 +888,16 @@
             const branch = currentStore.branches?.find(b => b.id === currentBranch);
             document.getElementById('currentBranchName').textContent = branch ? branch.name : 'All Branches';
             
+            // Update subtitle
+            document.getElementById('inventorySubtitle').innerHTML = 
+                `Manage stock for <strong>${currentStore.name}</strong> - ${branch ? branch.name : 'All Branches'}`;
+            
             // Reload inventory with branch filter
             currentPage = 1;
             loadInventory();
         }
 
-        // Load inventory from Firebase
+        // Load inventory from Firebase with proper branch structure
         async function loadInventory() {
             try {
                 showToast('Loading inventory...', 'info');
@@ -870,10 +917,11 @@
                 
                 inventoryItems = snapshot.docs.map(doc => {
                     const data = doc.data();
-                    // Extract categories
+                    
+                    // Add to categories set for filter
                     if (data.category) categories.add(data.category);
                     
-                    // Find branch name
+                    // Find branch name from the store's branches array
                     const branch = currentStore.branches?.find(b => b.id === data.branchId);
                     
                     return {
@@ -887,6 +935,7 @@
                         minStock: data.minStock || 5,
                         branchId: data.branchId,
                         branchName: branch ? branch.name : 'Unknown Branch',
+                        branchAddress: branch ? branch.address : '',
                         description: data.description || '',
                         createdAt: data.createdAt,
                         updatedAt: data.updatedAt
@@ -959,7 +1008,7 @@
                             <td class="${stockStatus.class}">${item.currentStock}</td>
                             <td>₹${item.sellingPrice.toFixed(2)}</td>
                             <td>₹${item.costPrice.toFixed(2)}</td>
-                            <td><span class="badge" style="background: var(--gradient-primary);">${item.branchName}</span></td>
+                            <td><span class="badge" style="background: var(--gradient-primary);" title="${item.branchAddress}">${item.branchName}</span></td>
                             <td><span class="badge ${stockStatus.badge}">${stockStatus.text}</span></td>
                             <td>
                                 <div class="action-icons">
@@ -1026,9 +1075,10 @@
             document.getElementById('storeId').value = currentStore.id;
             document.getElementById('itemSKU').value = 'SKU-' + Date.now().toString().slice(-8);
             
-            // Auto-select current branch if set
+            // Auto-select current branch if set (not "All Branches")
             if (currentBranch) {
                 document.getElementById('itemBranch').value = currentBranch;
+                updateBranchInfo(); // Show branch address
             }
             
             openModal();
@@ -1052,10 +1102,26 @@
             document.getElementById('itemBranch').value = item.branchId;
             document.getElementById('itemDescription').value = item.description || '';
 
+            // Show branch address
+            updateBranchInfo();
+
             openModal();
         }
 
-        // Save item
+        // Update branch info when branch is selected
+        function updateBranchInfo() {
+            const branchId = document.getElementById('itemBranch').value;
+            const branch = currentStore.branches?.find(b => b.id === branchId);
+            const addressElement = document.getElementById('branchAddress');
+            
+            if (branch && branch.address) {
+                addressElement.textContent = `📍 ${branch.address}`;
+            } else {
+                addressElement.textContent = '';
+            }
+        }
+
+        // Save item - This now properly saves items with branch information
         async function saveItem() {
             try {
                 const itemId = document.getElementById('itemId').value;
@@ -1063,26 +1129,68 @@
                 
                 if (!branchId) {
                     showToast('Please select a branch', 'error');
+                    document.getElementById('itemBranch').focus();
                     return;
                 }
                 
-                const itemData = {
-                    name: document.getElementById('itemName').value,
-                    category: document.getElementById('itemCategory').value,
-                    sku: document.getElementById('itemSKU').value || `SKU-${Date.now().toString().slice(-8)}`,
-                    sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
-                    costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
-                    currentStock: parseInt(document.getElementById('currentStock').value) || 0,
-                    minStock: parseInt(document.getElementById('minStock').value) || 5,
-                    branchId: branchId,
-                    description: document.getElementById('itemDescription').value,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
+                // Validate required fields
+                const itemName = document.getElementById('itemName').value.trim();
+                const category = document.getElementById('itemCategory').value;
+                const sellingPrice = parseFloat(document.getElementById('sellingPrice').value);
+                const costPrice = parseFloat(document.getElementById('costPrice').value);
+                const currentStock = parseInt(document.getElementById('currentStock').value);
 
-                if (!itemData.name || !itemData.category) {
-                    showToast('Please fill all required fields', 'error');
+                if (!itemName) {
+                    showToast('Please enter item name', 'error');
+                    document.getElementById('itemName').focus();
                     return;
                 }
+
+                if (!category) {
+                    showToast('Please select a category', 'error');
+                    document.getElementById('itemCategory').focus();
+                    return;
+                }
+
+                if (isNaN(sellingPrice) || sellingPrice < 0) {
+                    showToast('Please enter a valid selling price', 'error');
+                    document.getElementById('sellingPrice').focus();
+                    return;
+                }
+
+                if (isNaN(costPrice) || costPrice < 0) {
+                    showToast('Please enter a valid cost price', 'error');
+                    document.getElementById('costPrice').focus();
+                    return;
+                }
+
+                if (isNaN(currentStock) || currentStock < 0) {
+                    showToast('Please enter a valid stock quantity', 'error');
+                    document.getElementById('currentStock').focus();
+                    return;
+                }
+
+                // Find branch to validate it exists
+                const branch = currentStore.branches?.find(b => b.id === branchId);
+                if (!branch) {
+                    showToast('Selected branch not found', 'error');
+                    return;
+                }
+
+                // Prepare item data with proper structure
+                const itemData = {
+                    name: itemName,
+                    category: category,
+                    sku: document.getElementById('itemSKU').value.trim() || `SKU-${Date.now().toString().slice(-8)}`,
+                    sellingPrice: sellingPrice,
+                    costPrice: costPrice,
+                    currentStock: currentStock,
+                    minStock: parseInt(document.getElementById('minStock').value) || 5,
+                    branchId: branchId,
+                    branchName: branch.name, // Store branch name for easy access
+                    description: document.getElementById('itemDescription').value.trim(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
 
                 showToast('Saving item...', 'info');
 
@@ -1104,10 +1212,10 @@
                 }
 
                 closeModal();
-                await loadInventory();
+                await loadInventory(); // Reload to show updated data
             } catch (error) {
                 console.error('Error saving item:', error);
-                showToast('Failed to save item', 'error');
+                showToast('Failed to save item: ' + error.message, 'error');
             }
         }
 
@@ -1140,19 +1248,20 @@
                     
                 showToast('Item deleted successfully!', 'success');
                 closeDeleteModal();
-                await loadInventory();
+                await loadInventory(); // Reload after deletion
             } catch (error) {
                 console.error('Error deleting item:', error);
-                showToast('Failed to delete item', 'error');
+                showToast('Failed to delete item: ' + error.message, 'error');
             }
         }
 
-        // Export inventory
+        // Export inventory to CSV
         function exportInventory() {
-            let csv = 'Name,SKU,Category,Stock,Price,Cost,Branch,Description\n';
+            let csv = 'Name,SKU,Category,Stock,Price,Cost,Branch,Branch Address,Description\n';
             
             inventoryItems.forEach(item => {
-                csv += `"${item.name}","${item.sku}","${item.category}",${item.currentStock},${item.sellingPrice},${item.costPrice},"${item.branchName}","${item.description || ''}"\n`;
+                const branch = currentStore.branches?.find(b => b.id === item.branchId);
+                csv += `"${item.name}","${item.sku}","${item.category}",${item.currentStock},${item.sellingPrice},${item.costPrice},"${item.branchName}","${branch?.address || ''}","${item.description || ''}"\n`;
             });
 
             const blob = new Blob([csv], { type: 'text/csv' });
