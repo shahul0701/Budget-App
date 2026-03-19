@@ -540,6 +540,26 @@
         .text-warning { color: #ffc107 !important; }
         .text-success { color: #28a745 !important; }
 
+        /* Return Items Section */
+        .return-section {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .return-item-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        
+        .purchase-history-modal {
+            max-width: 1000px;
+        }
+
         @media (max-width: 768px) { .inventory-header { flex-direction: column; } }
     </style>
 </head>
@@ -610,6 +630,7 @@
         <div class="tab active" onclick="switchTab('inventory')" id="tabInventory">📦 Inventory</div>
         <div class="tab" onclick="switchTab('suppliers')" id="tabSuppliers">🚚 Suppliers</div>
         <div class="tab" onclick="switchTab('payments')" id="tabPayments">💰 Payments</div>
+        <div class="tab" onclick="switchTab('purchases')" id="tabPurchases">🛒 Purchases</div>
         <div class="tab" onclick="switchTab('debt')" id="tabDebt">📊 Debt Overview</div>
         <div class="tab" onclick="switchTab('vouchers')" id="tabVouchers">📄 Vouchers</div>
     </div>
@@ -669,6 +690,25 @@
             <option value="reversal">Reversal</option>
         </select>
         <button class="action-btn" onclick="applyPaymentFilters()"><i class="fas fa-filter"></i> Apply</button>
+    </div>
+
+    <!-- Filters (Purchases Tab) -->
+    <div class="filters-section" id="purchaseFilters" style="display:none;">
+        <div class="search-box">
+            <input type="text" id="purchaseSearchInput" placeholder="Search by supplier, invoice, item...">
+            <i class="fas fa-search"></i>
+        </div>
+        <select class="filter-select" id="purchaseStatusFilter">
+            <option value="">All Status</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+            <option value="pending">Pending</option>
+        </select>
+        <select class="filter-select" id="purchaseSupplierFilter">
+            <option value="">All Suppliers</option>
+        </select>
+        <button class="action-btn" onclick="applyPurchaseFilters()"><i class="fas fa-filter"></i> Apply</button>
+        <button class="action-btn success" onclick="openPurchaseModal()"><i class="fas fa-plus"></i> New Purchase</button>
     </div>
 
     <!-- Inventory Table -->
@@ -745,6 +785,32 @@
             </tbody>
         </table>
         <div class="pagination" id="paymentPagination"></div>
+    </div>
+
+    <!-- Purchases Table -->
+    <div class="table-card" id="purchasesTable" style="display:none;">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Invoice #</th>
+                    <th>Supplier</th>
+                    <th>Item</th>
+                    <th>Variant</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="purchasesTableBody">
+                <tr><td colspan="12" class="loading"><div class="spinner"></div><div>Loading purchases...</div></td></tr>
+            </tbody>
+        </table>
+        <div class="pagination" id="purchasePagination"></div>
     </div>
 
     <!-- Debt Overview Table -->
@@ -1086,7 +1152,17 @@
                         <option value="wrong_amount">Wrong Amount</option>
                         <option value="duplicate_payment">Duplicate Payment</option>
                         <option value="incorrect_supplier">Incorrect Supplier</option>
-                        <div class="alert alert-warning" style="padding: 15px; border-radius: 8px; background: #fff3cd; color: #856404; margin: 20px 0;">
+                        <option value="payment_cancelled">Payment Cancelled</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Additional Notes</label>
+                    <textarea id="reversalNotes" class="form-control" rows="3" placeholder="Provide more details..."></textarea>
+                </div>
+                
+                <div class="alert alert-warning" style="padding: 15px; border-radius: 8px; background: #fff3cd; color: #856404; margin: 20px 0;">
                     <i class="fas fa-exclamation-triangle"></i> 
                     <strong>Warning:</strong> Reversing this payment will:
                     <ul style="margin-top: 10px; margin-left: 20px;">
@@ -1096,190 +1172,252 @@
                         <li>This action cannot be undone</li>
                     </ul>
                 </div>
-                <option value="payment_cancelled">Payment Cancelled</option>
-                <option value="other">Other</option>
-            </select>
+                
+                <div class="form-actions">
+                    <button type="button" class="action-btn btn-block" onclick="closeModal('reversalModal')">Cancel</button>
+                    <button type="button" class="action-btn danger btn-block" onclick="confirmReversal()" id="confirmReversalBtn">Confirm Reversal</button>
+                </div>
+            </form>
         </div>
-        
-        <div class="form-group">
-            <label>Additional Notes</label>
-            <textarea id="reversalNotes" class="form-control" rows="3" placeholder="Provide more details..."></textarea>
-        </div>
-        
-        <div class="alert alert-warning" style="padding: 15px; border-radius: 8px; background: #fff3cd; color: #856404; margin: 20px 0;">
-            <i class="fas fa-exclamation-triangle"></i> 
-            <strong>Warning:</strong> Reversing this payment will:
-            <ul style="margin-top: 10px; margin-left: 20px;">
-                <li>Remove the payment amount from supplier's paid total</li>
-                <li>Mark affected purchases as pending again</li>
-                <li>Create a reversal record for audit purposes</li>
-                <li>This action cannot be undone</li>
-            </ul>
-        </div>
-        
-        <div class="form-actions">
-            <button type="button" class="action-btn btn-block" onclick="closeModal('reversalModal')">Cancel</button>
-            <button type="button" class="action-btn danger btn-block" onclick="confirmReversal()" id="confirmReversalBtn">Confirm Reversal</button>
-        </div>
-    </form>
-</div>
-</div>
+    </div>
 </div>
 
-<!-- PURCHASE MODAL -->
+<!-- PURCHASE MODAL (Add/Edit) -->
 <div class="modal-overlay" id="purchaseModal">
-<div class="modal-content">
-    <div class="modal-header info">
-        <h3><i class="fas fa-shopping-cart"></i> Record Purchase from Supplier</h3>
-        <button class="close-modal" onclick="closeModal('purchaseModal')">&times;</button>
-    </div>
-    <div class="modal-body">
-        <form id="purchaseForm" onsubmit="event.preventDefault();">
-            <div class="form-group">
-                <label>Select Supplier *</label>
-                <select id="purchaseSupplier" class="form-control" required>
-                    <option value="">Choose supplier</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Select Item *</label>
-                <select id="purchaseItem" class="form-control" required>
-                    <option value="">Choose item</option>
-                </select>
-            </div>
-            <div class="form-group" id="purchaseVariantGroup" style="display:none;">
-                <label>Select Variant</label>
-                <select id="purchaseVariant" class="form-control"></select>
-            </div>
-            <div class="form-row">
+    <div class="modal-content">
+        <div class="modal-header info">
+            <h3 id="purchaseModalTitle"><i class="fas fa-shopping-cart"></i> Record Purchase</h3>
+            <button class="close-modal" onclick="closeModal('purchaseModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="purchaseForm" onsubmit="event.preventDefault();">
+                <input type="hidden" id="purchaseId">
+                
                 <div class="form-group">
-                    <label>Quantity *</label>
-                    <input type="number" id="purchaseQty" class="form-control" min="1" value="1" required>
+                    <label>Select Supplier *</label>
+                    <select id="purchaseSupplier" class="form-control" required>
+                        <option value="">Choose supplier</option>
+                    </select>
                 </div>
                 <div class="form-group">
-                    <label>Purchase Price (₹) *</label>
-                    <input type="number" id="purchasePrice" class="form-control" step="0.01" min="0" required>
+                    <label>Select Item *</label>
+                    <select id="purchaseItem" class="form-control" required>
+                        <option value="">Choose item</option>
+                    </select>
                 </div>
-            </div>
-            <div class="form-row">
+                <div class="form-group" id="purchaseVariantGroup" style="display:none;">
+                    <label>Select Variant</label>
+                    <select id="purchaseVariant" class="form-control"></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Quantity *</label>
+                        <input type="number" id="purchaseQty" class="form-control" min="1" value="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Purchase Price (₹) *</label>
+                        <input type="number" id="purchasePrice" class="form-control" step="0.01" min="0" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Discount (%)</label>
+                        <input type="number" id="purchaseDiscount" class="form-control" step="0.1" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Tax (%)</label>
+                        <input type="number" id="purchaseTax" class="form-control" step="0.1" value="0">
+                    </div>
+                </div>
                 <div class="form-group">
-                    <label>Discount (%)</label>
-                    <input type="number" id="purchaseDiscount" class="form-control" step="0.1" value="0">
+                    <label>Total Amount</label>
+                    <input type="text" id="purchaseTotal" class="form-control" readonly>
                 </div>
                 <div class="form-group">
-                    <label>Tax (%)</label>
-                    <input type="number" id="purchaseTax" class="form-control" step="0.1" value="0">
+                    <label>Payment Status *</label>
+                    <select id="purchasePaymentStatus" class="form-control" required>
+                        <option value="paid">Paid</option>
+                        <option value="partial">Partial</option>
+                        <option value="pending">Pending</option>
+                    </select>
                 </div>
-            </div>
-            <div class="form-group">
-                <label>Total Amount</label>
-                <input type="text" id="purchaseTotal" class="form-control" readonly>
-            </div>
-            <div class="form-group">
-                <label>Payment Status *</label>
-                <select id="purchasePaymentStatus" class="form-control" required>
-                    <option value="paid">Paid</option>
-                    <option value="partial">Partial</option>
-                    <option value="pending">Pending</option>
-                </select>
-            </div>
-            <div class="form-group" id="paidAmountGroup" style="display:none;">
-                <label>Amount Paid (₹)</label>
-                <input type="number" id="purchasePaid" class="form-control" step="0.01" value="0">
-            </div>
-            <div class="form-group">
-                <label>Invoice/Reference No.</label>
-                <input type="text" id="purchaseInvoice" class="form-control">
-            </div>
-            <div class="form-group">
-                <label>Purchase Date *</label>
-                <input type="date" id="purchaseDate" class="form-control" required>
-            </div>
-            <div class="form-group">
-                <label>Notes</label>
-                <textarea id="purchaseNotes" class="form-control" rows="2"></textarea>
-            </div>
-            <div class="form-actions">
-                <button type="button" class="action-btn btn-block" onclick="closeModal('purchaseModal')">Cancel</button>
-                <button type="button" class="action-btn success btn-block" onclick="processPurchase()" id="processPurchaseBtn">Record Purchase</button>
-            </div>
-        </form>
+                <div class="form-group" id="paidAmountGroup" style="display:none;">
+                    <label>Amount Paid (₹)</label>
+                    <input type="number" id="purchasePaid" class="form-control" step="0.01" value="0">
+                </div>
+                <div class="form-group">
+                    <label>Invoice/Reference No.</label>
+                    <input type="text" id="purchaseInvoice" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Purchase Date *</label>
+                    <input type="date" id="purchaseDate" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="purchaseNotes" class="form-control" rows="2"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="action-btn btn-block" onclick="closeModal('purchaseModal')">Cancel</button>
+                    <button type="button" class="action-btn success btn-block" onclick="savePurchase()" id="savePurchaseBtn">Save Purchase</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
+
+<!-- RETURN ITEMS MODAL -->
+<div class="modal-overlay" id="returnModal">
+    <div class="modal-content" style="max-width:600px;">
+        <div class="modal-header warning">
+            <h3><i class="fas fa-undo-alt"></i> Return Items to Supplier</h3>
+            <button class="close-modal" onclick="closeModal('returnModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="returnForm" onsubmit="event.preventDefault();">
+                <input type="hidden" id="returnPurchaseId">
+                <input type="hidden" id="returnSupplierId">
+                
+                <div class="return-section">
+                    <strong>Note:</strong> Returning items will reduce pending payment amount and update inventory stock.
+                </div>
+                
+                <div class="form-group">
+                    <label>Supplier</label>
+                    <input type="text" id="returnSupplierName" class="form-control" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>Purchase Date</label>
+                    <input type="text" id="returnPurchaseDate" class="form-control" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>Invoice No.</label>
+                    <input type="text" id="returnInvoice" class="form-control" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>Select Items to Return</label>
+                    <div id="returnItemsContainer"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Return Reason</label>
+                    <select id="returnReason" class="form-control" required>
+                        <option value="damaged">Damaged / Defective</option>
+                        <option value="wrong_item">Wrong Item Received</option>
+                        <option value="excess_stock">Excess Stock</option>
+                        <option value="quality_issues">Quality Issues</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Additional Notes</label>
+                    <textarea id="returnNotes" class="form-control" rows="2"></textarea>
+                </div>
+                
+                <div class="form-group" id="returnPaymentAdjustment" style="background: #e8f4fd; padding: 15px; border-radius: 8px;">
+                    <strong>Payment Adjustment:</strong>
+                    <div style="margin-top: 10px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Current Pending Amount:</span>
+                            <span id="currentPendingAmount">₹0</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; color: #dc3545;">
+                            <span>Return Total:</span>
+                            <span id="returnTotalAmount">-₹0</span>
+                        </div>
+                        <hr>
+                        <div style="display: flex; justify-content: space-between; font-weight: bold;">
+                            <span>New Pending Amount:</span>
+                            <span id="newPendingAmount">₹0</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="action-btn btn-block" onclick="closeModal('returnModal')">Cancel</button>
+                    <button type="button" class="action-btn warning btn-block" onclick="processReturn()" id="processReturnBtn">Process Return</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 <!-- STOCK TRANSACTION MODAL -->
 <div class="modal-overlay" id="transactionModal">
-<div class="modal-content" style="max-width:500px;">
-    <div class="modal-header info">
-        <h3><i class="fas fa-exchange-alt"></i> Stock Movement</h3>
-        <button class="close-modal" onclick="closeModal('transactionModal')">&times;</button>
+    <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header info">
+            <h3><i class="fas fa-exchange-alt"></i> Stock Movement</h3>
+            <button class="close-modal" onclick="closeModal('transactionModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="txnForm" onsubmit="event.preventDefault();">
+                <div class="form-group">
+                    <label>Select Item *</label>
+                    <select id="txnItemSelect" class="form-control" required>
+                        <option value="">Choose item</option>
+                    </select>
+                </div>
+                <div class="form-group" id="txnVariantGroup" style="display:none;">
+                    <label>Select Variant</label>
+                    <select id="txnVariantSelect" class="form-control"></select>
+                </div>
+                <div class="form-group">
+                    <label>Transaction Type *</label>
+                    <select id="txnType" class="form-control" required>
+                        <option value="add">Add Stock</option>
+                        <option value="remove">Remove Stock</option>
+                        <option value="adjust">Set Stock (Adjust)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Quantity *</label>
+                    <input type="number" id="txnQty" class="form-control" min="1" required>
+                </div>
+                <div class="form-group">
+                    <label>Reason/Note</label>
+                    <input type="text" id="txnNote" class="form-control" placeholder="e.g., Damaged, Return, etc.">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="action-btn btn-block" onclick="closeModal('transactionModal')">Cancel</button>
+                    <button type="button" class="action-btn success btn-block" onclick="processTransaction()" id="processTxnBtn">Process Transaction</button>
+                </div>
+            </form>
+        </div>
     </div>
-    <div class="modal-body">
-        <form id="txnForm" onsubmit="event.preventDefault();">
-            <div class="form-group">
-                <label>Select Item *</label>
-                <select id="txnItemSelect" class="form-control" required>
-                    <option value="">Choose item</option>
-                </select>
-            </div>
-            <div class="form-group" id="txnVariantGroup" style="display:none;">
-                <label>Select Variant</label>
-                <select id="txnVariantSelect" class="form-control"></select>
-            </div>
-            <div class="form-group">
-                <label>Transaction Type *</label>
-                <select id="txnType" class="form-control" required>
-                    <option value="add">Add Stock</option>
-                    <option value="remove">Remove Stock</option>
-                    <option value="adjust">Set Stock (Adjust)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Quantity *</label>
-                <input type="number" id="txnQty" class="form-control" min="1" required>
-            </div>
-            <div class="form-group">
-                <label>Reason/Note</label>
-                <input type="text" id="txnNote" class="form-control" placeholder="e.g., Damaged, Return, etc.">
-            </div>
-            <div class="form-actions">
-                <button type="button" class="action-btn btn-block" onclick="closeModal('transactionModal')">Cancel</button>
-                <button type="button" class="action-btn success btn-block" onclick="processTransaction()" id="processTxnBtn">Process Transaction</button>
-            </div>
-        </form>
-    </div>
-</div>
 </div>
 
 <!-- VOUCHER VIEW MODAL -->
 <div class="modal-overlay" id="voucherModal">
-<div class="modal-content" style="max-width:700px;">
-    <div class="modal-header success">
-        <h3><i class="fas fa-file-invoice"></i> Payment Voucher</h3>
-        <button class="close-modal" onclick="closeModal('voucherModal')">&times;</button>
+    <div class="modal-content" style="max-width:700px;">
+        <div class="modal-header success">
+            <h3><i class="fas fa-file-invoice"></i> Payment Voucher</h3>
+            <button class="close-modal" onclick="closeModal('voucherModal')">&times;</button>
+        </div>
+        <div class="modal-body" id="voucherContent">
+            <!-- Voucher content will be dynamically inserted here -->
+        </div>
     </div>
-    <div class="modal-body" id="voucherContent">
-        <!-- Voucher content will be dynamically inserted here -->
-    </div>
-</div>
 </div>
 
 <!-- Delete Confirmation Modal -->
 <div class="modal-overlay" id="deleteModal">
-<div class="modal-content" style="max-width:400px;">
-    <div class="modal-header danger">
-        <h3>Confirm Delete</h3>
-        <button class="close-modal" onclick="closeModal('deleteModal')">&times;</button>
-    </div>
-    <div class="modal-body">
-        <p style="margin-bottom:25px;" id="deleteMessage">Delete this item permanently?</p>
-        <div class="form-actions">
-            <button class="action-btn btn-block" onclick="closeModal('deleteModal')">Cancel</button>
-            <button class="action-btn danger btn-block" onclick="confirmDelete()" id="confirmDeleteBtn">Delete</button>
+    <div class="modal-content" style="max-width:400px;">
+        <div class="modal-header danger">
+            <h3>Confirm Delete</h3>
+            <button class="close-modal" onclick="closeModal('deleteModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom:25px;" id="deleteMessage">Delete this item permanently?</p>
+            <div class="form-actions">
+                <button class="action-btn btn-block" onclick="closeModal('deleteModal')">Cancel</button>
+                <button class="action-btn danger btn-block" onclick="confirmDelete()" id="confirmDeleteBtn">Delete</button>
+            </div>
         </div>
     </div>
-</div>
 </div>
 
 <!-- Toast container -->
@@ -1318,6 +1456,7 @@ let vouchers = [];
 let currentPage = 1;
 let currentSupplierPage = 1;
 let currentPaymentPage = 1;
+let currentPurchasePage = 1;
 let currentVoucherPage = 1;
 let itemsPerPage = 10;
 let deleteItemId = null;
@@ -1380,6 +1519,11 @@ function generateVoucherNumber(type = 'PMT') {
     return `${type}-${year}${month}${day}-${random}`;
 }
 
+// Generate return number
+function generateReturnNumber() {
+    return 'RET-' + Date.now().toString().slice(-8);
+}
+
 // Check authentication
 auth.onAuthStateChanged(async (user) => {
     if (user) {
@@ -1414,6 +1558,7 @@ async function loadAllData() {
             loadVouchers()
         ]);
         updateDashboardStats();
+        updatePurchaseSupplierFilter();
         showToast('Data loaded successfully', 'success');
     } catch (error) {
         console.error('Error loading data:', error);
@@ -1632,6 +1777,10 @@ async function loadPurchases() {
             ...doc.data()
         }));
         
+        if (currentTab === 'purchases') {
+            renderPurchasesTable();
+        }
+        
     } catch (error) {
         console.error('Error loading purchases:', error);
     }
@@ -1721,6 +1870,18 @@ function updateSupplierFilter() {
     
     Array.from(supplierSet).sort().forEach(sup => {
         options += `<option value="${sup}">${sup}</option>`;
+    });
+    filter.innerHTML = options;
+}
+
+// Update purchase supplier filter
+function updatePurchaseSupplierFilter() {
+    const filter = document.getElementById('purchaseSupplierFilter');
+    if (!filter) return;
+    
+    let options = '<option value="">All Suppliers</option>';
+    suppliers.forEach(sup => {
+        options += `<option value="${sup.id}">${sup.name}</option>`;
     });
     filter.innerHTML = options;
 }
@@ -2193,6 +2354,85 @@ function renderPaymentsTable() {
     updatePagination(totalPages, 'paymentPagination', 'currentPaymentPage', 'goToPaymentPage');
 }
 
+// Render purchases table with edit/delete options
+function renderPurchasesTable() {
+    const tbody = document.getElementById('purchasesTableBody');
+    const searchTerm = document.getElementById('purchaseSearchInput')?.value.toLowerCase() || '';
+    const statusFilter = document.getElementById('purchaseStatusFilter')?.value || '';
+    const supplierFilter = document.getElementById('purchaseSupplierFilter')?.value || '';
+
+    let filteredPurchases = purchases.filter(purchase => {
+        const supplier = suppliers.find(s => s.id === purchase.supplierId);
+        const supplierName = supplier ? supplier.name.toLowerCase() : '';
+        const item = inventoryItems.find(i => i.id === purchase.itemId);
+        const itemName = item ? item.name.toLowerCase() : '';
+        
+        const matchesSearch = supplierName.includes(searchTerm) ||
+                            itemName.includes(searchTerm) ||
+                            (purchase.invoice && purchase.invoice.toLowerCase().includes(searchTerm));
+        
+        const matchesStatus = !statusFilter || purchase.paymentStatus === statusFilter;
+        const matchesSupplier = !supplierFilter || purchase.supplierId === supplierFilter;
+        
+        return matchesSearch && matchesStatus && matchesSupplier;
+    });
+
+    if (filteredPurchases.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; padding: 50px;">' +
+            '<i class="fas fa-shopping-cart" style="font-size: 48px; opacity: 0.3; margin-bottom: 15px;"></i><br>' +
+            'No purchase records found.</td></tr>';
+        return;
+    }
+
+    const totalPages = Math.ceil(filteredPurchases.length / itemsPerPage);
+    const startIndex = (currentPurchasePage - 1) * itemsPerPage;
+    const pagePurchases = filteredPurchases.slice(startIndex, startIndex + itemsPerPage);
+
+    tbody.innerHTML = pagePurchases.map(purchase => {
+        const supplier = suppliers.find(s => s.id === purchase.supplierId);
+        const supplierName = supplier ? supplier.name : 'Unknown Supplier';
+        const item = inventoryItems.find(i => i.id === purchase.itemId);
+        const itemName = item ? item.name : 'Unknown Item';
+        const purchaseDate = purchase.date ? new Date(purchase.date.toDate()).toLocaleDateString() : 'N/A';
+        
+        const totalAmount = purchase.totalAmount || 0;
+        const paidAmount = purchase.paidAmount || 0;
+        const balance = totalAmount - paidAmount;
+        
+        const statusClass = purchase.paymentStatus === 'paid' ? 'badge-success' : 
+                          (purchase.paymentStatus === 'partial' ? 'badge-warning' : 'badge-danger');
+        
+        return `<tr>
+            <td>${purchaseDate}</td>
+            <td><code>${escapeHtml(purchase.invoice || 'N/A')}</code></td>
+            <td>${escapeHtml(supplierName)}</td>
+            <td>${escapeHtml(itemName)}</td>
+            <td>${escapeHtml(purchase.variantName || '-')}</td>
+            <td>${purchase.quantity || 0}</td>
+            <td>₹${(purchase.unitPrice || 0).toFixed(2)}</td>
+            <td><strong>₹${totalAmount.toFixed(2)}</strong></td>
+            <td class="text-success">₹${paidAmount.toFixed(2)}</td>
+            <td class="${balance > 0 ? 'text-danger' : 'text-success'}"><strong>₹${balance.toFixed(2)}</strong></td>
+            <td><span class="badge ${statusClass}">${escapeHtml(purchase.paymentStatus || 'pending')}</span></td>
+            <td>
+                <div class="action-icons">
+                    <button class="icon-btn" onclick="editPurchase('${purchase.id}')" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="icon-btn warning" onclick="openReturnModal('${purchase.id}')" title="Return Items">
+                        <i class="fas fa-undo-alt"></i>
+                    </button>
+                    <button class="icon-btn danger" onclick="openDeleteModal('purchase', '${purchase.id}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    updatePagination(totalPages, 'purchasePagination', 'currentPurchasePage', 'goToPurchasePage');
+}
+
 // Render debt table with enhanced tracking
 function renderDebtTable() {
     const tbody = document.getElementById('debtTableBody');
@@ -2313,9 +2553,11 @@ function switchTab(tab) {
     document.getElementById('inventoryFilters').style.display = 'none';
     document.getElementById('supplierFilters').style.display = 'none';
     document.getElementById('paymentFilters').style.display = 'none';
+    document.getElementById('purchaseFilters').style.display = 'none';
     document.getElementById('inventoryTable').style.display = 'none';
     document.getElementById('suppliersTable').style.display = 'none';
     document.getElementById('paymentsTable').style.display = 'none';
+    document.getElementById('purchasesTable').style.display = 'none';
     document.getElementById('debtTable').style.display = 'none';
     document.getElementById('vouchersTable').style.display = 'none';
     
@@ -2332,6 +2574,10 @@ function switchTab(tab) {
         document.getElementById('paymentFilters').style.display = 'flex';
         document.getElementById('paymentsTable').style.display = 'block';
         renderPaymentsTable();
+    } else if (tab === 'purchases') {
+        document.getElementById('purchaseFilters').style.display = 'flex';
+        document.getElementById('purchasesTable').style.display = 'block';
+        renderPurchasesTable();
     } else if (tab === 'debt') {
         document.getElementById('debtTable').style.display = 'block';
         renderDebtTable();
@@ -2374,7 +2620,8 @@ function updatePagination(totalPages, elementId, pageVar, functionName) {
     for (let i = 1; i <= totalPages; i++) {
         const currentPage = pageVar === 'currentPage' ? currentPage : 
                            (pageVar === 'currentSupplierPage' ? currentSupplierPage : 
-                           (pageVar === 'currentPaymentPage' ? currentPaymentPage : currentVoucherPage));
+                           (pageVar === 'currentPaymentPage' ? currentPaymentPage : 
+                           (pageVar === 'currentPurchasePage' ? currentPurchasePage : currentVoucherPage)));
         html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="${functionName}(${i})">${i}</button>`;
     }
     container.innerHTML = html;
@@ -2396,6 +2643,11 @@ function goToPaymentPage(page) {
     renderPaymentsTable();
 }
 
+function goToPurchasePage(page) {
+    currentPurchasePage = page;
+    renderPurchasesTable();
+}
+
 function goToVoucherPage(page) {
     currentVoucherPage = page;
     renderVouchersTable();
@@ -2415,6 +2667,11 @@ function applySupplierFilters() {
 function applyPaymentFilters() {
     currentPaymentPage = 1;
     renderPaymentsTable();
+}
+
+function applyPurchaseFilters() {
+    currentPurchasePage = 1;
+    renderPurchasesTable();
 }
 
 // Variant management
@@ -2643,9 +2900,11 @@ async function confirmReversal() {
     }
 }
 
-// Open purchase modal
+// Open purchase modal for adding
 function openPurchaseModal() {
+    document.getElementById('purchaseModalTitle').textContent = 'Record Purchase';
     document.getElementById('purchaseForm').reset();
+    document.getElementById('purchaseId').value = '';
     document.getElementById('purchaseDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('purchaseModal').style.display = 'flex';
     document.getElementById('paidAmountGroup').style.display = 'none';
@@ -2660,6 +2919,397 @@ function openPurchaseModalForItem(itemId) {
         document.getElementById('purchaseItem').value = itemId;
         showPurchaseVariants(itemId);
     }, 100);
+}
+
+// Edit purchase
+async function editPurchase(purchaseId) {
+    const purchase = purchases.find(p => p.id === purchaseId);
+    if (!purchase) return;
+
+    document.getElementById('purchaseModalTitle').textContent = 'Edit Purchase';
+    document.getElementById('purchaseId').value = purchase.id;
+    document.getElementById('purchaseSupplier').value = purchase.supplierId || '';
+    document.getElementById('purchaseItem').value = purchase.itemId || '';
+    document.getElementById('purchaseVariant').value = purchase.variantId || '';
+    document.getElementById('purchaseQty').value = purchase.quantity || 1;
+    document.getElementById('purchasePrice').value = purchase.unitPrice || 0;
+    document.getElementById('purchaseDiscount').value = purchase.discount || 0;
+    document.getElementById('purchaseTax').value = purchase.tax || 0;
+    document.getElementById('purchasePaymentStatus').value = purchase.paymentStatus || 'pending';
+    document.getElementById('purchasePaid').value = purchase.paidAmount || 0;
+    document.getElementById('purchaseInvoice').value = purchase.invoice || '';
+    
+    if (purchase.date) {
+        const date = purchase.date.toDate();
+        document.getElementById('purchaseDate').value = date.toISOString().split('T')[0];
+    } else {
+        document.getElementById('purchaseDate').value = new Date().toISOString().split('T')[0];
+    }
+    
+    document.getElementById('purchaseNotes').value = purchase.notes || '';
+
+    // Show variants if applicable
+    setTimeout(() => {
+        showPurchaseVariants(purchase.itemId);
+        calculatePurchaseTotal();
+        
+        // Show paid amount group if status is partial
+        document.getElementById('paidAmountGroup').style.display = 
+            purchase.paymentStatus === 'partial' ? 'block' : 'none';
+    }, 100);
+
+    document.getElementById('purchaseModal').style.display = 'flex';
+}
+
+// Save purchase (add or edit)
+async function savePurchase() {
+    try {
+        if (!currentUser) {
+            showToast('Please wait for authentication', 'error');
+            return;
+        }
+
+        const purchaseId = document.getElementById('purchaseId').value;
+        const supplierId = document.getElementById('purchaseSupplier').value;
+        const itemId = document.getElementById('purchaseItem').value;
+        const variantId = document.getElementById('purchaseVariant').value;
+        const qty = parseInt(document.getElementById('purchaseQty').value);
+        const price = parseFloat(document.getElementById('purchasePrice').value);
+        const discount = parseFloat(document.getElementById('purchaseDiscount').value) || 0;
+        const tax = parseFloat(document.getElementById('purchaseTax').value) || 0;
+        const paymentStatus = document.getElementById('purchasePaymentStatus').value;
+        const paidAmount = parseFloat(document.getElementById('purchasePaid').value) || 0;
+        const invoice = document.getElementById('purchaseInvoice').value;
+        const date = document.getElementById('purchaseDate').value;
+        const notes = document.getElementById('purchaseNotes').value;
+
+        if (!supplierId || !itemId || !qty || qty <= 0 || !price || price <= 0 || !date) {
+            showToast('Please fill all required fields', 'error');
+            return;
+        }
+
+        setButtonLoading('savePurchaseBtn', true);
+        showGlobalLoading('Saving purchase...');
+
+        // Calculate totals
+        let subtotal = qty * price;
+        let discountAmount = subtotal * (discount / 100);
+        let afterDiscount = subtotal - discountAmount;
+        let taxAmount = afterDiscount * (tax / 100);
+        let totalAmount = afterDiscount + taxAmount;
+
+        const actualPaidAmount = paymentStatus === 'paid' ? totalAmount : 
+                                (paymentStatus === 'partial' ? paidAmount : 0);
+
+        // Get variant name if applicable
+        let variantName = null;
+        if (variantId) {
+            const item = inventoryItems.find(i => i.id === itemId);
+            if (item && item.variants) {
+                const variant = item.variants.find(v => v.id === variantId);
+                variantName = variant ? variant.name : null;
+            }
+        }
+
+        const purchaseData = {
+            supplierId: supplierId,
+            itemId: itemId,
+            variantId: variantId || null,
+            variantName: variantName,
+            quantity: qty,
+            unitPrice: price,
+            discount: discount,
+            tax: tax,
+            subtotal: subtotal,
+            discountAmount: discountAmount,
+            taxAmount: taxAmount,
+            totalAmount: totalAmount,
+            paidAmount: actualPaidAmount,
+            paymentStatus: paymentStatus,
+            invoice: invoice,
+            date: firebase.firestore.Timestamp.fromDate(new Date(date)),
+            notes: notes,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        const purchasesRef = db.collection('users').doc(currentUser.uid).collection('purchases');
+        
+        if (purchaseId) {
+            // Editing existing purchase - need to handle stock and payment adjustments
+            const oldPurchase = purchases.find(p => p.id === purchaseId);
+            
+            // Reverse old stock changes
+            const itemRef = db.collection('users').doc(currentUser.uid)
+                .collection('inventory').doc(itemId);
+            
+            if (oldPurchase.variantId) {
+                const variantRef = itemRef.collection('variants').doc(oldPurchase.variantId);
+                const variantDoc = await variantRef.get();
+                const currentStock = variantDoc.data().stock || 0;
+                await variantRef.update({ stock: currentStock - oldPurchase.quantity });
+                
+                // Update total item stock
+                const allVariants = await itemRef.collection('variants').get();
+                const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+                await itemRef.update({ currentStock: totalStock });
+            } else {
+                const itemDoc = await itemRef.get();
+                const currentStock = itemDoc.data().currentStock || 0;
+                await itemRef.update({ currentStock: currentStock - oldPurchase.quantity });
+            }
+
+            // Update purchase
+            await purchasesRef.doc(purchaseId).update(purchaseData);
+
+            // Update in supplier's subcollection
+            const supplierPurchaseRef = db.collection('users').doc(currentUser.uid)
+                .collection('suppliers').doc(supplierId)
+                .collection('purchases').doc(purchaseId);
+            await supplierPurchaseRef.set(purchaseData);
+
+            showToast('Purchase updated successfully!', 'success');
+
+        } else {
+            // New purchase
+            purchaseData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+            const purchaseRef = await purchasesRef.add(purchaseData);
+
+            // Save in supplier's subcollection
+            const supplierPurchaseRef = db.collection('users').doc(currentUser.uid)
+                .collection('suppliers').doc(supplierId)
+                .collection('purchases').doc(purchaseRef.id);
+            await supplierPurchaseRef.set(purchaseData);
+
+            // Update item stock
+            const itemRef = db.collection('users').doc(currentUser.uid)
+                .collection('inventory').doc(itemId);
+            
+            if (variantId) {
+                const variantRef = itemRef.collection('variants').doc(variantId);
+                const variantDoc = await variantRef.get();
+                const currentStock = variantDoc.data().stock || 0;
+                await variantRef.update({ stock: currentStock + qty });
+                
+                // Update total item stock
+                const allVariants = await itemRef.collection('variants').get();
+                const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+                await itemRef.update({ currentStock: totalStock });
+            } else {
+                const itemDoc = await itemRef.get();
+                const currentStock = itemDoc.data().currentStock || 0;
+                await itemRef.update({ currentStock: currentStock + qty });
+            }
+
+            // Record transaction
+            await itemRef.collection('transactions').add({
+                type: 'add',
+                qty: qty,
+                reason: 'Purchase from supplier',
+                purchaseId: purchaseRef.id,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            showToast('Purchase recorded successfully!', 'success');
+        }
+
+        closeModal('purchaseModal');
+        await loadAllData();
+
+    } catch (error) {
+        console.error('Error saving purchase:', error);
+        showToast('Failed to save purchase: ' + error.message, 'error');
+    } finally {
+        hideGlobalLoading();
+        setButtonLoading('savePurchaseBtn', false);
+    }
+}
+
+// Open return modal
+async function openReturnModal(purchaseId) {
+    const purchase = purchases.find(p => p.id === purchaseId);
+    if (!purchase) return;
+
+    const supplier = suppliers.find(s => s.id === purchase.supplierId);
+    const item = inventoryItems.find(i => i.id === purchase.itemId);
+    const variant = item && item.variants ? item.variants.find(v => v.id === purchase.variantId) : null;
+
+    document.getElementById('returnPurchaseId').value = purchaseId;
+    document.getElementById('returnSupplierId').value = purchase.supplierId;
+    document.getElementById('returnSupplierName').value = supplier ? supplier.name : 'Unknown';
+    document.getElementById('returnInvoice').value = purchase.invoice || 'N/A';
+    
+    const purchaseDate = purchase.date ? new Date(purchase.date.toDate()).toLocaleDateString() : 'N/A';
+    document.getElementById('returnPurchaseDate').value = purchaseDate;
+
+    // Build return items container
+    const container = document.getElementById('returnItemsContainer');
+    const itemName = item ? item.name : 'Unknown Item';
+    const variantName = variant ? ` (${variant.name})` : '';
+    const maxReturnQty = purchase.quantity || 0;
+
+    container.innerHTML = `
+        <div class="return-item-row">
+            <div style="flex: 2;">
+                <strong>${escapeHtml(itemName)}${escapeHtml(variantName)}</strong>
+                <br><small>Purchase Qty: ${maxReturnQty}</small>
+            </div>
+            <div style="flex: 1;">
+                <input type="number" id="returnQty" class="form-control" min="1" max="${maxReturnQty}" value="${maxReturnQty}" onchange="calculateReturnTotal(${purchase.unitPrice || 0})">
+            </div>
+            <div style="flex: 1;">
+                <input type="number" id="returnPrice" class="form-control" step="0.01" min="0" value="${purchase.unitPrice || 0}" onchange="calculateReturnTotal(${purchase.unitPrice || 0})">
+            </div>
+        </div>
+    `;
+
+    // Calculate and display pending amount
+    const pendingAmount = (purchase.totalAmount || 0) - (purchase.paidAmount || 0);
+    document.getElementById('currentPendingAmount').textContent = '₹' + pendingAmount.toFixed(2);
+    
+    // Calculate return total
+    calculateReturnTotal(purchase.unitPrice || 0);
+
+    document.getElementById('returnModal').style.display = 'flex';
+}
+
+// Calculate return total
+function calculateReturnTotal(unitPrice) {
+    const qty = parseInt(document.getElementById('returnQty')?.value) || 0;
+    const price = parseFloat(document.getElementById('returnPrice')?.value) || unitPrice;
+    const returnTotal = qty * price;
+    
+    document.getElementById('returnTotalAmount').textContent = '-₹' + returnTotal.toFixed(2);
+    
+    // Update new pending amount
+    const currentPendingText = document.getElementById('currentPendingAmount').textContent;
+    const currentPending = parseFloat(currentPendingText.replace('₹', '')) || 0;
+    const newPending = Math.max(0, currentPending - returnTotal);
+    document.getElementById('newPendingAmount').textContent = '₹' + newPending.toFixed(2);
+}
+
+// Process return
+async function processReturn() {
+    try {
+        const purchaseId = document.getElementById('returnPurchaseId').value;
+        const supplierId = document.getElementById('returnSupplierId').value;
+        const reason = document.getElementById('returnReason').value;
+        const notes = document.getElementById('returnNotes').value;
+        const qty = parseInt(document.getElementById('returnQty').value);
+        const price = parseFloat(document.getElementById('returnPrice').value);
+
+        if (!reason) {
+            showToast('Please select a return reason', 'error');
+            return;
+        }
+
+        if (!qty || qty <= 0) {
+            showToast('Please enter valid return quantity', 'error');
+            return;
+        }
+
+        setButtonLoading('processReturnBtn', true);
+        showGlobalLoading('Processing return...');
+
+        const purchase = purchases.find(p => p.id === purchaseId);
+        if (!purchase) {
+            showToast('Purchase not found', 'error');
+            return;
+        }
+
+        const returnTotal = qty * price;
+
+        // Create return record
+        const returnData = {
+            returnNumber: generateReturnNumber(),
+            purchaseId: purchaseId,
+            supplierId: supplierId,
+            itemId: purchase.itemId,
+            variantId: purchase.variantId,
+            quantity: qty,
+            unitPrice: price,
+            totalAmount: returnTotal,
+            reason: reason,
+            notes: notes,
+            date: firebase.firestore.Timestamp.now(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        // Save return record
+        const returnRef = db.collection('users').doc(currentUser.uid)
+            .collection('returns').doc();
+        await returnRef.set(returnData);
+
+        // Update purchase
+        const purchaseRef = db.collection('users').doc(currentUser.uid)
+            .collection('purchases').doc(purchaseId);
+        
+        const newQuantity = purchase.quantity - qty;
+        const newTotalAmount = newQuantity * purchase.unitPrice;
+        const newPaidAmount = Math.min(purchase.paidAmount || 0, newTotalAmount);
+        const newPaymentStatus = newPaidAmount >= newTotalAmount ? 'paid' : 
+                               (newPaidAmount > 0 ? 'partial' : 'pending');
+
+        await purchaseRef.update({
+            quantity: newQuantity,
+            totalAmount: newTotalAmount,
+            paidAmount: newPaidAmount,
+            paymentStatus: newPaymentStatus,
+            returnedQuantity: (purchase.returnedQuantity || 0) + qty,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update in supplier's subcollection
+        const supplierPurchaseRef = db.collection('users').doc(currentUser.uid)
+            .collection('suppliers').doc(supplierId)
+            .collection('purchases').doc(purchaseId);
+        await supplierPurchaseRef.update({
+            quantity: newQuantity,
+            totalAmount: newTotalAmount,
+            paidAmount: newPaidAmount,
+            paymentStatus: newPaymentStatus,
+            returnedQuantity: (purchase.returnedQuantity || 0) + qty
+        });
+
+        // Update item stock (reduce stock)
+        const itemRef = db.collection('users').doc(currentUser.uid)
+            .collection('inventory').doc(purchase.itemId);
+        
+        if (purchase.variantId) {
+            const variantRef = itemRef.collection('variants').doc(purchase.variantId);
+            const variantDoc = await variantRef.get();
+            const currentStock = variantDoc.data().stock || 0;
+            await variantRef.update({ stock: Math.max(0, currentStock - qty) });
+            
+            // Update total item stock
+            const allVariants = await itemRef.collection('variants').get();
+            const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+            await itemRef.update({ currentStock: totalStock });
+        } else {
+            const itemDoc = await itemRef.get();
+            const currentStock = itemDoc.data().currentStock || 0;
+            await itemRef.update({ currentStock: Math.max(0, currentStock - qty) });
+        }
+
+        // Record transaction
+        await itemRef.collection('transactions').add({
+            type: 'remove',
+            qty: qty,
+            reason: `Return to supplier: ${reason}`,
+            returnId: returnRef.id,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        showToast('Return processed successfully! Pending payment updated.', 'success');
+        closeModal('returnModal');
+        await loadAllData();
+
+    } catch (error) {
+        console.error('Error processing return:', error);
+        showToast('Failed to process return: ' + error.message, 'error');
+    } finally {
+        hideGlobalLoading();
+        setButtonLoading('processReturnBtn', false);
+    }
 }
 
 // Edit item
@@ -2738,6 +3388,7 @@ async function saveItem() {
         }
 
         setButtonLoading('saveItemBtn', true);
+        showGlobalLoading('Saving item...');
 
         const itemData = {
             name: itemName,
@@ -2756,8 +3407,6 @@ async function saveItem() {
             description: document.getElementById('itemDescription').value || '',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
-
-        showGlobalLoading('Saving item...');
 
         const inventoryRef = db.collection('users').doc(currentUser.uid).collection('inventory');
         let itemRef;
@@ -3070,118 +3719,6 @@ async function savePayment() {
     } finally {
         hideGlobalLoading();
         setButtonLoading('savePaymentBtn', false);
-    }
-}
-
-// Process purchase
-async function processPurchase() {
-    try {
-        if (!currentUser) {
-            showToast('Please wait for authentication', 'error');
-            return;
-        }
-
-        const supplierId = document.getElementById('purchaseSupplier').value;
-        const itemId = document.getElementById('purchaseItem').value;
-        const variantId = document.getElementById('purchaseVariant').value;
-        const qty = parseInt(document.getElementById('purchaseQty').value);
-        const price = parseFloat(document.getElementById('purchasePrice').value);
-        const discount = parseFloat(document.getElementById('purchaseDiscount').value) || 0;
-        const tax = parseFloat(document.getElementById('purchaseTax').value) || 0;
-        const paymentStatus = document.getElementById('purchasePaymentStatus').value;
-        const paidAmount = parseFloat(document.getElementById('purchasePaid').value) || 0;
-        const invoice = document.getElementById('purchaseInvoice').value;
-        const date = document.getElementById('purchaseDate').value;
-        const notes = document.getElementById('purchaseNotes').value;
-
-        if (!supplierId || !itemId || !qty || qty <= 0 || !price || price <= 0 || !date) {
-            showToast('Please fill all required fields', 'error');
-            return;
-        }
-
-        setButtonLoading('processPurchaseBtn', true);
-        showGlobalLoading('Recording purchase...');
-
-        // Calculate totals
-        let subtotal = qty * price;
-        let discountAmount = subtotal * (discount / 100);
-        let afterDiscount = subtotal - discountAmount;
-        let taxAmount = afterDiscount * (tax / 100);
-        let totalAmount = afterDiscount + taxAmount;
-
-        const actualPaidAmount = paymentStatus === 'paid' ? totalAmount : 
-                                (paymentStatus === 'partial' ? paidAmount : 0);
-
-        const purchaseData = {
-            supplierId: supplierId,
-            itemId: itemId,
-            variantId: variantId || null,
-            quantity: qty,
-            unitPrice: price,
-            discount: discount,
-            tax: tax,
-            subtotal: subtotal,
-            discountAmount: discountAmount,
-            taxAmount: taxAmount,
-            totalAmount: totalAmount,
-            paidAmount: actualPaidAmount,
-            paymentStatus: paymentStatus,
-            invoice: invoice,
-            date: firebase.firestore.Timestamp.fromDate(new Date(date)),
-            notes: notes,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-
-        // Save purchase
-        const purchaseRef = db.collection('users').doc(currentUser.uid)
-            .collection('purchases').doc();
-        await purchaseRef.set(purchaseData);
-
-        // Save in supplier's subcollection
-        const supplierPurchaseRef = db.collection('users').doc(currentUser.uid)
-            .collection('suppliers').doc(supplierId)
-            .collection('purchases').doc(purchaseRef.id);
-        await supplierPurchaseRef.set(purchaseData);
-
-        // Update item stock
-        const itemRef = db.collection('users').doc(currentUser.uid)
-            .collection('inventory').doc(itemId);
-        
-        if (variantId) {
-            const variantRef = itemRef.collection('variants').doc(variantId);
-            const variantDoc = await variantRef.get();
-            const currentStock = variantDoc.data().stock || 0;
-            await variantRef.update({ stock: currentStock + qty });
-            
-            // Update total item stock
-            const allVariants = await itemRef.collection('variants').get();
-            const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
-            await itemRef.update({ currentStock: totalStock });
-        } else {
-            const itemDoc = await itemRef.get();
-            const currentStock = itemDoc.data().currentStock || 0;
-            await itemRef.update({ currentStock: currentStock + qty });
-        }
-
-        // Record transaction
-        await itemRef.collection('transactions').add({
-            type: 'add',
-            qty: qty,
-            reason: 'Purchase from supplier',
-            purchaseId: purchaseRef.id,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        showToast('Purchase recorded successfully!', 'success');
-        closeModal('purchaseModal');
-        await loadAllData();
-        
-    } catch (error) {
-        console.error('Error recording purchase:', error);
-        showToast('Failed to record purchase: ' + error.message, 'error');
-    } finally {
-        hideGlobalLoading();
-        setButtonLoading('processPurchaseBtn', false);
     }
 }
 
@@ -3506,6 +4043,69 @@ function viewSupplierPaymentHistory(supplierId) {
     document.getElementById('voucherModal').style.display = 'flex';
 }
 
+// View supplier purchases
+function viewSupplierPurchases(supplierId) {
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (!supplier) return;
+    
+    const supplierPurchases = purchases.filter(p => p.supplierId === supplierId);
+    
+    if (supplierPurchases.length === 0) {
+        showToast('No purchases found for this supplier', 'info');
+        return;
+    }
+
+    let purchasesHtml = `
+        <div style="padding: 20px;">
+            <h3 style="margin-bottom: 20px;">Purchase History - ${escapeHtml(supplier.name)}</h3>
+            <table class="table" style="min-width: 600px;">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Invoice</th>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Total</th>
+                        <th>Paid</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    supplierPurchases.forEach(purchase => {
+        const date = purchase.date ? new Date(purchase.date.toDate()).toLocaleDateString() : 'N/A';
+        const item = inventoryItems.find(i => i.id === purchase.itemId);
+        const itemName = item ? item.name : 'Unknown';
+        const statusClass = purchase.paymentStatus === 'paid' ? 'success' : 
+                          (purchase.paymentStatus === 'partial' ? 'warning' : 'danger');
+        
+        purchasesHtml += `
+            <tr>
+                <td>${date}</td>
+                <td>${escapeHtml(purchase.invoice || 'N/A')}</td>
+                <td>${escapeHtml(itemName)}</td>
+                <td>${purchase.quantity || 0}</td>
+                <td>₹${(purchase.totalAmount || 0).toFixed(2)}</td>
+                <td>₹${(purchase.paidAmount || 0).toFixed(2)}</td>
+                <td><span class="badge badge-${statusClass}">${escapeHtml(purchase.paymentStatus || 'pending')}</span></td>
+            </tr>
+        `;
+    });
+
+    purchasesHtml += `
+                </tbody>
+            </table>
+            <div style="margin-top: 20px; text-align: right;">
+                <button class="action-btn" onclick="closeModal('voucherModal')">Close</button>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('voucherContent').innerHTML = purchasesHtml;
+    document.getElementById('voucherModal').style.display = 'flex';
+}
+
 // Delete functions
 function openDeleteModal(type, id) {
     deleteType = type;
@@ -3516,6 +4116,8 @@ function openDeleteModal(type, id) {
         message = 'Delete this supplier? All related purchases and payments will be lost.';
     } else if (type === 'payment') {
         message = 'Delete this payment record? This action cannot be undone.';
+    } else if (type === 'purchase') {
+        message = 'Delete this purchase? Stock will be adjusted and pending payments will be updated.';
     }
     
     document.getElementById('deleteMessage').textContent = message;
@@ -3611,6 +4213,40 @@ async function confirmDelete() {
             }
             
             showToast('Payment deleted successfully!', 'success');
+            
+        } else if (deleteType === 'purchase') {
+            const purchase = purchases.find(p => p.id === deleteItemId);
+            if (!purchase) return;
+
+            // Reverse stock changes
+            const itemRef = db.collection('users').doc(currentUser.uid)
+                .collection('inventory').doc(purchase.itemId);
+            
+            if (purchase.variantId) {
+                const variantRef = itemRef.collection('variants').doc(purchase.variantId);
+                const variantDoc = await variantRef.get();
+                const currentStock = variantDoc.data().stock || 0;
+                await variantRef.update({ stock: Math.max(0, currentStock - purchase.quantity) });
+                
+                // Update total item stock
+                const allVariants = await itemRef.collection('variants').get();
+                const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+                await itemRef.update({ currentStock: totalStock });
+            } else {
+                const itemDoc = await itemRef.get();
+                const currentStock = itemDoc.data().currentStock || 0;
+                await itemRef.update({ currentStock: Math.max(0, currentStock - purchase.quantity) });
+            }
+
+            // Delete purchase
+            await db.collection('users').doc(currentUser.uid)
+                .collection('purchases').doc(deleteItemId).delete();
+            
+            await db.collection('users').doc(currentUser.uid)
+                .collection('suppliers').doc(purchase.supplierId)
+                .collection('purchases').doc(deleteItemId).delete();
+            
+            showToast('Purchase deleted successfully! Stock adjusted.', 'success');
         }
         
         closeModal('deleteModal');
@@ -3673,6 +4309,21 @@ function exportData() {
             csv += `"${payment.voucherNumber || 'N/A'}","${date}","${supplierName}",${payment.amount || 0},"${payment.method || ''}","${payment.type || ''}","${payment.reference || ''}",${appliedCount} purchases,"${payment.notes || ''}","${status}"\n`;
         });
 
+        csv += '\n=== PURCHASES ===\n';
+        csv += 'Date,Invoice,Supplier,Item,Variant,Quantity,Unit Price,Total,Paid,Balance,Status\n';
+        
+        purchases.forEach(purchase => {
+            const supplier = suppliers.find(s => s.id === purchase.supplierId);
+            const supplierName = supplier ? supplier.name : 'Unknown';
+            const item = inventoryItems.find(i => i.id === purchase.itemId);
+            const itemName = item ? item.name : 'Unknown';
+            const date = purchase.date ? new Date(purchase.date.toDate()).toLocaleDateString() : '';
+            const total = purchase.totalAmount || 0;
+            const paid = purchase.paidAmount || 0;
+            const balance = total - paid;
+            csv += `"${date}","${purchase.invoice || 'N/A'}","${supplierName}","${itemName}","${purchase.variantName || ''}",${purchase.quantity || 0},${purchase.unitPrice || 0},${total},${paid},${balance},"${purchase.paymentStatus || ''}"\n`;
+        });
+
         csv += '\n=== VOUCHERS ===\n';
         csv += 'Voucher #,Date,Type,Supplier,Amount,Status\n';
         
@@ -3699,69 +4350,6 @@ function exportData() {
         hideGlobalLoading();
         setButtonLoading('exportBtn', false);
     }
-}
-
-// View supplier purchases
-function viewSupplierPurchases(supplierId) {
-    const supplier = suppliers.find(s => s.id === supplierId);
-    if (!supplier) return;
-    
-    const supplierPurchases = purchases.filter(p => p.supplierId === supplierId);
-    
-    if (supplierPurchases.length === 0) {
-        showToast('No purchases found for this supplier', 'info');
-        return;
-    }
-
-    let purchasesHtml = `
-        <div style="padding: 20px;">
-            <h3 style="margin-bottom: 20px;">Purchase History - ${escapeHtml(supplier.name)}</h3>
-            <table class="table" style="min-width: 600px;">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Invoice</th>
-                        <th>Item</th>
-                        <th>Qty</th>
-                        <th>Total</th>
-                        <th>Paid</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-
-    supplierPurchases.forEach(purchase => {
-        const date = purchase.date ? new Date(purchase.date.toDate()).toLocaleDateString() : 'N/A';
-        const item = inventoryItems.find(i => i.id === purchase.itemId);
-        const itemName = item ? item.name : 'Unknown';
-        const statusClass = purchase.paymentStatus === 'paid' ? 'success' : 
-                          (purchase.paymentStatus === 'partial' ? 'warning' : 'danger');
-        
-        purchasesHtml += `
-            <tr>
-                <td>${date}</td>
-                <td>${escapeHtml(purchase.invoice || 'N/A')}</td>
-                <td>${escapeHtml(itemName)}</td>
-                <td>${purchase.quantity || 0}</td>
-                <td>₹${(purchase.totalAmount || 0).toFixed(2)}</td>
-                <td>₹${(purchase.paidAmount || 0).toFixed(2)}</td>
-                <td><span class="badge badge-${statusClass}">${escapeHtml(purchase.paymentStatus || 'pending')}</span></td>
-            </tr>
-        `;
-    });
-
-    purchasesHtml += `
-                </tbody>
-            </table>
-            <div style="margin-top: 20px; text-align: right;">
-                <button class="action-btn" onclick="closeModal('voucherModal')">Close</button>
-            </div>
-        </div>
-    `;
-
-    document.getElementById('voucherContent').innerHTML = purchasesHtml;
-    document.getElementById('voucherModal').style.display = 'flex';
 }
 
 // Toast notification
@@ -3800,6 +4388,10 @@ document.getElementById('paymentSearchInput')?.addEventListener('input', applyPa
 document.getElementById('paymentMethodFilter')?.addEventListener('change', applyPaymentFilters);
 document.getElementById('paymentTypeFilter')?.addEventListener('change', applyPaymentFilters);
 
+document.getElementById('purchaseSearchInput')?.addEventListener('input', applyPurchaseFilters);
+document.getElementById('purchaseStatusFilter')?.addEventListener('change', applyPurchaseFilters);
+document.getElementById('purchaseSupplierFilter')?.addEventListener('change', applyPurchaseFilters);
+
 document.getElementById('purchaseQty').addEventListener('input', calculatePurchaseTotal);
 document.getElementById('purchasePrice').addEventListener('input', calculatePurchaseTotal);
 document.getElementById('purchaseDiscount').addEventListener('input', calculatePurchaseTotal);
@@ -3825,13 +4417,17 @@ window.openPaymentModal = openPaymentModal;
 window.openPaymentModalForSupplier = openPaymentModalForSupplier;
 window.openPurchaseModal = openPurchaseModal;
 window.openPurchaseModalForItem = openPurchaseModalForItem;
+window.openReturnModal = openReturnModal;
 window.editItem = editItem;
 window.editSupplier = editSupplier;
 window.editPayment = editPayment;
+window.editPurchase = editPurchase;
 window.saveItem = saveItem;
 window.saveSupplier = saveSupplier;
 window.savePayment = savePayment;
-window.processPurchase = processPurchase;
+window.savePurchase = savePurchase;
+window.processReturn = processReturn;
+window.calculateReturnTotal = calculateReturnTotal;
 window.openDeleteModal = openDeleteModal;
 window.confirmDelete = confirmDelete;
 window.exportData = exportData;
@@ -3844,9 +4440,11 @@ window.closeModal = closeModal;
 window.applyFilters = applyFilters;
 window.applySupplierFilters = applySupplierFilters;
 window.applyPaymentFilters = applyPaymentFilters;
+window.applyPurchaseFilters = applyPurchaseFilters;
 window.goToPage = goToPage;
 window.goToSupplierPage = goToSupplierPage;
 window.goToPaymentPage = goToPaymentPage;
+window.goToPurchasePage = goToPurchasePage;
 window.goToVoucherPage = goToVoucherPage;
 window.viewSupplierPurchases = viewSupplierPurchases;
 window.viewSupplierPaymentHistory = viewSupplierPaymentHistory;
