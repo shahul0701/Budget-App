@@ -255,7 +255,7 @@
         <button class="action-btn" onclick="applyFilters()"><i class="fas fa-filter"></i> Apply</button>
     </div>
 
-    <!-- Inventory Table (now includes variant column) -->
+    <!-- Inventory Table -->
     <div class="table-card">
         <table class="table">
             <thead>
@@ -279,7 +279,7 @@
     </div>
 </div>
 
-<!-- ADD/EDIT ITEM MODAL (with variants) -->
+<!-- ADD/EDIT ITEM MODAL -->
 <div class="modal-overlay" id="itemModal">
     <div class="modal-content">
         <div class="modal-header">
@@ -287,7 +287,7 @@
             <button class="close-modal" onclick="closeModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <form id="itemForm">
+            <form id="itemForm" onsubmit="event.preventDefault(); return false;">
                 <div class="form-group">
                     <label>Item Name *</label>
                     <input type="text" id="itemName" class="form-control" required>
@@ -307,24 +307,24 @@
                     </div>
                     <div class="form-group">
                         <label>Base SKU</label>
-                        <input type="text" id="itemSKU" class="form-control" placeholder="Auto-generated" readonly>
+                        <input type="text" id="itemSKU" class="form-control" readonly>
                     </div>
                 </div>
 
-                <!-- VARIANTS SECTION (new feature) -->
+                <!-- VARIANTS SECTION -->
                 <div class="section-title"><i class="fas fa-tags"></i> Variants (size/color/style)</div>
                 <div id="variantsContainer"></div>
                 <button type="button" class="action-btn secondary" style="margin-bottom:15px;" onclick="addVariantField()"><i class="fas fa-plus-circle"></i> Add variant</button>
 
-                <!-- Base prices used as fallback, but variants override -->
+                <!-- Base prices -->
                 <div class="form-row">
                     <div class="form-group">
                         <label>Default Selling Price (₹)</label>
-                        <input type="number" id="sellingPrice" class="form-control" step="0.01">
+                        <input type="number" id="sellingPrice" class="form-control" step="0.01" value="0">
                     </div>
                     <div class="form-group">
                         <label>Default Cost (₹)</label>
-                        <input type="number" id="costPrice" class="form-control" step="0.01">
+                        <input type="number" id="costPrice" class="form-control" step="0.01" value="0">
                     </div>
                 </div>
                 <div class="form-row">
@@ -351,7 +351,7 @@
     </div>
 </div>
 
-<!-- STOCK TRANSACTION MODAL (new feature) -->
+<!-- STOCK TRANSACTION MODAL -->
 <div class="modal-overlay" id="transactionModal">
     <div class="modal-content" style="max-width:500px;">
         <div class="modal-header" style="background:var(--gradient-success);">
@@ -359,7 +359,7 @@
             <button class="close-modal" onclick="closeTransactionModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <form id="txnForm">
+            <form id="txnForm" onsubmit="event.preventDefault(); return false;">
                 <div class="form-group">
                     <label>Select Item *</label>
                     <select id="txnItemSelect" class="form-control" required></select>
@@ -399,7 +399,10 @@
         <div class="modal-header" style="background: var(--gradient-danger);"><h3>Confirm Delete</h3><button class="close-modal" onclick="closeDeleteModal()">&times;</button></div>
         <div class="modal-body">
             <p style="margin-bottom:25px;">Delete item permanently? Variants and history will be lost.</p>
-            <div class="form-actions"><button class="action-btn btn-block" onclick="closeDeleteModal()">Cancel</button><button class="action-btn danger btn-block" onclick="confirmDelete()">Delete</button></div>
+            <div class="form-actions">
+                <button class="action-btn btn-block" onclick="closeDeleteModal()">Cancel</button>
+                <button class="action-btn danger btn-block" onclick="confirmDelete()">Delete</button>
+            </div>
         </div>
     </div>
 </div>
@@ -408,7 +411,7 @@
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-    // Firebase config
+    // Firebase configuration
     const firebaseConfig = {
         apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
         authDomain: "budget-app-1365f.firebaseapp.com",
@@ -417,187 +420,317 @@
         messagingSenderId: "1036194450411",
         appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae"
     };
+
+    // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
     const auth = firebase.auth();
 
+    // Enable offline persistence for better performance
+    db.enablePersistence()
+        .catch(err => console.log('Persistence error:', err));
+
     // Global state
     let currentUser = null;
-    let inventoryItems = [];         // each item includes .variants array and .transactions array (last 3)
-    let currentPage = 1, itemsPerPage = 10;
+    let inventoryItems = [];
+    let currentPage = 1;
+    let itemsPerPage = 10;
     let deleteItemId = null;
     let categories = new Set();
+    let variantIndex = 0;
 
-    // Auth
-    auth.onAuthStateChanged(user => {
-        if (user) { currentUser = user; loadInventory(); } 
-        else { window.location.href = 'index.html'; }
+    // Check authentication
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            currentUser = user;
+            showToast('Logged in successfully!', 'success');
+            await loadInventory();
+        } else {
+            // For demo purposes, create a demo user if not logged in
+            try {
+                const demoUser = await auth.signInAnonymously();
+                currentUser = demoUser.user;
+                showToast('Demo mode activated', 'info');
+                await loadInventory();
+            } catch (error) {
+                console.error('Auth error:', error);
+                showToast('Please check your Firebase configuration', 'error');
+            }
+        }
     });
 
-    // Load inventory with variants and recent transactions (subcollection)
+    // Load inventory from Firebase
     async function loadInventory() {
         try {
-            showToast('Loading inventory...','info');
-            const snapshot = await db.collection('users').doc(currentUser.uid).collection('inventory').get();
+            if (!currentUser) return;
+            
+            showToast('Loading inventory...', 'info');
+            
+            const inventoryRef = db.collection('users').doc(currentUser.uid).collection('inventory');
+            const snapshot = await inventoryRef.get();
+            
             inventoryItems = [];
             categories.clear();
             
             for (const doc of snapshot.docs) {
                 const data = doc.data();
-                // load variants subcollection
-                const variantsSnap = await db.collection('users').doc(currentUser.uid).collection('inventory').doc(doc.id).collection('variants').get();
-                const variants = variantsSnap.docs.map(v => ({ id: v.id, ...v.data() }));
                 
-                // load last 3 transactions from subcollection
-                const txnSnap = await db.collection('users').doc(currentUser.uid).collection('inventory').doc(doc.id).collection('transactions').orderBy('timestamp','desc').limit(3).get();
-                const transactions = txnSnap.docs.map(t => ({ id: t.id, ...t.data() }));
+                // Load variants
+                let variants = [];
+                try {
+                    const variantsSnap = await doc.ref.collection('variants').get();
+                    variants = variantsSnap.docs.map(v => ({ id: v.id, ...v.data() }));
+                } catch (e) {
+                    console.log('No variants for item', doc.id);
+                }
+                
+                // Load recent transactions
+                let transactions = [];
+                try {
+                    const txnSnap = await doc.ref.collection('transactions')
+                        .orderBy('timestamp', 'desc')
+                        .limit(3)
+                        .get();
+                    transactions = txnSnap.docs.map(t => ({ id: t.id, ...t.data() }));
+                } catch (e) {
+                    console.log('No transactions for item', doc.id);
+                }
+
+                // Calculate total stock from variants if available
+                let totalStock = data.currentStock || 0;
+                if (variants.length > 0) {
+                    totalStock = variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+                }
 
                 const item = {
                     id: doc.id,
-                    name: data.name || 'Unnamed',
+                    name: data.name || 'Unnamed Item',
                     sku: data.sku || `SKU-${doc.id.slice(-8)}`,
                     category: data.category || 'Other',
-                    sellingPrice: data.sellingPrice || 0,
-                    costPrice: data.costPrice || 0,
-                    currentStock: data.currentStock || 0,
-                    minStock: data.minStock || 5,
+                    sellingPrice: parseFloat(data.sellingPrice) || 0,
+                    costPrice: parseFloat(data.costPrice) || 0,
+                    currentStock: totalStock,
+                    minStock: parseInt(data.minStock) || 5,
                     description: data.description || '',
-                    variants: variants,                      // new
-                    transactions: transactions               // new
+                    variants: variants,
+                    transactions: transactions
                 };
-                // compute total stock including variants? We'll store master stock but also show variant sum.
-                // For simplicity we keep master stock, but we also calculate total from variants if present.
-                if (variants.length > 0) {
-                    const totalVariantStock = variants.reduce((acc,v)=> acc + (v.stock || 0), 0);
-                    item.currentStock = totalVariantStock;   // reflect real stock
-                }
+                
                 inventoryItems.push(item);
                 if (data.category) categories.add(data.category);
             }
+            
             updateCategoryFilter();
             renderTable();
-            showToast('Inventory ready','success');
-        } catch (e) { console.error(e); showToast('Error loading','error'); }
+            showToast(`Loaded ${inventoryItems.length} items`, 'success');
+            
+        } catch (error) {
+            console.error('Error loading inventory:', error);
+            showToast('Failed to load inventory: ' + error.message, 'error');
+            
+            // Show empty table with error message
+            document.getElementById('inventoryTableBody').innerHTML = 
+                '<tr><td colspan="9" style="text-align:center;padding:50px;">' +
+                '<i class="fas fa-exclamation-triangle" style="font-size:48px;color:var(--danger);"></i><br>' +
+                'Failed to load inventory. Please check Firebase configuration.</td></tr>';
+        }
     }
 
+    // Update category filter dropdown
     function updateCategoryFilter() {
         const filter = document.getElementById('categoryFilter');
-        let opts = '<option value="">All Categories</option>';
-        Array.from(categories).sort().forEach(c => opts += `<option value="${c}">${c}</option>`);
-        filter.innerHTML = opts;
+        let options = '<option value="">All Categories</option>';
+        Array.from(categories).sort().forEach(cat => {
+            options += `<option value="${cat}">${cat}</option>`;
+        });
+        filter.innerHTML = options;
     }
 
-    // Render table with variants column and transaction history
+    // Render table
     function renderTable() {
         const tbody = document.getElementById('inventoryTableBody');
         const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-        const catFilter = document.getElementById('categoryFilter').value;
+        const categoryFilter = document.getElementById('categoryFilter').value;
         const stockFilter = document.getElementById('stockFilter').value;
 
-        let filtered = inventoryItems.filter(item => {
-            const matchesSearch = item.name.toLowerCase().includes(searchTerm) || item.sku.toLowerCase().includes(searchTerm) ||
-                item.category.toLowerCase().includes(searchTerm) || (item.variants?.some(v => v.name?.toLowerCase().includes(searchTerm)));
-            const matchesCat = !catFilter || item.category === catFilter;
+        // Filter items
+        let filteredItems = inventoryItems.filter(item => {
+            const matchesSearch = item.name.toLowerCase().includes(searchTerm) ||
+                                item.sku.toLowerCase().includes(searchTerm) ||
+                                item.category.toLowerCase().includes(searchTerm) ||
+                                (item.variants && item.variants.some(v => 
+                                    v.name && v.name.toLowerCase().includes(searchTerm)));
+            
+            const matchesCategory = !categoryFilter || item.category === categoryFilter;
+            
             let matchesStock = true;
-            if (stockFilter==='in_stock') matchesStock = item.currentStock > item.minStock;
-            else if (stockFilter==='low_stock') matchesStock = item.currentStock > 0 && item.currentStock <= item.minStock;
-            else if (stockFilter==='out_of_stock') matchesStock = item.currentStock <= 0;
-            return matchesSearch && matchesCat && matchesStock;
+            if (stockFilter === 'in_stock') {
+                matchesStock = item.currentStock > item.minStock;
+            } else if (stockFilter === 'low_stock') {
+                matchesStock = item.currentStock > 0 && item.currentStock <= item.minStock;
+            } else if (stockFilter === 'out_of_stock') {
+                matchesStock = item.currentStock <= 0;
+            }
+            
+            return matchesSearch && matchesCategory && matchesStock;
         });
 
-        // pagination
-        const totalPages = Math.ceil(filtered.length / itemsPerPage);
-        const start = (currentPage-1)*itemsPerPage;
-        const pageItems = filtered.slice(start, start+itemsPerPage);
+        // Pagination
+        const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const pageItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
 
-        if (!pageItems.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:50px;"><i class="fas fa-box-open" style="font-size:48px;opacity:0.3;"></i><br>No items</td></tr>';
+        if (pageItems.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 50px;">' +
+                '<i class="fas fa-box-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 15px;"></i><br>' +
+                'No items found. Click "Add Item" to create your first product.</td></tr>';
         } else {
             tbody.innerHTML = pageItems.map(item => {
-                const stockStat = getStockStatus(item.currentStock, item.minStock);
-                // format variants
-                let variantHtml = '';
-                if (item.variants && item.variants.length) {
-                    variantHtml = '<div style="font-size:13px;">' + item.variants.map(v => 
-                        `<span class="badge badge-secondary" style="background:#6c757d;margin:2px;">${v.name || 'var'}: ${v.stock||0} (₹${v.price||item.sellingPrice})</span>`
-                    ).join(' ') + '</div>';
-                } else { variantHtml = '<span class="text-muted">—</span>'; }
+                const stockStatus = getStockStatus(item.currentStock, item.minStock);
+                
+                // Format variants
+                let variantHtml = '<span class="text-muted">—</span>';
+                if (item.variants && item.variants.length > 0) {
+                    variantHtml = '<div style="font-size:12px; margin-top:5px;">' + 
+                        item.variants.map(v => 
+                            `<span class="badge badge-secondary" style="background:#6c757d; margin:2px;">` +
+                            `${v.name || 'var'}: ${v.stock || 0} (₹${v.price || item.sellingPrice})</span>`
+                        ).join('') + 
+                    '</div>';
+                }
 
-                // last 3 transactions
-                let txnHtml = '';
-                if (item.transactions && item.transactions.length) {
+                // Format transactions
+                let txnHtml = '<span class="text-muted">no transactions</span>';
+                if (item.transactions && item.transactions.length > 0) {
                     txnHtml = item.transactions.map(t => {
-                        let sign = t.type==='add' ? '+' : (t.type==='remove' ? '-' : '=');
-                        return `<span class="txn-chip"><i class="fas fa-clock"></i> ${sign}${t.qty ?? 0} ${t.reason ? '· '+t.reason.substring(0,10) : ''}</span>`;
+                        const sign = t.type === 'add' ? '+' : (t.type === 'remove' ? '-' : '=');
+                        const date = t.timestamp ? new Date(t.timestamp.toDate()).toLocaleDateString() : '';
+                        return `<span class="txn-chip" title="${date}">` +
+                               `<i class="fas fa-clock"></i> ${sign}${t.qty || 0}` +
+                               (t.reason ? ` · ${t.reason.substring(0,10)}` : '') +
+                               `</span>`;
                     }).join(' ');
-                } else { txnHtml = '<span class="text-muted">no txns</span>'; }
+                }
 
                 return `<tr>
-                    <td><strong>${item.name}</strong>${variantHtml}</td>
-                    <td><code>${item.sku}</code></td>
-                    <td><span class="badge badge-info">${item.category}</span></td>
-                    <td class="${stockStat.class}"><b>${item.currentStock}</b></td>
+                    <td>
+                        <strong>${escapeHtml(item.name)}</strong>
+                        ${variantHtml}
+                    </td>
+                    <td><code>${escapeHtml(item.sku)}</code></td>
+                    <td><span class="badge badge-info">${escapeHtml(item.category)}</span></td>
+                    <td class="${stockStatus.class}"><strong>${item.currentStock}</strong></td>
                     <td>₹${item.sellingPrice.toFixed(2)}</td>
                     <td>₹${item.costPrice.toFixed(2)}</td>
-                    <td><span class="badge ${stockStat.badge}">${stockStat.text}</span></td>
+                    <td><span class="badge ${stockStatus.badge}">${stockStatus.text}</span></td>
                     <td>${txnHtml}</td>
-                    <td><div class="action-icons">
-                        <button class="icon-btn" onclick="editItem('${item.id}')" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="icon-btn success" onclick="openTxnForItem('${item.id}')" title="Record movement"><i class="fas fa-exchange-alt"></i></button>
-                        <button class="icon-btn danger" onclick="openDeleteModal('${item.id}')" title="Delete"><i class="fas fa-trash"></i></button>
-                    </div></td>
+                    <td>
+                        <div class="action-icons">
+                            <button class="icon-btn" onclick="editItem('${item.id}')" title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="icon-btn success" onclick="openTxnForItem('${item.id}')" title="Record movement">
+                                <i class="fas fa-exchange-alt"></i>
+                            </button>
+                            <button class="icon-btn danger" onclick="openDeleteModal('${item.id}')" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
                 </tr>`;
             }).join('');
         }
+
         updatePagination(totalPages);
     }
 
-    function getStockStatus(s, min) {
-        if (s<=0) return {text:'Out of Stock',badge:'badge-danger',class:'text-danger'};
-        if (s<=min) return {text:'Low Stock',badge:'badge-warning',class:'text-warning'};
-        return {text:'In Stock',badge:'badge-success',class:'text-success'};
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
-    function updatePagination(total) {
+    // Get stock status
+    function getStockStatus(stock, minStock) {
+        if (stock <= 0) {
+            return { text: 'Out of Stock', badge: 'badge-danger', class: 'text-danger' };
+        } else if (stock <= minStock) {
+            return { text: 'Low Stock', badge: 'badge-warning', class: 'text-warning' };
+        } else {
+            return { text: 'In Stock', badge: 'badge-success', class: 'text-success' };
+        }
+    }
+
+    // Update pagination
+    function updatePagination(totalPages) {
+        const container = document.getElementById('pagination');
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
         let html = '';
-        for (let i=1;i<=total;i++) html += `<button class="page-btn ${i===currentPage?'active':''}" onclick="goToPage(${i})">${i}</button>`;
-        document.getElementById('pagination').innerHTML = html;
+        for (let i = 1; i <= totalPages; i++) {
+            html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        }
+        container.innerHTML = html;
     }
-    function goToPage(p) { currentPage=p; renderTable(); }
-    function applyFilters() { currentPage=1; renderTable(); }
 
-    // Variant management in modal
-    let variantIndex = 0;
+    // Go to page
+    function goToPage(page) {
+        currentPage = page;
+        renderTable();
+    }
+
+    // Apply filters
+    function applyFilters() {
+        currentPage = 1;
+        renderTable();
+    }
+
+    // Variant management
     function addVariantField(vals = {}) {
         const container = document.getElementById('variantsContainer');
         const idx = variantIndex++;
         const html = `
             <div class="variant-row" id="variantRow-${idx}">
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                    <input type="text" placeholder="Variant name (e.g. XL/Red)" value="${vals.name || ''}" class="form-control" style="width:180px;" id="varName-${idx}">
-                    <input type="number" placeholder="Stock" value="${vals.stock || 0}" class="form-control" style="width:90px;" id="varStock-${idx}" min="0">
-                    <input type="number" placeholder="Price" value="${vals.price || ''}" class="form-control" style="width:110px;" id="varPrice-${idx}" step="0.01">
+                    <input type="text" placeholder="Variant name (e.g. XL/Red)" 
+                           value="${vals.name || ''}" class="form-control" style="width:180px;" 
+                           id="varName-${idx}">
+                    <input type="number" placeholder="Stock" value="${vals.stock || 0}" 
+                           class="form-control" style="width:90px;" id="varStock-${idx}" min="0">
+                    <input type="number" placeholder="Price" value="${vals.price || ''}" 
+                           class="form-control" style="width:110px;" id="varPrice-${idx}" step="0.01">
                     <i class="fas fa-trash remove-variant" onclick="removeVariant(${idx})" style="margin-left:auto;"></i>
                 </div>
             </div>`;
         container.insertAdjacentHTML('beforeend', html);
     }
-    window.removeVariant = (idx) => document.getElementById(`variantRow-${idx}`)?.remove();
 
+    window.removeVariant = function(idx) {
+        const row = document.getElementById(`variantRow-${idx}`);
+        if (row) row.remove();
+    };
+
+    // Open add modal
     function openAddModal() {
-        document.getElementById('modalTitle').innerText = 'Add New Item';
+        document.getElementById('modalTitle').textContent = 'Add New Item';
         document.getElementById('itemForm').reset();
         document.getElementById('itemId').value = '';
-        document.getElementById('itemSKU').value = 'SKU-'+Date.now().toString().slice(-8);
-        document.getElementById('variantsContainer').innerHTML = ''; // clear
+        document.getElementById('itemSKU').value = 'SKU-' + Date.now().toString().slice(-8);
+        document.getElementById('variantsContainer').innerHTML = '';
         variantIndex = 0;
         openModal();
     }
 
-    async function editItem(id) {
-        const item = inventoryItems.find(i=>i.id===id);
+    // Edit item
+    async function editItem(itemId) {
+        const item = inventoryItems.find(i => i.id === itemId);
         if (!item) return;
-        document.getElementById('modalTitle').innerText = 'Edit Item';
+
+        document.getElementById('modalTitle').textContent = 'Edit Item';
         document.getElementById('itemId').value = item.id;
         document.getElementById('itemName').value = item.name;
         document.getElementById('itemCategory').value = item.category;
@@ -607,95 +740,147 @@
         document.getElementById('currentStock').value = item.currentStock;
         document.getElementById('minStock').value = item.minStock;
         document.getElementById('itemDescription').value = item.description || '';
-        // load variants
+        
+        // Load variants
         document.getElementById('variantsContainer').innerHTML = '';
         variantIndex = 0;
         if (item.variants && item.variants.length) {
-            item.variants.forEach(v => addVariantField({name:v.name, stock:v.stock, price:v.price}));
+            item.variants.forEach(v => addVariantField({ name: v.name, stock: v.stock, price: v.price }));
         }
+        
         openModal();
     }
 
-    // Save item with variants
+    // Save item
     async function saveItem() {
         try {
-            const id = document.getElementById('itemId').value;
-            const baseSku = document.getElementById('itemSKU').value || ('SKU-'+Date.now().toString().slice(-8));
+            if (!currentUser) {
+                showToast('Please wait for authentication', 'error');
+                return;
+            }
+
+            const itemId = document.getElementById('itemId').value;
+            const itemName = document.getElementById('itemName').value.trim();
+            const itemCategory = document.getElementById('itemCategory').value;
+
+            if (!itemName || !itemCategory) {
+                showToast('Please fill all required fields', 'error');
+                return;
+            }
+
             const itemData = {
-                name: document.getElementById('itemName').value,
-                category: document.getElementById('itemCategory').value,
-                sku: baseSku,
+                name: itemName,
+                category: itemCategory,
+                sku: document.getElementById('itemSKU').value || `SKU-${Date.now().toString().slice(-8)}`,
                 sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
                 costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
                 currentStock: parseInt(document.getElementById('currentStock').value) || 0,
                 minStock: parseInt(document.getElementById('minStock').value) || 5,
-                description: document.getElementById('itemDescription').value,
+                description: document.getElementById('itemDescription').value || '',
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
-            if (!itemData.name || !itemData.category) { showToast('Name & category required','error'); return; }
 
-            showToast('Saving...','info');
-            const invRef = db.collection('users').doc(currentUser.uid).collection('inventory');
+            showToast('Saving item...', 'info');
+
+            const inventoryRef = db.collection('users').doc(currentUser.uid).collection('inventory');
             let itemRef;
-            if (id) {
-                await invRef.doc(id).update(itemData);
-                itemRef = invRef.doc(id);
+
+            if (itemId) {
+                // Update existing item
+                itemRef = inventoryRef.doc(itemId);
+                await itemRef.update(itemData);
+                showToast('Item updated successfully!', 'success');
             } else {
+                // Add new item
                 itemData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                const docRef = await invRef.add(itemData);
-                itemRef = docRef;
+                itemRef = await inventoryRef.add(itemData);
+                showToast('Item added successfully!', 'success');
             }
 
-            // Handle variants: delete existing then add new
+            // Handle variants
             const variantCollection = itemRef.collection('variants');
-            const existing = await variantCollection.get();
-            existing.forEach(doc => doc.ref.delete());
+            
+            // Delete existing variants
+            const existingVariants = await variantCollection.get();
+            const deletePromises = existingVariants.docs.map(doc => doc.ref.delete());
+            await Promise.all(deletePromises);
 
-            // collect variants from UI
-            for (let i=0; i<variantIndex; i++) {
+            // Add new variants
+            const variantPromises = [];
+            for (let i = 0; i < variantIndex; i++) {
                 const nameInput = document.getElementById(`varName-${i}`);
                 if (!nameInput) continue;
-                const name = nameInput.value.trim();
-                if (!name) continue;
-                const stock = parseInt(document.getElementById(`varStock-${i}`)?.value) || 0;
-                const price = parseFloat(document.getElementById(`varPrice-${i}`)?.value) || itemData.sellingPrice;
-                await variantCollection.add({ name, stock, price });
-            }
+                
+                const variantName = nameInput.value.trim();
+                if (!variantName) continue;
 
-            // after variant change, update master stock to sum of variant stocks (optional)
-            const newVariantsSnap = await variantCollection.get();
-            const totalStock = newVariantsSnap.docs.reduce((acc, v) => acc + (v.data().stock || 0), 0);
-            await itemRef.update({ currentStock: totalStock });
+                const variantData = {
+                    name: variantName,
+                    stock: parseInt(document.getElementById(`varStock-${i}`)?.value) || 0,
+                    price: parseFloat(document.getElementById(`varPrice-${i}`)?.value) || itemData.sellingPrice
+                };
+                
+                variantPromises.push(variantCollection.add(variantData));
+            }
+            
+            await Promise.all(variantPromises);
+
+            // Update total stock based on variants
+            const newVariants = await variantCollection.get();
+            const totalStock = newVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+            
+            if (totalStock > 0) {
+                await itemRef.update({ currentStock: totalStock });
+            }
 
             closeModal();
             await loadInventory();
-            showToast('Item saved with variants','success');
-        } catch (e) { console.error(e); showToast('Error saving','error'); }
+            
+        } catch (error) {
+            console.error('Error saving item:', error);
+            showToast('Failed to save item: ' + error.message, 'error');
+        }
     }
 
-    // Stock transaction modal
-    function openTransactionModal() { 
-        populateItemSelect(); 
+    // Stock transaction functions
+    function openTransactionModal() {
+        populateItemSelect();
         document.getElementById('txnForm').reset();
         document.getElementById('txnVariantGroup').style.display = 'none';
         document.getElementById('transactionModal').style.display = 'flex';
     }
-    function closeTransactionModal() { document.getElementById('transactionModal').style.display = 'none'; }
+
+    function closeTransactionModal() {
+        document.getElementById('transactionModal').style.display = 'none';
+    }
 
     function populateItemSelect() {
-        const sel = document.getElementById('txnItemSelect');
-        sel.innerHTML = '<option value="">-- choose item --</option>' + inventoryItems.map(i => `<option value="${i.id}">${i.name} (${i.sku})</option>`).join('');
-        sel.onchange = function() { showVariantsForTxn(this.value); };
+        const select = document.getElementById('txnItemSelect');
+        select.innerHTML = '<option value="">-- Choose an item --</option>';
+        
+        inventoryItems.forEach(item => {
+            select.innerHTML += `<option value="${item.id}">${item.name} (Stock: ${item.currentStock})</option>`;
+        });
+        
+        select.onchange = function() {
+            showVariantsForTxn(this.value);
+        };
     }
+
     function showVariantsForTxn(itemId) {
-        const item = inventoryItems.find(i=>i.id===itemId);
+        const item = inventoryItems.find(i => i.id === itemId);
         const variantGroup = document.getElementById('txnVariantGroup');
-        const varSelect = document.getElementById('txnVariantSelect');
-        if (item && item.variants && item.variants.length) {
-            varSelect.innerHTML = '<option value="">-- all (base stock) --</option>' + 
-                item.variants.map(v => `<option value="${v.id}" data-stock="${v.stock}">${v.name} (stock:${v.stock})</option>`).join('');
+        const variantSelect = document.getElementById('txnVariantSelect');
+        
+        if (item && item.variants && item.variants.length > 0) {
+            variantSelect.innerHTML = '<option value="">-- All (base stock) --</option>' +
+                item.variants.map(v => 
+                    `<option value="${v.id}">${v.name} (Stock: ${v.stock})</option>`
+                ).join('');
             variantGroup.style.display = 'block';
-        } else { variantGroup.style.display = 'none'; }
+        } else {
+            variantGroup.style.display = 'none';
+        }
     }
 
     function openTxnForItem(itemId) {
@@ -707,106 +892,238 @@
     }
 
     async function processTransaction() {
-        const itemId = document.getElementById('txnItemSelect').value;
-        if (!itemId) { showToast('Select item','error'); return; }
-        const type = document.getElementById('txnType').value;
-        let qty = parseInt(document.getElementById('txnQty').value);
-        if (isNaN(qty) || qty<=0) { showToast('Valid quantity','error'); return; }
-        const note = document.getElementById('txnNote').value || '';
-        const variantId = document.getElementById('txnVariantSelect').value; // optional
-
-        const item = inventoryItems.find(i=>i.id===itemId);
-        if (!item) return;
-
         try {
+            const itemId = document.getElementById('txnItemSelect').value;
+            if (!itemId) {
+                showToast('Please select an item', 'error');
+                return;
+            }
+
+            const type = document.getElementById('txnType').value;
+            const qty = parseInt(document.getElementById('txnQty').value);
+            if (isNaN(qty) || qty <= 0) {
+                showToast('Please enter a valid quantity', 'error');
+                return;
+            }
+
+            const note = document.getElementById('txnNote').value || '';
+            const variantId = document.getElementById('txnVariantSelect').value;
+
+            showToast('Processing transaction...', 'info');
+
             const itemRef = db.collection('users').doc(currentUser.uid).collection('inventory').doc(itemId);
-            let newStock;
-
+            
             if (variantId) {
-                // variant specific transaction
-                const varRef = itemRef.collection('variants').doc(variantId);
-                const varDoc = await varRef.get();
-                if (!varDoc.exists) { showToast('Variant not found','error'); return; }
-                let currentVarStock = varDoc.data().stock || 0;
-                if (type === 'add') newStock = currentVarStock + qty;
-                else if (type === 'remove') { if (currentVarStock < qty) { showToast('Not enough stock','error'); return; } newStock = currentVarStock - qty; }
-                else newStock = qty; // adjust
-                await varRef.update({ stock: newStock });
+                // Update variant stock
+                const variantRef = itemRef.collection('variants').doc(variantId);
+                const variantDoc = await variantRef.get();
+                
+                if (!variantDoc.exists) {
+                    showToast('Variant not found', 'error');
+                    return;
+                }
 
-                // recalc total item stock
+                const currentStock = variantDoc.data().stock || 0;
+                let newStock = currentStock;
+
+                if (type === 'add') {
+                    newStock = currentStock + qty;
+                } else if (type === 'remove') {
+                    if (currentStock < qty) {
+                        showToast('Insufficient stock', 'error');
+                        return;
+                    }
+                    newStock = currentStock - qty;
+                } else if (type === 'adjust') {
+                    newStock = qty;
+                }
+
+                await variantRef.update({ stock: newStock });
+
+                // Update total item stock
                 const allVariants = await itemRef.collection('variants').get();
-                const total = allVariants.docs.reduce((acc, v) => acc + (v.data().stock || 0), 0);
-                await itemRef.update({ currentStock: total });
+                const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
+                await itemRef.update({ currentStock: totalStock });
+
             } else {
-                // base item stock
+                // Update base item stock
                 const itemDoc = await itemRef.get();
-                let current = itemDoc.data().currentStock || 0;
-                if (type === 'add') newStock = current + qty;
-                else if (type === 'remove') { if (current < qty) { showToast('Not enough stock','error'); return; } newStock = current - qty; }
-                else newStock = qty;
+                const currentStock = itemDoc.data().currentStock || 0;
+                let newStock = currentStock;
+
+                if (type === 'add') {
+                    newStock = currentStock + qty;
+                } else if (type === 'remove') {
+                    if (currentStock < qty) {
+                        showToast('Insufficient stock', 'error');
+                        return;
+                    }
+                    newStock = currentStock - qty;
+                } else if (type === 'adjust') {
+                    newStock = qty;
+                }
+
                 await itemRef.update({ currentStock: newStock });
             }
 
-            // Record transaction in subcollection
-            const txnCol = itemRef.collection('transactions');
-            await txnCol.add({
-                type, qty, reason: note, variantId: variantId || null,
+            // Record transaction
+            await itemRef.collection('transactions').add({
+                type: type,
+                qty: qty,
+                reason: note,
+                variantId: variantId || null,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             closeTransactionModal();
             await loadInventory();
-            showToast('Stock movement recorded','success');
-        } catch (e) { console.error(e); showToast('Transaction failed','error'); }
+            showToast('Transaction recorded successfully', 'success');
+
+        } catch (error) {
+            console.error('Transaction error:', error);
+            showToast('Transaction failed: ' + error.message, 'error');
+        }
     }
 
-    // Delete
-    function openDeleteModal(id) { deleteItemId = id; document.getElementById('deleteModal').style.display = 'flex'; }
-    function closeDeleteModal() { deleteItemId = null; document.getElementById('deleteModal').style.display = 'none'; }
+    // Delete functions
+    function openDeleteModal(itemId) {
+        deleteItemId = itemId;
+        document.getElementById('deleteModal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        deleteItemId = null;
+        document.getElementById('deleteModal').style.display = 'none';
+    }
+
     async function confirmDelete() {
         if (!deleteItemId) return;
+
         try {
-            await db.collection('users').doc(currentUser.uid).collection('inventory').doc(deleteItemId).delete();
-            showToast('Deleted','success'); closeDeleteModal(); await loadInventory();
-        } catch(e) { showToast('Error','error'); }
+            showToast('Deleting item...', 'info');
+            
+            const itemRef = db.collection('users').doc(currentUser.uid).collection('inventory').doc(deleteItemId);
+            
+            // Delete variants subcollection
+            const variants = await itemRef.collection('variants').get();
+            const variantDeletes = variants.docs.map(doc => doc.ref.delete());
+            await Promise.all(variantDeletes);
+            
+            // Delete transactions subcollection
+            const transactions = await itemRef.collection('transactions').get();
+            const txnDeletes = transactions.docs.map(doc => doc.ref.delete());
+            await Promise.all(txnDeletes);
+            
+            // Delete main item
+            await itemRef.delete();
+            
+            showToast('Item deleted successfully!', 'success');
+            closeDeleteModal();
+            await loadInventory();
+            
+        } catch (error) {
+            console.error('Error deleting item:', error);
+            showToast('Failed to delete item', 'error');
+        }
     }
 
-    // Export CSV with variants flattened (optional)
+    // Export inventory
     function exportInventory() {
-        let csv = 'Name,SKU,Category,TotalStock,VariantName,VariantStock,VariantPrice\n';
+        if (inventoryItems.length === 0) {
+            showToast('No items to export', 'warning');
+            return;
+        }
+
+        let csv = 'Name,SKU,Category,Total Stock,Status,Default Price,Default Cost,Min Stock,Description\n';
+        
         inventoryItems.forEach(item => {
-            if (item.variants && item.variants.length) {
+            const status = getStockStatus(item.currentStock, item.minStock).text;
+            csv += `"${item.name}","${item.sku}","${item.category}",${item.currentStock},"${status}",` +
+                   `${item.sellingPrice},${item.costPrice},${item.minStock},"${item.description || ''}"\n`;
+            
+            // Add variant rows
+            if (item.variants && item.variants.length > 0) {
                 item.variants.forEach(v => {
-                    csv += `"${item.name}","${item.sku}","${item.category}",${item.currentStock},"${v.name}",${v.stock},${v.price}\n`;
+                    csv += `"  → ${v.name} (variant)","${item.sku}-${v.name}",,${v.stock || 0},,${v.price || item.sellingPrice},,,,\n`;
                 });
-            } else {
-                csv += `"${item.name}","${item.sku}","${item.category}",${item.currentStock},"-",0,0\n`;
             }
         });
-        const blob = new Blob([csv],{type:'text/csv'}); const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = 'inventory_advanced.csv'; a.click();
-        showToast('Exported','success');
+
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `inventory_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        showToast('Inventory exported successfully!', 'success');
     }
 
     // Modal controls
-    function openModal() { document.getElementById('itemModal').style.display = 'flex'; }
-    function closeModal() { document.getElementById('itemModal').style.display = 'none'; }
+    function openModal() {
+        document.getElementById('itemModal').style.display = 'flex';
+    }
 
-    // Toast
-    function showToast(msg,type='info') {
-        const c = document.getElementById('toastContainer');
-        const t = document.createElement('div');
-        t.className = `toast ${type}`;
-        t.innerHTML = `<i class="fas fa-${type==='success'?'check-circle':type==='error'?'exclamation-circle':'info-circle'}"></i><div>${msg}</div>`;
-        c.appendChild(t);
-        setTimeout(()=>t.remove(),4000);
+    function closeModal() {
+        document.getElementById('itemModal').style.display = 'none';
+    }
+
+    // Toast notification
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        let icon = 'info-circle';
+        if (type === 'success') icon = 'check-circle';
+        if (type === 'error') icon = 'exclamation-circle';
+        if (type === 'warning') icon = 'exclamation-triangle';
+        
+        toast.innerHTML = `
+            <i class="fas fa-${icon}"></i>
+            <div style="flex:1;">${message}</div>
+            <button class="close-modal" style="background:none; color:#666;" onclick="this.parentElement.remove()">&times;</button>
+        `;
+        
+        container.appendChild(toast);
+        setTimeout(() => {
+            if (toast.parentElement) toast.remove();
+        }, 5000);
     }
 
     // Event listeners
     document.getElementById('searchInput').addEventListener('input', applyFilters);
     document.getElementById('categoryFilter').addEventListener('change', applyFilters);
     document.getElementById('stockFilter').addEventListener('change', applyFilters);
-    window.onclick = e => { if (e.target.classList.contains('modal-overlay')) e.target.style.display='none'; };
+
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        if (event.target.classList.contains('modal-overlay')) {
+            event.target.style.display = 'none';
+        }
+    };
+
+    // Make functions global
+    window.openAddModal = openAddModal;
+    window.editItem = editItem;
+    window.saveItem = saveItem;
+    window.openDeleteModal = openDeleteModal;
+    window.closeDeleteModal = closeDeleteModal;
+    window.confirmDelete = confirmDelete;
+    window.exportInventory = exportInventory;
+    window.openTransactionModal = openTransactionModal;
+    window.closeTransactionModal = closeTransactionModal;
+    window.processTransaction = processTransaction;
+    window.openTxnForItem = openTxnForItem;
+    window.addVariantField = addVariantField;
+    window.closeModal = closeModal;
+    window.openModal = openModal;
+    window.applyFilters = applyFilters;
+    window.goToPage = goToPage;
+    window.removeVariant = removeVariant;
 </script>
 </body>
 </html>
