@@ -11,6 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* Keep all your existing styles - they're perfect! */
         * {
             margin: 0;
             padding: 0;
@@ -45,26 +46,25 @@
             margin: 0 auto;
         }
 
-        /* Business Selection Modal - Always show first */
-       /* Update the business-modal CSS */
-.business-modal {
-    display: none; /* Changed from flex to none by default */
-    position: fixed;
-    z-index: 2000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.7);
-    backdrop-filter: blur(10px);
-    overflow-y: auto;
-    align-items: center;
-    justify-content: center;
-}
+        /* Business Selection Modal */
+        .business-modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            overflow-y: auto;
+            align-items: center;
+            justify-content: center;
+        }
 
-.business-modal.active {
-    display: flex !important; /* Show when active class is present */
-}
+        .business-modal.active {
+            display: flex !important;
+        }
 
         .business-modal-content {
             background: white;
@@ -338,7 +338,7 @@
             background: #e0e0e0;
         }
 
-        /* Branch Selector - Hidden initially */
+        /* Branch Selector */
         .branch-selector {
             background: white;
             border-radius: 15px;
@@ -683,6 +683,7 @@
         .badge-success { background: var(--gradient-success); }
         .badge-warning { background: var(--gradient-warning); }
         .badge-info { background: var(--gradient-primary); }
+        .badge-danger { background: var(--gradient-danger); }
 
         /* Loading */
         .loading {
@@ -879,10 +880,10 @@
                 <p id="dashboardSubtitle">Select a business to get started</p>
             </div>
             <div class="header-actions">
-                <a href="inventory.html" class="action-btn success">
+                <a href="inventory.html" class="action-btn success" onclick="return setBusinessContext('inventory')">
                     <i class="fas fa-plus"></i> Add Item
                 </a>
-                <a href="sales.html" class="action-btn warning">
+                <a href="sales.html" class="action-btn warning" onclick="return setBusinessContext('sales')">
                     <i class="fas fa-shopping-cart"></i> New Sale
                 </a>
                 <button class="action-btn" onclick="refreshDashboard()">
@@ -961,7 +962,7 @@
             <div class="table-card">
                 <div class="table-header">
                     <h3><i class="fas fa-history"></i> Recent Sales</h3>
-                    <a href="sales.html" class="view-btn">
+                    <a href="sales.html" class="view-btn" onclick="return setBusinessContext('sales')">
                         <i class="fas fa-arrow-right"></i> View All
                     </a>
                 </div>
@@ -1003,7 +1004,7 @@
             <div class="table-card">
                 <div class="table-header">
                     <h3><i class="fas fa-exclamation-triangle"></i> Low Stock Alert</h3>
-                    <a href="inventory.html" class="view-btn">
+                    <a href="inventory.html" class="view-btn" onclick="return setBusinessContext('inventory')">
                         <i class="fas fa-arrow-right"></i> Manage
                     </a>
                 </div>
@@ -1078,11 +1079,21 @@
     let startDate = null;
     let endDate = null;
 
+    // Real-time listeners
+    let unsubscribeSales = null;
+    let unsubscribeInventory = null;
+    let unsubscribeCustomers = null;
+    let unsubscribeSuppliers = null;
+
     // Check authentication
     auth.onAuthStateChanged((user) => {
         if (user) {
             currentUser = user;
             console.log("User logged in:", user.uid);
+            
+            // Check for saved store in localStorage
+            const savedStoreId = localStorage.getItem(`lastStore_${user.uid}`);
+            const savedBranch = localStorage.getItem(`lastBranch_${user.uid}`);
             
             // Show modal immediately
             const modal = document.getElementById('businessModal');
@@ -1090,18 +1101,18 @@
             modal.classList.add('active');
             
             // Load stores
-            loadUserStores();
+            loadUserStores(savedStoreId, savedBranch);
         } else {
             window.location.href = 'index.html';
         }
     });
 
     // Load user's stores
-    async function loadUserStores() {
+    async function loadUserStores(savedStoreId = null, savedBranch = null) {
         try {
             console.log("Loading stores for user:", currentUser.uid);
             
-            // First, check if user document exists
+            // Check if user document exists
             const userDoc = await db.collection('users').doc(currentUser.uid).get();
             
             if (!userDoc.exists) {
@@ -1114,7 +1125,7 @@
                 console.log("User document created");
             }
             
-            // Now load stores
+            // Load stores
             const snapshot = await db.collection('users')
                 .doc(currentUser.uid)
                 .collection('stores')
@@ -1139,6 +1150,15 @@
                 
                 console.log("Stores loaded:", stores);
                 displayStores();
+                
+                // Auto-select saved store if exists
+                if (savedStoreId) {
+                    const savedStore = stores.find(s => s.id === savedStoreId);
+                    if (savedStore) {
+                        selectStore(savedStore.id);
+                        currentBranch = savedBranch || null;
+                    }
+                }
             }
         } catch (error) {
             console.error('Error loading stores:', error);
@@ -1376,6 +1396,9 @@
             // Hide modal and show dashboard
             hideBusinessModal();
             
+            // Set up real-time listeners
+            setupRealtimeListeners();
+            
             // Load dashboard data
             await loadDashboardData();
             updateBranchSelector();
@@ -1388,95 +1411,256 @@
         }
     }
 
-// Select current store and continue - COMPLETELY FIXED VERSION
-function selectCurrentStore() {
-    console.log("Select current store clicked", currentStore);
-    
-    if (!currentStore) {
-        showToast('Please select a business first', 'error');
-        return;
+    // Set up real-time listeners for automatic updates
+    function setupRealtimeListeners() {
+        if (!currentUser || !currentStore) return;
+        
+        console.log("Setting up real-time listeners...");
+        
+        // Unsubscribe from previous listeners
+        if (unsubscribeSales) unsubscribeSales();
+        if (unsubscribeInventory) unsubscribeInventory();
+        if (unsubscribeCustomers) unsubscribeCustomers();
+        if (unsubscribeSuppliers) unsubscribeSuppliers();
+        
+        // Sales listener
+        let salesQuery = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('stores')
+            .doc(currentStore.id)
+            .collection('sales')
+            .orderBy('date', 'desc')
+            .limit(50);
+            
+        if (currentBranch) {
+            salesQuery = salesQuery.where('branchId', '==', currentBranch);
+        }
+        
+        unsubscribeSales = salesQuery.onSnapshot((snapshot) => {
+            console.log("Sales updated in real-time:", snapshot.size);
+            salesData = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    ...data,
+                    date: data.date?.toDate() || new Date()
+                };
+            });
+            
+            // Apply date filters and update dashboard
+            applyFiltersAndUpdate();
+        }, (error) => {
+            console.error("Sales listener error:", error);
+        });
+        
+        // Inventory listener
+        let inventoryQuery = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('stores')
+            .doc(currentStore.id)
+            .collection('inventory');
+            
+        if (currentBranch) {
+            inventoryQuery = inventoryQuery.where('branchId', '==', currentBranch);
+        }
+        
+        unsubscribeInventory = inventoryQuery.onSnapshot((snapshot) => {
+            console.log("Inventory updated in real-time:", snapshot.size);
+            inventoryItems = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            
+            // Update low stock table
+            updateLowStockTable();
+        }, (error) => {
+            console.error("Inventory listener error:", error);
+        });
+        
+        // Customers listener
+        const customersQuery = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('stores')
+            .doc(currentStore.id)
+            .collection('customers')
+            .orderBy('createdAt', 'desc')
+            .limit(20);
+            
+        unsubscribeCustomers = customersQuery.onSnapshot((snapshot) => {
+            console.log("Customers updated:", snapshot.size);
+            customers.clear();
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                customers.set(data.name || doc.id, {
+                    orders: data.totalPurchases ? 1 : 0,
+                    total: data.totalPurchases || 0
+                });
+            });
+            
+            // Update top customers table
+            updateTopCustomersTable();
+            document.getElementById('totalCustomers').textContent = customers.size;
+        }, (error) => {
+            console.error("Customers listener error:", error);
+        });
+        
+        // Suppliers listener
+        const suppliersQuery = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('stores')
+            .doc(currentStore.id)
+            .collection('suppliers')
+            .orderBy('createdAt', 'desc')
+            .limit(20);
+            
+        unsubscribeSuppliers = suppliersQuery.onSnapshot((snapshot) => {
+            console.log("Suppliers updated:", snapshot.size);
+            vendors.clear();
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                const payments = data.payments || [];
+                const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+                const lastPayment = payments.length > 0 ? 
+                    payments.sort((a, b) => new Date(b.date) - new Date(a.date))[0] : null;
+                    
+                vendors.set(data.name || doc.id, {
+                    items: payments.length,
+                    amount: totalPaid,
+                    date: lastPayment ? new Date(lastPayment.date).toLocaleDateString() : 'Never'
+                });
+            });
+            
+            // Update recent vendors table
+            updateRecentVendorsTable();
+            document.getElementById('vendorsCount').textContent = `${vendors.size} vendors`;
+        }, (error) => {
+            console.error("Suppliers listener error:", error);
+        });
     }
-    
-    if (!currentUser) {
-        showToast('Please login first', 'error');
-        return;
-    }
-    
-    // Save to localStorage
-    localStorage.setItem(`lastStore_${currentUser.uid}`, currentStore.id);
-    if (currentBranch) {
-        localStorage.setItem(`lastBranch_${currentUser.uid}`, currentBranch);
-    }
-    
-    // CRITICAL FIX: Hide modal using multiple methods
-    const modal = document.getElementById('businessModal');
-    modal.style.display = 'none';
-    modal.classList.remove('active');
-    
-    // Also remove any inline styles that might keep it visible
-    modal.removeAttribute('style');
-    modal.style.display = 'none';
-    
-    // Show branch selector
-    const branchSelector = document.getElementById('branchSelector');
-    branchSelector.style.display = 'flex';
-    branchSelector.style.visibility = 'visible';
-    
-    // Load dashboard data
-    loadDashboardData();
-    updateBranchSelector();
-    
-    showToast(`Welcome to ${currentStore.name}!`, 'success');
-    
-    console.log("Modal hidden, dashboard should be visible");
-}
 
-   // Hide business modal - COMPLETELY FIXED
-function hideBusinessModal() {
-    const modal = document.getElementById('businessModal');
-    
-    // Multiple ways to ensure modal is hidden
-    modal.style.display = 'none';
-    modal.classList.remove('active');
-    
-    // Remove any inline styles
-    modal.removeAttribute('style');
-    modal.style.display = 'none';
-    
-    // Show branch selector
-    const branchSelector = document.getElementById('branchSelector');
-    branchSelector.style.display = 'flex';
-    branchSelector.style.visibility = 'visible';
-    
-    console.log("hideBusinessModal called - modal hidden");
-}
+    // Apply filters and update dashboard
+    function applyFiltersAndUpdate() {
+        // Filter sales by date
+        let filteredSales = salesData;
+        if (startDate) {
+            filteredSales = filteredSales.filter(s => s.date >= startDate);
+        }
+        if (endDate) {
+            filteredSales = filteredSales.filter(s => s.date <= endDate);
+        }
+        
+        // Process and update
+        processData(filteredSales);
+        updateCharts(filteredSales);
+        updateRecentSalesTable(filteredSales);
+    }
+
+    // Select current store and continue
+    function selectCurrentStore() {
+        console.log("Select current store clicked", currentStore);
+        
+        if (!currentStore) {
+            showToast('Please select a business first', 'error');
+            return;
+        }
+        
+        if (!currentUser) {
+            showToast('Please login first', 'error');
+            return;
+        }
+        
+        // Save to localStorage
+        localStorage.setItem(`lastStore_${currentUser.uid}`, currentStore.id);
+        if (currentBranch) {
+            localStorage.setItem(`lastBranch_${currentUser.uid}`, currentBranch);
+        }
+        
+        // Hide modal
+        const modal = document.getElementById('businessModal');
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+        modal.removeAttribute('style');
+        modal.style.display = 'none';
+        
+        // Show branch selector
+        const branchSelector = document.getElementById('branchSelector');
+        branchSelector.style.display = 'flex';
+        branchSelector.style.visibility = 'visible';
+        
+        // Set up real-time listeners
+        setupRealtimeListeners();
+        
+        // Load dashboard data
+        loadDashboardData();
+        updateBranchSelector();
+        
+        showToast(`Welcome to ${currentStore.name}!`, 'success');
+        
+        console.log("Modal hidden, dashboard should be visible");
+    }
+
+    // Hide business modal
+    function hideBusinessModal() {
+        const modal = document.getElementById('businessModal');
+        
+        // Multiple ways to ensure modal is hidden
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+        
+        // Remove any inline styles
+        modal.removeAttribute('style');
+        modal.style.display = 'none';
+        
+        // Show branch selector
+        const branchSelector = document.getElementById('branchSelector');
+        branchSelector.style.display = 'flex';
+        branchSelector.style.visibility = 'visible';
+        
+        console.log("hideBusinessModal called - modal hidden");
+    }
 
     // Show business modal
-   // Show business modal
-function showBusinessModal() {
-    console.log("Showing business modal");
-    
-    // Reset modal to show store grid
-    document.getElementById('addStoreForm').classList.remove('active');
-    document.getElementById('storeGrid').style.display = 'grid';
-    
-    const footer = document.getElementById('modalFooter');
-    if (footer) {
-        footer.style.display = 'flex';
+    function showBusinessModal() {
+        console.log("Showing business modal");
+        
+        // Reset modal to show store grid
+        document.getElementById('addStoreForm').classList.remove('active');
+        document.getElementById('storeGrid').style.display = 'grid';
+        
+        const footer = document.getElementById('modalFooter');
+        if (footer) {
+            footer.style.display = 'flex';
+        }
+        
+        loadUserStores(); // Reload stores
+        
+        // Show modal
+        const modal = document.getElementById('businessModal');
+        modal.style.display = 'flex';
+        modal.classList.add('active');
+        
+        // Hide branch selector
+        const branchSelector = document.getElementById('branchSelector');
+        branchSelector.style.display = 'none';
+        branchSelector.style.visibility = 'hidden';
     }
-    
-    loadUserStores(); // Reload stores
-    
-    // Show modal
-    const modal = document.getElementById('businessModal');
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-    
-    // Hide branch selector
-    const branchSelector = document.getElementById('branchSelector');
-    branchSelector.style.display = 'none';
-    branchSelector.style.visibility = 'hidden';
-}
+
+    // Set business context before navigating to other pages
+    function setBusinessContext(page) {
+        if (!currentStore) {
+            showToast('Please select a business first', 'error');
+            return false;
+        }
+        
+        // Save current context to localStorage for other pages to use
+        localStorage.setItem(`currentStore_${currentUser.uid}`, JSON.stringify({
+            id: currentStore.id,
+            name: currentStore.name,
+            branch: currentBranch
+        }));
+        
+        return true; // Allow navigation
+    }
 
     // Update branch selector
     function updateBranchSelector() {
@@ -1513,6 +1697,9 @@ function showBusinessModal() {
         } else {
             localStorage.removeItem(`lastBranch_${currentUser.uid}`);
         }
+        
+        // Reset listeners with new branch
+        setupRealtimeListeners();
         loadDashboardData();
         
         // Update subtitle
@@ -1558,13 +1745,13 @@ function showBusinessModal() {
                 endDate = null;
                 startInput.value = '';
                 endInput.value = '';
-                loadDashboardData();
+                applyFiltersAndUpdate();
                 return;
         }
         
         startInput.value = startDate.toISOString().split('T')[0];
         endInput.value = endDate.toISOString().split('T')[0];
-        loadDashboardData();
+        applyFiltersAndUpdate();
     }
 
     // Apply date filter
@@ -1575,10 +1762,10 @@ function showBusinessModal() {
         // Remove active class from quick filters
         document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
         
-        loadDashboardData();
+        applyFiltersAndUpdate();
     }
 
-    // Load dashboard data
+    // Load dashboard data (initial load)
     async function loadDashboardData() {
         if (!currentStore || !currentUser) return;
         
@@ -1590,7 +1777,8 @@ function showBusinessModal() {
                 .doc(currentUser.uid)
                 .collection('stores')
                 .doc(currentStore.id)
-                .collection('sales');
+                .collection('sales')
+                .orderBy('date', 'desc');
             
             let inventoryQuery = db.collection('users')
                 .doc(currentUser.uid)
@@ -1616,15 +1804,6 @@ function showBusinessModal() {
             
             console.log("Sales loaded:", salesData.length);
             
-            // Filter by date
-            let filteredSales = salesData;
-            if (startDate) {
-                filteredSales = filteredSales.filter(s => s.date >= startDate);
-            }
-            if (endDate) {
-                filteredSales = filteredSales.filter(s => s.date <= endDate);
-            }
-            
             // Load inventory
             const inventorySnapshot = await inventoryQuery.get();
             inventoryItems = inventorySnapshot.docs.map(doc => ({
@@ -1634,10 +1813,8 @@ function showBusinessModal() {
             
             console.log("Inventory loaded:", inventoryItems.length);
             
-            // Process data
-            processData(filteredSales);
-            updateCharts(filteredSales);
-            updateTables();
+            // Apply filters and update
+            applyFiltersAndUpdate();
             
         } catch (error) {
             console.error('Error loading dashboard data:', error);
@@ -1650,8 +1827,6 @@ function showBusinessModal() {
         let totalSales = 0;
         let totalCost = 0;
         let totalTax = 0;
-        customers.clear();
-        vendors.clear();
         
         sales.forEach(sale => {
             totalSales += sale.total || 0;
@@ -1661,24 +1836,7 @@ function showBusinessModal() {
             if (sale.items) {
                 sale.items.forEach(item => {
                     totalCost += (item.cost || 0) * (item.quantity || 0);
-                    
-                    // Track vendors if available
-                    if (item.vendor) {
-                        const vendor = vendors.get(item.vendor) || { items: 0, amount: 0, date: sale.date };
-                        vendor.items += item.quantity || 0;
-                        vendor.amount += (item.cost || 0) * (item.quantity || 0);
-                        vendor.date = sale.date.toLocaleDateString();
-                        vendors.set(item.vendor, vendor);
-                    }
                 });
-            }
-            
-            // Track customers
-            if (sale.customerName) {
-                const customer = customers.get(sale.customerName) || { orders: 0, total: 0 };
-                customer.orders++;
-                customer.total += sale.total || 0;
-                customers.set(sale.customerName, customer);
             }
         });
         
@@ -1693,8 +1851,6 @@ function showBusinessModal() {
         document.getElementById('profitMargin').textContent = `${profitMargin}% margin`;
         document.getElementById('totalTax').textContent = `₹${totalTax.toFixed(2)}`;
         document.getElementById('taxRate').textContent = `${avgTaxRate}% avg`;
-        document.getElementById('totalCustomers').textContent = customers.size;
-        document.getElementById('vendorsCount').textContent = `${vendors.size} vendors`;
     }
 
     // Update charts
@@ -1786,32 +1942,36 @@ function showBusinessModal() {
         });
     }
 
-    // Update tables
-    function updateTables() {
-        // Recent sales
-        const recentSales = salesData.slice(0, 5);
+    // Update recent sales table
+    function updateRecentSalesTable(sales) {
+        const recentSales = sales.slice(0, 5);
+        const tbody = document.getElementById('recentSalesTable');
+        
         if (recentSales.length === 0) {
-            document.getElementById('recentSalesTable').innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No sales yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No sales yet</td></tr>';
         } else {
-            document.getElementById('recentSalesTable').innerHTML = recentSales.map(sale => `
+            tbody.innerHTML = recentSales.map(sale => `
                 <tr>
                     <td><strong>${sale.invoiceNumber || 'INV-' + sale.id.slice(-6)}</strong></td>
                     <td>${sale.customerName || 'Walk-in Customer'}</td>
                     <td>₹${(sale.total || 0).toFixed(2)}</td>
-                    <td><span class="badge badge-success">${sale.paymentMethod || 'Cash'}</span></td>
+                    <td><span class="badge badge-${sale.paymentStatus === 'paid' ? 'success' : sale.paymentStatus === 'partial' ? 'warning' : 'danger'}">${sale.paymentMethod || 'Cash'}</span></td>
                 </tr>
             `).join('');
         }
-        
-        // Top customers
+    }
+
+    // Update top customers table
+    function updateTopCustomersTable() {
+        const tbody = document.getElementById('topCustomersTable');
         const topCustomers = Array.from(customers.entries())
             .sort((a, b) => b[1].total - a[1].total)
             .slice(0, 5);
         
         if (topCustomers.length === 0) {
-            document.getElementById('topCustomersTable').innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 30px;">No customers yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 30px;">No customers yet</td></tr>';
         } else {
-            document.getElementById('topCustomersTable').innerHTML = topCustomers.map(([name, data]) => `
+            tbody.innerHTML = topCustomers.map(([name, data]) => `
                 <tr>
                     <td><strong>${name}</strong></td>
                     <td>${data.orders}</td>
@@ -1819,16 +1979,19 @@ function showBusinessModal() {
                 </tr>
             `).join('');
         }
-        
-        // Low stock items
+    }
+
+    // Update low stock table
+    function updateLowStockTable() {
+        const tbody = document.getElementById('lowStockTable');
         const lowStock = inventoryItems
             .filter(item => item.currentStock > 0 && item.currentStock <= (item.minStock || 5))
             .slice(0, 5);
         
         if (lowStock.length === 0) {
-            document.getElementById('lowStockTable').innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No low stock items</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No low stock items</td></tr>';
         } else {
-            document.getElementById('lowStockTable').innerHTML = lowStock.map(item => {
+            tbody.innerHTML = lowStock.map(item => {
                 const branch = currentStore.branches?.find(b => b.id === item.branchId);
                 return `
                     <tr>
@@ -1840,13 +2003,17 @@ function showBusinessModal() {
                 `;
             }).join('');
         }
-        
-        // Recent vendors
+    }
+
+    // Update recent vendors table
+    function updateRecentVendorsTable() {
+        const tbody = document.getElementById('recentVendorsTable');
         const recentVendors = Array.from(vendors.entries()).slice(0, 5);
+        
         if (recentVendors.length === 0) {
-            document.getElementById('recentVendorsTable').innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No vendors yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px;">No vendors yet</td></tr>';
         } else {
-            document.getElementById('recentVendorsTable').innerHTML = recentVendors.map(([name, data]) => `
+            tbody.innerHTML = recentVendors.map(([name, data]) => `
                 <tr>
                     <td><strong>${name}</strong></td>
                     <td>${data.items}</td>
@@ -1910,6 +2077,14 @@ function showBusinessModal() {
     // Prevent modal from closing when clicking inside the modal content
     document.querySelector('.business-modal-content')?.addEventListener('click', function(event) {
         event.stopPropagation();
+    });
+
+    // Cleanup listeners on page unload
+    window.addEventListener('beforeunload', function() {
+        if (unsubscribeSales) unsubscribeSales();
+        if (unsubscribeInventory) unsubscribeInventory();
+        if (unsubscribeCustomers) unsubscribeCustomers();
+        if (unsubscribeSuppliers) unsubscribeSuppliers();
     });
 </script>
 </body>
