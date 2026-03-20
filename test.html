@@ -1558,6 +1558,15 @@ async function loadAllData() {
         updateDashboardStats();
         updatePurchaseSupplierFilter();
         updateSupplierDropdowns();
+        
+        // Render current tab
+        if (currentTab === 'inventory') renderInventoryTable();
+        else if (currentTab === 'suppliers') renderSuppliersTable();
+        else if (currentTab === 'payments') renderPaymentsTable();
+        else if (currentTab === 'purchases') renderPurchasesTable();
+        else if (currentTab === 'debt') renderDebtTable();
+        else if (currentTab === 'vouchers') renderVouchersTable();
+        
         showToast('Data loaded successfully', 'success');
     } catch (error) {
         console.error('Error loading data:', error);
@@ -1644,10 +1653,6 @@ async function loadInventory() {
         updateCategoryFilter();
         updateSupplierFilter();
         
-        if (currentTab === 'inventory') {
-            renderInventoryTable();
-        }
-        
     } catch (error) {
         console.error('Error loading inventory:', error);
         throw error;
@@ -1728,17 +1733,13 @@ async function loadSuppliers() {
             });
         }
         
-        if (currentTab === 'suppliers') {
-            renderSuppliersTable();
-        }
-        
     } catch (error) {
         console.error('Error loading suppliers:', error);
         throw error;
     }
 }
 
-// Replace the existing loadPayments function with this improved version
+// Load payments from Firebase
 async function loadPayments() {
     try {
         if (!currentUser) return;
@@ -1762,20 +1763,16 @@ async function loadPayments() {
             payments.push({
                 id: doc.id,
                 ...data,
-                date: dateObj // Store as Date object for consistent handling
+                date: dateObj
             });
         });
         
-        // If payments tab is active, render the table
-        if (currentTab === 'payments') {
-            renderPaymentsTable();
-        }
-        
     } catch (error) {
         console.error('Error loading payments:', error);
-        showToast('Error loading payments: ' + error.message, 'error');
+        throw error;
     }
 }
+
 // Load purchases
 async function loadPurchases() {
     try {
@@ -1788,10 +1785,6 @@ async function loadPurchases() {
             id: doc.id,
             ...doc.data()
         }));
-        
-        if (currentTab === 'purchases') {
-            renderPurchasesTable();
-        }
         
     } catch (error) {
         console.error('Error loading purchases:', error);
@@ -1810,10 +1803,6 @@ async function loadVouchers() {
             id: doc.id,
             ...doc.data()
         }));
-        
-        if (currentTab === 'vouchers') {
-            renderVouchersTable();
-        }
         
     } catch (error) {
         console.error('Error loading vouchers:', error);
@@ -1928,7 +1917,7 @@ function updateSupplierDropdowns() {
     updateTransactionItemDropdown();
 }
 
-// Replace your existing updateSupplierDebtInfo function
+// Update supplier debt info in payment modal
 async function updateSupplierDebtInfo() {
     const supplierId = document.getElementById('paymentSupplier').value;
     const debtInfo = document.getElementById('supplierDebtInfo');
@@ -1956,24 +1945,24 @@ async function updateSupplierDebtInfo() {
         progressBar.style.width = paidPercent + '%';
         debtInfo.style.display = 'block';
         
-        // Get pending purchases from supplier data
+        // Get pending purchases
         if (purchaseList) {
-            // First, try to get from supplier.purchases if available
             let pendingPurchases = [];
             
+            // First try from supplier.purchases
             if (supplier.purchases && supplier.purchases.length > 0) {
                 pendingPurchases = supplier.purchases.filter(p => p.pendingAmount > 0);
-            } else {
-                // If not available in supplier object, try to fetch from purchases array
-                pendingPurchases = purchases.filter(p => 
-                    p.supplierId === supplierId && 
-                    ((p.totalAmount || 0) - (p.paidAmount || 0)) > 0
-                ).map(p => ({
-                    id: p.id,
-                    pendingAmount: (p.totalAmount || 0) - (p.paidAmount || 0),
-                    date: p.date,
-                    invoice: p.invoice
-                }));
+            } 
+            // Then try from global purchases
+            else {
+                pendingPurchases = purchases
+                    .filter(p => p.supplierId === supplierId && ((p.totalAmount || 0) - (p.paidAmount || 0)) > 0)
+                    .map(p => ({
+                        id: p.id,
+                        pendingAmount: (p.totalAmount || 0) - (p.paidAmount || 0),
+                        date: p.date,
+                        invoice: p.invoice
+                    }));
             }
             
             if (pendingPurchases.length > 0) {
@@ -2006,7 +1995,7 @@ async function updateSupplierDebtInfo() {
                 purchaseList.innerHTML = html;
                 document.getElementById('pendingPurchasesGroup').style.display = 'block';
                 
-                // Add change event listeners to checkboxes
+                // Add change event listeners
                 document.querySelectorAll('#purchaseCheckboxList input[type="checkbox"]').forEach(cb => {
                     cb.addEventListener('change', updatePaymentAmountFromSelected);
                 });
@@ -2026,17 +2015,11 @@ function updatePaymentAmountFromSelected() {
         total += parseFloat(cb.getAttribute('data-amount') || 0);
     });
     
-    const amountField = document.getElementById('paymentAmount');
     if (total > 0) {
-        amountField.value = total.toFixed(2);
-    } else {
-        // Don't clear if no checkboxes are selected, just keep current value
-        // This allows manual entry when needed
+        document.getElementById('paymentAmount').value = total.toFixed(2);
     }
-    
-    // Optional: Show selected count
-    console.log(`Selected ${checkboxes.length} purchases, total: ₹${total.toFixed(2)}`);
 }
+
 // Update purchase item dropdown
 function updatePurchaseItemDropdown() {
     const purchaseItem = document.getElementById('purchaseItem');
@@ -2216,7 +2199,7 @@ function renderInventoryTable() {
     updatePagination(totalPages, 'pagination', 'currentPage', 'goToPage');
 }
 
-// Render suppliers table with enhanced payment tracking
+// Render suppliers table
 function renderSuppliersTable() {
     const tbody = document.getElementById('suppliersTableBody');
     const searchTerm = document.getElementById('supplierSearchInput').value.toLowerCase();
@@ -2257,7 +2240,7 @@ function renderSuppliersTable() {
                 (sup.pendingAmount > sup.creditLimit ? 'Over Limit' : 'Has Dues') : 'Clear';
             
             const lastPaymentDate = sup.lastPayment ? 
-                new Date(sup.lastPayment.date.toDate()).toLocaleDateString() : 'No payments';
+                (sup.lastPayment.date ? new Date(sup.lastPayment.date.toDate()).toLocaleDateString() : 'No payments') : 'No payments';
             
             const paidPercent = sup.totalPurchases > 0 ? 
                 ((sup.totalPaid / sup.totalPurchases) * 100).toFixed(1) : 0;
@@ -2305,7 +2288,7 @@ function renderSuppliersTable() {
     updatePagination(totalPages, 'supplierPagination', 'currentSupplierPage', 'goToSupplierPage');
 }
 
-// Replace the existing renderPaymentsTable function with this corrected version
+// Render payments table
 function renderPaymentsTable() {
     const tbody = document.getElementById('paymentsTableBody');
     const searchTerm = document.getElementById('paymentSearchInput')?.value.toLowerCase() || '';
@@ -2341,12 +2324,12 @@ function renderPaymentsTable() {
         const supplier = suppliers.find(s => s.id === payment.supplierId);
         const supplierName = supplier ? supplier.name : 'Unknown Supplier';
         
-        // Safely format the date
+        // Safely format date
         let paymentDate = 'N/A';
         if (payment.date) {
             if (payment.date instanceof Date) {
                 paymentDate = payment.date.toLocaleDateString();
-            } else if (payment.date && typeof payment.date === 'object' && payment.date.toDate) {
+            } else if (payment.date && typeof payment.date.toDate === 'function') {
                 paymentDate = payment.date.toDate().toLocaleDateString();
             } else if (typeof payment.date === 'string') {
                 paymentDate = new Date(payment.date).toLocaleDateString();
@@ -2392,7 +2375,6 @@ function renderPaymentsTable() {
         </tr>`;
     }).join('');
 
-  // Update pagination only if there are pages
     if (totalPages > 1) {
         updatePagination(totalPages, 'paymentPagination', 'currentPaymentPage', 'goToPaymentPage');
     } else {
@@ -2400,8 +2382,7 @@ function renderPaymentsTable() {
     }
 }
 
-
-// Render purchases table with edit/delete options
+// Render purchases table
 function renderPurchasesTable() {
     const tbody = document.getElementById('purchasesTableBody');
     const searchTerm = document.getElementById('purchaseSearchInput')?.value.toLowerCase() || '';
@@ -2480,7 +2461,7 @@ function renderPurchasesTable() {
     updatePagination(totalPages, 'purchasePagination', 'currentPurchasePage', 'goToPurchasePage');
 }
 
-// Render debt table with enhanced tracking
+// Render debt table
 function renderDebtTable() {
     const tbody = document.getElementById('debtTableBody');
     
@@ -2507,7 +2488,14 @@ function renderDebtTable() {
         
         const paymentHistory = lastPayments.length > 0 ? 
             lastPayments.map(p => {
-                const date = p.date ? new Date(p.date.toDate()).toLocaleDateString() : '';
+                let date = '';
+                if (p.date) {
+                    if (p.date instanceof Date) {
+                        date = p.date.toLocaleDateString();
+                    } else if (p.date && typeof p.date.toDate === 'function') {
+                        date = p.date.toDate().toLocaleDateString();
+                    }
+                }
                 return `<span class="txn-chip" title="${date}">` +
                        `<i class="fas fa-credit-card"></i> ₹${p.amount}` +
                        `</span>`;
@@ -2786,19 +2774,12 @@ function openPaymentModalForSupplier(supplierId) {
     }, 100);
 }
 
-// Replace your existing editPayment function with this
+// Edit payment
 async function editPayment(paymentId) {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment || payment.isReversed) {
         showToast('Cannot edit reversed payment', 'error');
         return;
-    }
-
-    // First, ensure supplier data is loaded
-    if (suppliers.length === 0) {
-        showGlobalLoading('Loading supplier data...');
-        await loadSuppliers();
-        hideGlobalLoading();
     }
 
     document.getElementById('paymentModalTitle').textContent = 'Edit Payment';
@@ -2811,7 +2792,7 @@ async function editPayment(paymentId) {
     document.getElementById('paymentMethod').value = payment.method || 'cash';
     document.getElementById('paymentReference').value = payment.reference || '';
     
-    // Handle date properly
+    // Handle date
     if (payment.date) {
         let dateObj;
         if (payment.date instanceof Date) {
@@ -2830,46 +2811,28 @@ async function editPayment(paymentId) {
     
     document.getElementById('paymentNotes').value = payment.notes || '';
     
-    // Show the modal first
+    // Show modal first
     document.getElementById('paymentModal').style.display = 'flex';
     
-    // Update supplier debt info and wait for it to populate
+    // Update supplier debt info
     setTimeout(async () => {
         await updateSupplierDebtInfo();
         
-        // Now that the purchase list is populated, check the boxes that were previously applied
+        // Check previously applied purchases
         if (payment.appliedTo && payment.appliedTo.length > 0) {
-            // Give a moment for the checkboxes to render
             setTimeout(() => {
-                const checkboxes = document.querySelectorAll('#purchaseCheckboxList input[type="checkbox"]');
-                let checkedCount = 0;
-                
                 payment.appliedTo.forEach(applied => {
                     const checkbox = document.querySelector(`#purchaseCheckboxList input[value="${applied.purchaseId}"]`);
                     if (checkbox) {
                         checkbox.checked = true;
-                        checkedCount++;
-                        
-                        // Also update the amount if needed
-                        const amountAttr = checkbox.getAttribute('data-amount');
-                        if (amountAttr && parseFloat(amountAttr) !== applied.amount) {
-                            console.log('Amount mismatch, updating checkbox data');
-                            checkbox.setAttribute('data-amount', applied.amount);
-                        }
-                    } else {
-                        console.log('Purchase not found in list:', applied.purchaseId);
                     }
                 });
-                
-                if (checkedCount > 0) {
-                    // Update payment amount based on selected purchases
-                    updatePaymentAmountFromSelected();
-                    showToast(`Loaded ${checkedCount} previously applied purchases`, 'info');
-                }
-            }, 500); // Increased timeout to ensure DOM is ready
+                updatePaymentAmountFromSelected();
+            }, 500);
         }
     }, 300);
 }
+
 // Open reversal modal
 function openReversalModal(paymentId) {
     const payment = payments.find(p => p.id === paymentId);
@@ -3034,7 +2997,7 @@ async function editPurchase(purchaseId) {
     document.getElementById('purchaseModal').style.display = 'flex';
 }
 
-// Save purchase (add or edit)
+// Save purchase
 async function savePurchase() {
     try {
         if (!currentUser) {
@@ -3106,8 +3069,10 @@ async function savePurchase() {
         const purchasesRef = db.collection('users').doc(currentUser.uid).collection('purchases');
         
         if (purchaseId) {
+            // Update existing purchase
             const oldPurchase = purchases.find(p => p.id === purchaseId);
             
+            // Revert old stock
             const itemRef = db.collection('users').doc(currentUser.uid)
                 .collection('inventory').doc(itemId);
             
@@ -3136,6 +3101,7 @@ async function savePurchase() {
             showToast('Purchase updated successfully!', 'success');
 
         } else {
+            // Add new purchase
             purchaseData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             const purchaseRef = await purchasesRef.add(purchaseData);
 
@@ -3144,6 +3110,7 @@ async function savePurchase() {
                 .collection('purchases').doc(purchaseRef.id);
             await supplierPurchaseRef.set(purchaseData);
 
+            // Update inventory stock
             const itemRef = db.collection('users').doc(currentUser.uid)
                 .collection('inventory').doc(itemId);
             
@@ -3323,6 +3290,7 @@ async function processReturn() {
             returnedQuantity: (purchase.returnedQuantity || 0) + qty
         });
 
+        // Update inventory stock
         const itemRef = db.collection('users').doc(currentUser.uid)
             .collection('inventory').doc(purchase.itemId);
         
@@ -3470,6 +3438,7 @@ async function saveItem() {
             showToast('Item added successfully!', 'success');
         }
 
+        // Handle variants
         const variantCollection = itemRef.collection('variants');
         
         const existingVariants = await variantCollection.get();
@@ -3572,8 +3541,7 @@ async function saveSupplier() {
     }
 }
 
-// Also fix the savePayment function to ensure dates are stored correctly
-// Replace the existing savePayment function with this improved version
+// Save payment
 async function savePayment() {
     try {
         if (!currentUser) {
@@ -3637,7 +3605,7 @@ async function savePayment() {
             return;
         }
 
-        // Create date object and ensure it's stored as Firestore Timestamp
+        // Create date object
         const paymentDate = new Date(dateStr);
         
         const paymentData = {
@@ -3648,7 +3616,7 @@ async function savePayment() {
             method: method,
             type: type,
             reference: reference,
-            date: firebase.firestore.Timestamp.fromDate(paymentDate), // Store as Timestamp
+            date: firebase.firestore.Timestamp.fromDate(paymentDate),
             notes: notes,
             appliedTo: [],
             isReversed: false,
@@ -3658,7 +3626,7 @@ async function savePayment() {
         const paymentsRef = db.collection('users').doc(currentUser.uid).collection('payments');
         
         if (paymentId) {
-            // Handle edit payment - first revert old applied amounts
+            // Handle edit payment - revert old applied amounts
             const oldPayment = payments.find(p => p.id === paymentId);
             if (oldPayment && oldPayment.appliedTo) {
                 for (const applied of oldPayment.appliedTo) {
@@ -3706,6 +3674,7 @@ async function savePayment() {
                 .collection('payments').doc(paymentRef.id);
             await supplierPaymentRef.set(paymentData);
 
+            // Create voucher
             const voucherData = {
                 voucherNumber: voucherNumber,
                 type: 'Payment',
@@ -3786,7 +3755,7 @@ async function savePayment() {
                     remainingAmount: remainingAmount
                 });
 
-                // Update voucher with applied info
+                // Update voucher
                 const voucherRef = db.collection('users').doc(currentUser.uid)
                     .collection('vouchers').doc(paymentDocId);
                 await voucherRef.update({
@@ -3947,7 +3916,18 @@ async function viewVoucher(paymentId) {
     if (!supplier) return;
 
     const voucherContent = document.getElementById('voucherContent');
-    const paymentDate = payment.date ? new Date(payment.date.toDate()).toLocaleDateString() : 'N/A';
+    
+    // Format date
+    let paymentDate = 'N/A';
+    if (payment.date) {
+        if (payment.date instanceof Date) {
+            paymentDate = payment.date.toLocaleDateString();
+        } else if (payment.date && typeof payment.date.toDate === 'function') {
+            paymentDate = payment.date.toDate().toLocaleDateString();
+        } else if (typeof payment.date === 'string') {
+            paymentDate = new Date(payment.date).toLocaleDateString();
+        }
+    }
     
     const appliedPurchases = [];
     if (payment.appliedTo && payment.appliedTo.length > 0) {
@@ -4098,7 +4078,17 @@ function viewSupplierPaymentHistory(supplierId) {
     `;
 
     supplierPayments.forEach(payment => {
-        const date = payment.date ? new Date(payment.date.toDate()).toLocaleDateString() : 'N/A';
+        let date = 'N/A';
+        if (payment.date) {
+            if (payment.date instanceof Date) {
+                date = payment.date.toLocaleDateString();
+            } else if (payment.date && typeof payment.date.toDate === 'function') {
+                date = payment.date.toDate().toLocaleDateString();
+            } else if (typeof payment.date === 'string') {
+                date = new Date(payment.date).toLocaleDateString();
+            }
+        }
+        
         historyHtml += `
             <div class="timeline-item">
                 <div class="timeline-date">${date}</div>
@@ -4379,7 +4369,14 @@ function exportData() {
         payments.forEach(payment => {
             const supplier = suppliers.find(s => s.id === payment.supplierId);
             const supplierName = supplier ? supplier.name : 'Unknown';
-            const date = payment.date ? new Date(payment.date.toDate()).toLocaleDateString() : '';
+            let date = '';
+            if (payment.date) {
+                if (payment.date instanceof Date) {
+                    date = payment.date.toLocaleDateString();
+                } else if (payment.date && typeof payment.date.toDate === 'function') {
+                    date = payment.date.toDate().toLocaleDateString();
+                }
+            }
             const appliedCount = payment.appliedTo ? payment.appliedTo.length : 0;
             const status = payment.isReversed ? 'Reversed' : 'Active';
             csv += `"${payment.voucherNumber || 'N/A'}","${date}","${supplierName}",${payment.amount || 0},"${payment.method || ''}","${payment.type || ''}","${payment.reference || ''}",${appliedCount} purchases,"${payment.notes || ''}","${status}"\n`;
@@ -4484,6 +4481,7 @@ window.onclick = function(event) {
     }
 };
 
+// Export functions to global scope
 window.switchTab = switchTab;
 window.openAddItemModal = openAddItemModal;
 window.openAddSupplierModal = openAddSupplierModal;
