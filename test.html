@@ -333,7 +333,7 @@
             width: 40px; height: 40px; border: 4px solid rgba(78,84,200,0.1); border-top: 4px solid var(--primary);
             border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px;
         }
-        @keyframes spin { 0% { transform: rotate(0deg); } 1% { transform: rotate(360deg); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
         /* toast */
         .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; }
@@ -1897,7 +1897,7 @@ function updateSupplierDropdowns() {
         const pendingAmount = sup.pendingAmount || 0;
         const paidPercent = sup.totalPurchases > 0 ? ((sup.totalPaid / sup.totalPurchases) * 100).toFixed(1) : 0;
         
-        paymentOptions += `<option value="${sup.id}">${sup.name} - Due: ₹${pendingAmount} (${paidPercent}% paid)</option>`;
+        paymentOptions += `<option value="${sup.id}">${sup.name} - Due: ₹${pendingAmount.toFixed(2)} (${paidPercent}% paid)</option>`;
         purchaseOptions += `<option value="${sup.id}">${sup.name}</option>`;
     });
     
@@ -3006,7 +3006,7 @@ async function savePurchase() {
                 const variantRef = itemRef.collection('variants').doc(oldPurchase.variantId);
                 const variantDoc = await variantRef.get();
                 const currentStock = variantDoc.data().stock || 0;
-                await variantRef.update({ stock: currentStock - oldPurchase.quantity });
+                await variantRef.update({ stock: Math.max(0, currentStock - oldPurchase.quantity) });
                 
                 const allVariants = await itemRef.collection('variants').get();
                 const totalStock = allVariants.docs.reduce((sum, v) => sum + (v.data().stock || 0), 0);
@@ -3014,7 +3014,7 @@ async function savePurchase() {
             } else {
                 const itemDoc = await itemRef.get();
                 const currentStock = itemDoc.data().currentStock || 0;
-                await itemRef.update({ currentStock: currentStock - oldPurchase.quantity });
+                await itemRef.update({ currentStock: Math.max(0, currentStock - oldPurchase.quantity) });
             }
 
             await purchasesRef.doc(purchaseId).update(purchaseData);
@@ -3463,7 +3463,7 @@ async function saveSupplier() {
     }
 }
 
-// Save payment (add or edit)
+// Save payment (add or edit) - FIXED VERSION
 async function savePayment() {
     try {
         if (!currentUser) {
@@ -3508,6 +3508,14 @@ async function savePayment() {
             return;
         }
 
+        // Calculate total pending amount from selected purchases
+        const totalSelectedPending = selectedPurchases.reduce((sum, p) => sum + p.amount, 0);
+        
+        if (amount > totalSelectedPending) {
+            showToast(`Payment amount (₹${amount}) exceeds total pending amount (₹${totalSelectedPending})`, 'error');
+            return;
+        }
+
         const paymentData = {
             voucherNumber: voucherNumber,
             supplierId: supplierId,
@@ -3526,6 +3534,7 @@ async function savePayment() {
         const paymentsRef = db.collection('users').doc(currentUser.uid).collection('payments');
         
         if (paymentId) {
+            // Handle edit payment
             const oldPayment = payments.find(p => p.id === paymentId);
             if (oldPayment && oldPayment.appliedTo) {
                 for (const applied of oldPayment.appliedTo) {
@@ -3538,12 +3547,14 @@ async function savePayment() {
                         const purchase = purchaseDoc.data();
                         const newPaidAmount = (purchase.paidAmount || 0) - applied.amount;
                         
+                        // Update in supplier's purchases
                         await purchaseRef.update({
                             paidAmount: Math.max(0, newPaidAmount),
                             paymentStatus: newPaidAmount <= 0 ? 'pending' : 
                                          (newPaidAmount < purchase.totalAmount ? 'partial' : 'paid')
                         });
 
+                        // Update in main purchases collection
                         const mainPurchaseRef = db.collection('users').doc(currentUser.uid)
                             .collection('purchases').doc(applied.purchaseId);
                         await mainPurchaseRef.update({
@@ -3591,6 +3602,7 @@ async function savePayment() {
             showToast('Payment recorded successfully!', 'success');
         }
 
+        // Apply payment to selected purchases
         if (selectedPurchases.length > 0) {
             const appliedTo = [];
             let remainingAmount = amount;
@@ -3612,12 +3624,13 @@ async function savePayment() {
                     const paymentForThis = Math.min(remainingAmount, purchasePending);
                     const newPaidAmount = (purchase.paidAmount || 0) + paymentForThis;
                     
+                    // Update in supplier's purchases
                     await purchaseRef.update({
                         paidAmount: newPaidAmount,
-                        paymentStatus: newPaidAmount >= purchase.totalAmount ? 'paid' : 'partial',
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        paymentStatus: newPaidAmount >= purchase.totalAmount ? 'paid' : 'partial'
                     });
 
+                    // Update in main purchases collection
                     const mainPurchaseRef = db.collection('users').doc(currentUser.uid)
                         .collection('purchases').doc(selected.purchaseId);
                     await mainPurchaseRef.update({
@@ -3634,6 +3647,7 @@ async function savePayment() {
                 }
             }
 
+            // Update payment record with applied purchases
             if (appliedTo.length > 0) {
                 const paymentDocId = paymentId || (await paymentsRef.where('voucherNumber', '==', voucherNumber).get()).docs[0].id;
                 await paymentsRef.doc(paymentDocId).update({
@@ -3641,12 +3655,22 @@ async function savePayment() {
                     remainingAmount: remainingAmount
                 });
 
-                await db.collection('users').doc(currentUser.uid)
+                // Update in supplier's payments
+                const supplierPaymentRef = db.collection('users').doc(currentUser.uid)
                     .collection('suppliers').doc(supplierId)
-                    .collection('payments').doc(paymentDocId).update({
-                        appliedTo: appliedTo,
-                        remainingAmount: remainingAmount
-                    });
+                    .collection('payments').doc(paymentDocId);
+                await supplierPaymentRef.update({
+                    appliedTo: appliedTo,
+                    remainingAmount: remainingAmount
+                });
+
+                // Update voucher with applied info
+                const voucherRef = db.collection('users').doc(currentUser.uid)
+                    .collection('vouchers').doc(paymentDocId);
+                await voucherRef.update({
+                    appliedTo: appliedTo,
+                    remainingAmount: remainingAmount
+                });
             }
         }
 
