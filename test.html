@@ -1929,6 +1929,7 @@ async function updateSupplierDebtInfo() {
     
     if (!supplierId) {
         debtInfo.style.display = 'none';
+        purchaseList.innerHTML = '';
         return;
     }
     
@@ -3541,7 +3542,7 @@ async function saveSupplier() {
     }
 }
 
-// Save payment
+// Save payment - COMPLETELY FIXED VERSION
 async function savePayment() {
     try {
         if (!currentUser) {
@@ -3549,6 +3550,7 @@ async function savePayment() {
             return;
         }
 
+        // Get form values
         const paymentId = document.getElementById('paymentId').value;
         const supplierId = document.getElementById('paymentSupplier').value;
         const amount = parseFloat(document.getElementById('paymentAmount').value);
@@ -3559,6 +3561,7 @@ async function savePayment() {
         const notes = document.getElementById('paymentNotes').value;
         const voucherNumber = document.getElementById('paymentVoucherNumber').value;
 
+        // Validate required fields
         if (!supplierId) {
             showToast('Please select a supplier', 'error');
             return;
@@ -3624,9 +3627,10 @@ async function savePayment() {
         };
 
         const paymentsRef = db.collection('users').doc(currentUser.uid).collection('payments');
+        let paymentDocId;
         
         if (paymentId) {
-            // Handle edit payment - revert old applied amounts
+            // Handle edit payment - first revert old applied amounts
             const oldPayment = payments.find(p => p.id === paymentId);
             if (oldPayment && oldPayment.appliedTo) {
                 for (const applied of oldPayment.appliedTo) {
@@ -3662,12 +3666,14 @@ async function savePayment() {
                 .collection('suppliers').doc(supplierId)
                 .collection('payments').doc(paymentId);
             await supplierPaymentRef.set(paymentData);
-
+            
+            paymentDocId = paymentId;
             showToast('Payment updated successfully!', 'success');
 
         } else {
             paymentData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             const paymentRef = await paymentsRef.add(paymentData);
+            paymentDocId = paymentRef.id;
             
             const supplierPaymentRef = db.collection('users').doc(currentUser.uid)
                 .collection('suppliers').doc(supplierId)
@@ -3697,7 +3703,6 @@ async function savePayment() {
         if (selectedPurchases.length > 0) {
             const appliedTo = [];
             let remainingAmount = amount;
-            const paymentDocId = paymentId || (await paymentsRef.where('voucherNumber', '==', voucherNumber).get()).docs[0].id;
 
             for (const selected of selectedPurchases) {
                 if (remainingAmount <= 0) break;
@@ -3765,9 +3770,19 @@ async function savePayment() {
             }
         }
 
+        // Close modal and reload data
         closeModal('paymentModal');
         await loadAllData();
         
+        // Switch to payments tab to show the new payment
+        if (currentTab !== 'payments') {
+            switchTab('payments');
+        } else {
+            renderPaymentsTable();
+        }
+        
+        showToast('Payment saved successfully!', 'success');
+
     } catch (error) {
         console.error('Error saving payment:', error);
         showToast('Failed to save payment: ' + error.message, 'error');
@@ -4317,6 +4332,14 @@ async function confirmDelete() {
         
         closeModal('deleteModal');
         await loadAllData();
+        
+        // Refresh current tab
+        if (currentTab === 'inventory') renderInventoryTable();
+        else if (currentTab === 'suppliers') renderSuppliersTable();
+        else if (currentTab === 'payments') renderPaymentsTable();
+        else if (currentTab === 'purchases') renderPurchasesTable();
+        else if (currentTab === 'debt') renderDebtTable();
+        else if (currentTab === 'vouchers') renderVouchersTable();
         
     } catch (error) {
         console.error('Error deleting:', error);
