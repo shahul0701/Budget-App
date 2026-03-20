@@ -1738,7 +1738,7 @@ async function loadSuppliers() {
     }
 }
 
-// Load payments with enhanced tracking
+// Replace the existing loadPayments function with this improved version
 async function loadPayments() {
     try {
         if (!currentUser) return;
@@ -1746,20 +1746,36 @@ async function loadPayments() {
         const paymentsRef = db.collection('users').doc(currentUser.uid).collection('payments');
         const snapshot = await paymentsRef.orderBy('date', 'desc').get();
         
-        payments = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
+        payments = [];
         
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            
+            // Handle date properly - could be Timestamp or string
+            let dateObj = data.date;
+            if (data.date && typeof data.date.toDate === 'function') {
+                dateObj = data.date.toDate();
+            } else if (data.date && typeof data.date === 'string') {
+                dateObj = new Date(data.date);
+            }
+            
+            payments.push({
+                id: doc.id,
+                ...data,
+                date: dateObj // Store as Date object for consistent handling
+            });
+        });
+        
+        // If payments tab is active, render the table
         if (currentTab === 'payments') {
             renderPaymentsTable();
         }
         
     } catch (error) {
         console.error('Error loading payments:', error);
+        showToast('Error loading payments: ' + error.message, 'error');
     }
 }
-
 // Load purchases
 async function loadPurchases() {
     try {
@@ -2254,12 +2270,19 @@ function renderSuppliersTable() {
     updatePagination(totalPages, 'supplierPagination', 'currentSupplierPage', 'goToSupplierPage');
 }
 
-// Render payments table with enhanced tracking
+// Replace the existing renderPaymentsTable function with this corrected version
 function renderPaymentsTable() {
     const tbody = document.getElementById('paymentsTableBody');
     const searchTerm = document.getElementById('paymentSearchInput')?.value.toLowerCase() || '';
     const methodFilter = document.getElementById('paymentMethodFilter')?.value || '';
     const typeFilter = document.getElementById('paymentTypeFilter')?.value || '';
+
+    if (!payments || payments.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 50px;">' +
+            '<i class="fas fa-credit-card" style="font-size: 48px; opacity: 0.3; margin-bottom: 15px;"></i><br>' +
+            'No payment records found. Click "Record Payment" to add your first payment.</td></tr>';
+        return;
+    }
 
     let filteredPayments = payments.filter(payment => {
         const supplier = suppliers.find(s => s.id === payment.supplierId);
@@ -2275,13 +2298,6 @@ function renderPaymentsTable() {
         return matchesSearch && matchesMethod && matchesType;
     });
 
-    if (filteredPayments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 50px;">' +
-            '<i class="fas fa-credit-card" style="font-size: 48px; opacity: 0.3; margin-bottom: 15px;"></i><br>' +
-            'No payment records found.</td></tr>';
-        return;
-    }
-
     const totalPages = Math.ceil(filteredPayments.length / itemsPerPage);
     const startIndex = (currentPaymentPage - 1) * itemsPerPage;
     const pagePayments = filteredPayments.slice(startIndex, startIndex + itemsPerPage);
@@ -2289,7 +2305,18 @@ function renderPaymentsTable() {
     tbody.innerHTML = pagePayments.map(payment => {
         const supplier = suppliers.find(s => s.id === payment.supplierId);
         const supplierName = supplier ? supplier.name : 'Unknown Supplier';
-        const paymentDate = payment.date ? new Date(payment.date.toDate()).toLocaleDateString() : 'N/A';
+        
+        // Safely format the date
+        let paymentDate = 'N/A';
+        if (payment.date) {
+            if (payment.date instanceof Date) {
+                paymentDate = payment.date.toLocaleDateString();
+            } else if (payment.date && typeof payment.date === 'object' && payment.date.toDate) {
+                paymentDate = payment.date.toDate().toLocaleDateString();
+            } else if (typeof payment.date === 'string') {
+                paymentDate = new Date(payment.date).toLocaleDateString();
+            }
+        }
         
         const appliedTo = payment.appliedTo || [];
         const appliedText = appliedTo.length > 0 ? 
@@ -2330,8 +2357,14 @@ function renderPaymentsTable() {
         </tr>`;
     }).join('');
 
-    updatePagination(totalPages, 'paymentPagination', 'currentPaymentPage', 'goToPaymentPage');
+  // Update pagination only if there are pages
+    if (totalPages > 1) {
+        updatePagination(totalPages, 'paymentPagination', 'currentPaymentPage', 'goToPaymentPage');
+    } else {
+        document.getElementById('paymentPagination').innerHTML = '';
+    }
 }
+
 
 // Render purchases table with edit/delete options
 function renderPurchasesTable() {
@@ -3463,7 +3496,8 @@ async function saveSupplier() {
     }
 }
 
-// Save payment (add or edit) - FIXED VERSION
+// Also fix the savePayment function to ensure dates are stored correctly
+// Replace the existing savePayment function with this improved version
 async function savePayment() {
     try {
         if (!currentUser) {
@@ -3477,10 +3511,26 @@ async function savePayment() {
         const method = document.getElementById('paymentMethod').value;
         const type = document.getElementById('paymentType').value;
         const reference = document.getElementById('paymentReference').value;
-        const date = document.getElementById('paymentDate').value;
+        const dateStr = document.getElementById('paymentDate').value;
         const notes = document.getElementById('paymentNotes').value;
         const voucherNumber = document.getElementById('paymentVoucherNumber').value;
 
+        if (!supplierId) {
+            showToast('Please select a supplier', 'error');
+            return;
+        }
+
+        if (!amount || amount <= 0) {
+            showToast('Please enter a valid amount', 'error');
+            return;
+        }
+
+        if (!dateStr) {
+            showToast('Please select a payment date', 'error');
+            return;
+        }
+
+        // Get selected purchases
         const selectedPurchases = [];
         document.querySelectorAll('#purchaseCheckboxList input[type="checkbox"]:checked').forEach(cb => {
             selectedPurchases.push({
@@ -3488,11 +3538,6 @@ async function savePayment() {
                 amount: parseFloat(cb.getAttribute('data-amount'))
             });
         });
-
-        if (!supplierId || !amount || amount <= 0 || !method || !date) {
-            showToast('Please fill all required fields', 'error');
-            return;
-        }
 
         if (selectedPurchases.length === 0) {
             showToast('Please select at least one purchase to apply payment', 'error');
@@ -3516,6 +3561,9 @@ async function savePayment() {
             return;
         }
 
+        // Create date object and ensure it's stored as Firestore Timestamp
+        const paymentDate = new Date(dateStr);
+        
         const paymentData = {
             voucherNumber: voucherNumber,
             supplierId: supplierId,
@@ -3524,7 +3572,7 @@ async function savePayment() {
             method: method,
             type: type,
             reference: reference,
-            date: firebase.firestore.Timestamp.fromDate(new Date(date)),
+            date: firebase.firestore.Timestamp.fromDate(paymentDate), // Store as Timestamp
             notes: notes,
             appliedTo: [],
             isReversed: false,
@@ -3534,7 +3582,7 @@ async function savePayment() {
         const paymentsRef = db.collection('users').doc(currentUser.uid).collection('payments');
         
         if (paymentId) {
-            // Handle edit payment
+            // Handle edit payment - first revert old applied amounts
             const oldPayment = payments.find(p => p.id === paymentId);
             if (oldPayment && oldPayment.appliedTo) {
                 for (const applied of oldPayment.appliedTo) {
@@ -3547,14 +3595,12 @@ async function savePayment() {
                         const purchase = purchaseDoc.data();
                         const newPaidAmount = (purchase.paidAmount || 0) - applied.amount;
                         
-                        // Update in supplier's purchases
                         await purchaseRef.update({
                             paidAmount: Math.max(0, newPaidAmount),
                             paymentStatus: newPaidAmount <= 0 ? 'pending' : 
                                          (newPaidAmount < purchase.totalAmount ? 'partial' : 'paid')
                         });
 
-                        // Update in main purchases collection
                         const mainPurchaseRef = db.collection('users').doc(currentUser.uid)
                             .collection('purchases').doc(applied.purchaseId);
                         await mainPurchaseRef.update({
@@ -3606,6 +3652,7 @@ async function savePayment() {
         if (selectedPurchases.length > 0) {
             const appliedTo = [];
             let remainingAmount = amount;
+            const paymentDocId = paymentId || (await paymentsRef.where('voucherNumber', '==', voucherNumber).get()).docs[0].id;
 
             for (const selected of selectedPurchases) {
                 if (remainingAmount <= 0) break;
@@ -3649,7 +3696,6 @@ async function savePayment() {
 
             // Update payment record with applied purchases
             if (appliedTo.length > 0) {
-                const paymentDocId = paymentId || (await paymentsRef.where('voucherNumber', '==', voucherNumber).get()).docs[0].id;
                 await paymentsRef.doc(paymentDocId).update({
                     appliedTo: appliedTo,
                     remainingAmount: remainingAmount
