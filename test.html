@@ -1928,8 +1928,8 @@ function updateSupplierDropdowns() {
     updateTransactionItemDropdown();
 }
 
-// Update supplier debt info in payment modal
-function updateSupplierDebtInfo() {
+// Replace your existing updateSupplierDebtInfo function
+async function updateSupplierDebtInfo() {
     const supplierId = document.getElementById('paymentSupplier').value;
     const debtInfo = document.getElementById('supplierDebtInfo');
     const totalPurchasesSpan = document.getElementById('supplierTotalPurchases');
@@ -1956,19 +1956,47 @@ function updateSupplierDebtInfo() {
         progressBar.style.width = paidPercent + '%';
         debtInfo.style.display = 'block';
         
-        // Update purchase selection list
-        if (purchaseList && supplier.purchases) {
-            const pendingPurchases = supplier.purchases.filter(p => p.pendingAmount > 0);
+        // Get pending purchases from supplier data
+        if (purchaseList) {
+            // First, try to get from supplier.purchases if available
+            let pendingPurchases = [];
+            
+            if (supplier.purchases && supplier.purchases.length > 0) {
+                pendingPurchases = supplier.purchases.filter(p => p.pendingAmount > 0);
+            } else {
+                // If not available in supplier object, try to fetch from purchases array
+                pendingPurchases = purchases.filter(p => 
+                    p.supplierId === supplierId && 
+                    ((p.totalAmount || 0) - (p.paidAmount || 0)) > 0
+                ).map(p => ({
+                    id: p.id,
+                    pendingAmount: (p.totalAmount || 0) - (p.paidAmount || 0),
+                    date: p.date,
+                    invoice: p.invoice
+                }));
+            }
+            
             if (pendingPurchases.length > 0) {
                 let html = '';
                 pendingPurchases.forEach(p => {
-                    const date = p.date ? new Date(p.date.toDate()).toLocaleDateString() : 'Unknown';
+                    let dateStr = 'Unknown';
+                    if (p.date) {
+                        if (p.date instanceof Date) {
+                            dateStr = p.date.toLocaleDateString();
+                        } else if (p.date && typeof p.date.toDate === 'function') {
+                            dateStr = p.date.toDate().toLocaleDateString();
+                        } else if (typeof p.date === 'string') {
+                            dateStr = new Date(p.date).toLocaleDateString();
+                        }
+                    }
+                    
+                    const pendingAmount = p.pendingAmount || 0;
                     html += `
-                        <div style="margin-bottom: 8px;">
+                        <div style="margin-bottom: 8px; padding: 8px; border: 1px solid #e0e0e0; border-radius: 6px;">
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                                <input type="checkbox" value="${p.id}" data-amount="${p.pendingAmount}">
+                                <input type="checkbox" value="${p.id}" data-amount="${pendingAmount}">
                                 <span style="flex: 1;">
-                                    <strong>${date}</strong> - ₹${p.pendingAmount.toFixed(2)}
+                                    <strong>${dateStr}</strong> - ₹${pendingAmount.toFixed(2)}
                                     <br><small>Inv: ${p.invoice || 'N/A'}</small>
                                 </span>
                             </label>
@@ -1978,11 +2006,12 @@ function updateSupplierDebtInfo() {
                 purchaseList.innerHTML = html;
                 document.getElementById('pendingPurchasesGroup').style.display = 'block';
                 
+                // Add change event listeners to checkboxes
                 document.querySelectorAll('#purchaseCheckboxList input[type="checkbox"]').forEach(cb => {
                     cb.addEventListener('change', updatePaymentAmountFromSelected);
                 });
             } else {
-                purchaseList.innerHTML = '<p class="text-muted">No pending purchases</p>';
+                purchaseList.innerHTML = '<p class="text-muted" style="padding: 15px; text-align: center;">No pending purchases for this supplier</p>';
                 document.getElementById('pendingPurchasesGroup').style.display = 'block';
             }
         }
@@ -1997,11 +2026,17 @@ function updatePaymentAmountFromSelected() {
         total += parseFloat(cb.getAttribute('data-amount') || 0);
     });
     
+    const amountField = document.getElementById('paymentAmount');
     if (total > 0) {
-        document.getElementById('paymentAmount').value = total.toFixed(2);
+        amountField.value = total.toFixed(2);
+    } else {
+        // Don't clear if no checkboxes are selected, just keep current value
+        // This allows manual entry when needed
     }
+    
+    // Optional: Show selected count
+    console.log(`Selected ${checkboxes.length} purchases, total: ₹${total.toFixed(2)}`);
 }
-
 // Update purchase item dropdown
 function updatePurchaseItemDropdown() {
     const purchaseItem = document.getElementById('purchaseItem');
@@ -2751,12 +2786,19 @@ function openPaymentModalForSupplier(supplierId) {
     }, 100);
 }
 
-// Edit payment
+// Replace your existing editPayment function with this
 async function editPayment(paymentId) {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment || payment.isReversed) {
         showToast('Cannot edit reversed payment', 'error');
         return;
+    }
+
+    // First, ensure supplier data is loaded
+    if (suppliers.length === 0) {
+        showGlobalLoading('Loading supplier data...');
+        await loadSuppliers();
+        hideGlobalLoading();
     }
 
     document.getElementById('paymentModalTitle').textContent = 'Edit Payment';
@@ -2769,31 +2811,65 @@ async function editPayment(paymentId) {
     document.getElementById('paymentMethod').value = payment.method || 'cash';
     document.getElementById('paymentReference').value = payment.reference || '';
     
+    // Handle date properly
     if (payment.date) {
-        const date = payment.date.toDate();
-        document.getElementById('paymentDate').value = date.toISOString().split('T')[0];
+        let dateObj;
+        if (payment.date instanceof Date) {
+            dateObj = payment.date;
+        } else if (payment.date && typeof payment.date.toDate === 'function') {
+            dateObj = payment.date.toDate();
+        } else if (typeof payment.date === 'string') {
+            dateObj = new Date(payment.date);
+        } else {
+            dateObj = new Date();
+        }
+        document.getElementById('paymentDate').value = dateObj.toISOString().split('T')[0];
     } else {
         document.getElementById('paymentDate').value = new Date().toISOString().split('T')[0];
     }
     
     document.getElementById('paymentNotes').value = payment.notes || '';
     
+    // Show the modal first
     document.getElementById('paymentModal').style.display = 'flex';
     
-    setTimeout(() => {
-        updateSupplierDebtInfo();
+    // Update supplier debt info and wait for it to populate
+    setTimeout(async () => {
+        await updateSupplierDebtInfo();
         
+        // Now that the purchase list is populated, check the boxes that were previously applied
         if (payment.appliedTo && payment.appliedTo.length > 0) {
+            // Give a moment for the checkboxes to render
             setTimeout(() => {
+                const checkboxes = document.querySelectorAll('#purchaseCheckboxList input[type="checkbox"]');
+                let checkedCount = 0;
+                
                 payment.appliedTo.forEach(applied => {
                     const checkbox = document.querySelector(`#purchaseCheckboxList input[value="${applied.purchaseId}"]`);
-                    if (checkbox) checkbox.checked = true;
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        checkedCount++;
+                        
+                        // Also update the amount if needed
+                        const amountAttr = checkbox.getAttribute('data-amount');
+                        if (amountAttr && parseFloat(amountAttr) !== applied.amount) {
+                            console.log('Amount mismatch, updating checkbox data');
+                            checkbox.setAttribute('data-amount', applied.amount);
+                        }
+                    } else {
+                        console.log('Purchase not found in list:', applied.purchaseId);
+                    }
                 });
-            }, 500);
+                
+                if (checkedCount > 0) {
+                    // Update payment amount based on selected purchases
+                    updatePaymentAmountFromSelected();
+                    showToast(`Loaded ${checkedCount} previously applied purchases`, 'info');
+                }
+            }, 500); // Increased timeout to ensure DOM is ready
         }
-    }, 100);
+    }, 300);
 }
-
 // Open reversal modal
 function openReversalModal(paymentId) {
     const payment = payments.find(p => p.id === paymentId);
