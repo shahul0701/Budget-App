@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
+    /* Same styles as before */
     * {
       margin: 0;
       padding: 0;
@@ -59,7 +60,6 @@
       padding: 0 2rem;
     }
 
-    /* Stats Cards */
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -87,7 +87,6 @@
       margin-top: 0.5rem;
     }
 
-    /* Tabs */
     .tabs {
       display: flex;
       gap: 1rem;
@@ -114,7 +113,6 @@
       background: #f1f5f9;
     }
 
-    /* Form Card */
     .form-card {
       background: white;
       border-radius: 1rem;
@@ -220,7 +218,6 @@
       background: #e2e8f0;
     }
 
-    /* Table Styles */
     .table-container {
       background: white;
       border-radius: 1rem;
@@ -342,7 +339,6 @@
 </div>
 
 <div class="container">
-  <!-- Stats Cards -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-value" id="totalSales">0</div>
@@ -358,13 +354,11 @@
     </div>
   </div>
 
-  <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" onclick="switchTab('add')">➕ Add New Sale</div>
     <div class="tab" onclick="switchTab('list')">📋 View All Sales</div>
   </div>
 
-  <!-- Add Sale Form -->
   <div id="addForm" class="form-card active">
     <div class="form-title">
       <i class="fas fa-plus-circle"></i>
@@ -449,7 +443,6 @@
     </form>
   </div>
 
-  <!-- Sales List -->
   <div id="listForm" class="form-card">
     <div class="form-title">
       <i class="fas fa-list"></i>
@@ -482,12 +475,11 @@
   </div>
 </div>
 
-<!-- View/Edit Modal -->
-<div id="viewModal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;">
-  <div class="modal-content" style="background: white; border-radius: 1rem; padding: 2rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-    <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-      <h3 id="modalTitle">Sale Details</h3>
-      <span class="close-modal" onclick="closeModal()" style="cursor: pointer; font-size: 1.5rem;">&times;</span>
+<div id="viewModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;">
+  <div style="background: white; border-radius: 1rem; padding: 2rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <h3>Sale Details</h3>
+      <span onclick="closeModal()" style="cursor: pointer; font-size: 1.5rem;">&times;</span>
     </div>
     <div id="modalContent"></div>
   </div>
@@ -495,7 +487,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, query, getDocs, addDoc, doc, deleteDoc, updateDoc, where, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, collection, query, getDocs, addDoc, doc, deleteDoc, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
 
   const firebaseConfig = {
@@ -517,18 +509,35 @@
   let allSales = [];
 
   function getCompanyId() {
+    // Check if we're already logged in
+    const isLoggedIn = sessionStorage.getItem('isLoggedIn');
     const companyData = sessionStorage.getItem('currentCompany');
-    if (companyData) {
-      currentCompany = JSON.parse(companyData);
-      return currentCompany.id;
+    
+    console.log("Sales page - Checking auth:", { isLoggedIn, companyData });
+    
+    if (!isLoggedIn || !companyData) {
+      console.log("No session found, redirecting to login");
+      window.location.href = 'login.html';
+      return null;
     }
-    return null;
+    
+    try {
+      currentCompany = JSON.parse(companyData);
+      console.log("Company loaded:", currentCompany);
+      return currentCompany.id;
+    } catch (error) {
+      console.error("Error parsing company data:", error);
+      window.location.href = 'login.html';
+      return null;
+    }
   }
 
   // Set default date
-  document.getElementById('saleDate').value = new Date().toISOString().split('T')[0];
+  const saleDateInput = document.getElementById('saleDate');
+  if (saleDateInput) {
+    saleDateInput.value = new Date().toISOString().split('T')[0];
+  }
 
-  // Calculate totals
   function calculateTotal() {
     const quantity = parseFloat(document.getElementById('quantity').value) || 0;
     const unitPrice = parseFloat(document.getElementById('unitPrice').value) || 0;
@@ -545,66 +554,75 @@
   }
 
   // Save sale
-  document.getElementById('saleForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const companyId = getCompanyId();
-    if (!companyId) {
-      window.location.href = 'login.html';
-      return;
-    }
-    
-    const { subtotal, discountAmount, taxAmount, total } = calculateTotal();
-    
-    const saleData = {
-      invoiceNo: document.getElementById('invoiceNo').value,
-      customerName: document.getElementById('customerName').value,
-      customerEmail: document.getElementById('customerEmail').value,
-      customerPhone: document.getElementById('customerPhone').value,
-      productName: document.getElementById('productName').value,
-      quantity: parseFloat(document.getElementById('quantity').value),
-      unitPrice: parseFloat(document.getElementById('unitPrice').value),
-      discount: parseFloat(document.getElementById('discount').value),
-      tax: parseFloat(document.getElementById('tax').value),
-      paymentMethod: document.getElementById('paymentMethod').value,
-      paymentStatus: document.getElementById('paymentStatus').value,
-      saleDate: document.getElementById('saleDate').value,
-      notes: document.getElementById('notes').value,
-      subtotal: subtotal,
-      discountAmount: discountAmount,
-      taxAmount: taxAmount,
-      totalAmount: total,
-      createdAt: Date.now()
-    };
-    
-    try {
-      const salesRef = collection(db, `companies/${companyId}/sales`);
-      await addDoc(salesRef, saleData);
+  const saleForm = document.getElementById('saleForm');
+  if (saleForm) {
+    saleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
       
-      const messageDiv = document.getElementById('formMessage');
-      messageDiv.innerHTML = '<i class="fas fa-check-circle"></i> Sale recorded successfully!';
-      messageDiv.className = 'message success';
+      const companyId = getCompanyId();
+      if (!companyId) return;
       
-      resetForm();
-      loadSales();
+      const { subtotal, discountAmount, taxAmount, total } = calculateTotal();
       
-      setTimeout(() => {
-        messageDiv.className = 'message';
-      }, 3000);
-    } catch (error) {
-      console.error("Error saving sale:", error);
-      const messageDiv = document.getElementById('formMessage');
-      messageDiv.innerHTML = '❌ Error saving sale. Please try again.';
-      messageDiv.className = 'message error';
-    }
-  });
+      const saleData = {
+        invoiceNo: document.getElementById('invoiceNo').value,
+        customerName: document.getElementById('customerName').value,
+        customerEmail: document.getElementById('customerEmail').value,
+        customerPhone: document.getElementById('customerPhone').value,
+        productName: document.getElementById('productName').value,
+        quantity: parseFloat(document.getElementById('quantity').value),
+        unitPrice: parseFloat(document.getElementById('unitPrice').value),
+        discount: parseFloat(document.getElementById('discount').value),
+        tax: parseFloat(document.getElementById('tax').value),
+        paymentMethod: document.getElementById('paymentMethod').value,
+        paymentStatus: document.getElementById('paymentStatus').value,
+        saleDate: document.getElementById('saleDate').value,
+        notes: document.getElementById('notes').value,
+        subtotal: subtotal,
+        discountAmount: discountAmount,
+        taxAmount: taxAmount,
+        totalAmount: total,
+        createdAt: Date.now()
+      };
+      
+      try {
+        const salesRef = collection(db, `companies/${companyId}/sales`);
+        await addDoc(salesRef, saleData);
+        
+        const messageDiv = document.getElementById('formMessage');
+        if (messageDiv) {
+          messageDiv.innerHTML = '<i class="fas fa-check-circle"></i> Sale recorded successfully!';
+          messageDiv.className = 'message success';
+        }
+        
+        resetForm();
+        loadSales();
+        
+        setTimeout(() => {
+          if (messageDiv) messageDiv.className = 'message';
+        }, 3000);
+      } catch (error) {
+        console.error("Error saving sale:", error);
+        const messageDiv = document.getElementById('formMessage');
+        if (messageDiv) {
+          messageDiv.innerHTML = '❌ Error saving sale. Please try again.';
+          messageDiv.className = 'message error';
+        }
+      }
+    });
+  }
 
   function resetForm() {
-    document.getElementById('saleForm').reset();
-    document.getElementById('saleDate').value = new Date().toISOString().split('T')[0];
-    document.getElementById('quantity').value = '1';
-    document.getElementById('unitPrice').value = '0';
-    document.getElementById('discount').value = '0';
+    const form = document.getElementById('saleForm');
+    if (form) form.reset();
+    const dateInput = document.getElementById('saleDate');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    const quantityInput = document.getElementById('quantity');
+    if (quantityInput) quantityInput.value = '1';
+    const unitPriceInput = document.getElementById('unitPrice');
+    if (unitPriceInput) unitPriceInput.value = '0';
+    const discountInput = document.getElementById('discount');
+    if (discountInput) discountInput.value = '0';
   }
 
   async function loadSales() {
@@ -625,6 +643,10 @@
       updateStats();
     } catch (error) {
       console.error("Error loading sales:", error);
+      const tbody = document.getElementById('salesTableBody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #dc2626;">Error loading sales</td></tr>';
+      }
     }
   }
 
@@ -660,49 +682,54 @@
     const totalRevenue = allSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
     const avgOrder = totalSales > 0 ? totalRevenue / totalSales : 0;
     
-    document.getElementById('totalSales').innerHTML = totalSales;
-    document.getElementById('totalRevenue').innerHTML = `₹${totalRevenue.toFixed(2)}`;
-    document.getElementById('avgOrder').innerHTML = `₹${avgOrder.toFixed(2)}`;
+    const totalSalesEl = document.getElementById('totalSales');
+    const totalRevenueEl = document.getElementById('totalRevenue');
+    const avgOrderEl = document.getElementById('avgOrder');
+    
+    if (totalSalesEl) totalSalesEl.innerHTML = totalSales;
+    if (totalRevenueEl) totalRevenueEl.innerHTML = `₹${totalRevenue.toFixed(2)}`;
+    if (avgOrderEl) avgOrderEl.innerHTML = `₹${avgOrder.toFixed(2)}`;
   }
 
-  window.viewSale = async function(saleId) {
+  window.viewSale = function(saleId) {
     const sale = allSales.find(s => s.id === saleId);
     if (!sale) return;
     
     const modal = document.getElementById('viewModal');
     const content = document.getElementById('modalContent');
     
-    content.innerHTML = `
-      <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-        <h4>Invoice Details</h4>
-        <p><strong>Invoice #:</strong> ${escapeHtml(sale.invoiceNo)}</p>
-        <p><strong>Date:</strong> ${escapeHtml(sale.saleDate)}</p>
-        <p><strong>Payment Status:</strong> ${escapeHtml(sale.paymentStatus)}</p>
-      </div>
-      <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-        <h4>Customer Details</h4>
-        <p><strong>Name:</strong> ${escapeHtml(sale.customerName)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(sale.customerEmail || 'N/A')}</p>
-        <p><strong>Phone:</strong> ${escapeHtml(sale.customerPhone)}</p>
-      </div>
-      <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-        <h4>Product Details</h4>
-        <p><strong>Product:</strong> ${escapeHtml(sale.productName)}</p>
-        <p><strong>Quantity:</strong> ${sale.quantity}</p>
-        <p><strong>Unit Price:</strong> ₹${sale.unitPrice.toFixed(2)}</p>
-        <p><strong>Subtotal:</strong> ₹${sale.subtotal.toFixed(2)}</p>
-        <p><strong>Discount:</strong> ${sale.discount}% (₹${sale.discountAmount.toFixed(2)})</p>
-        <p><strong>Tax:</strong> ${sale.tax}% (₹${sale.taxAmount.toFixed(2)})</p>
-        <p><strong>Total Amount:</strong> <strong>₹${sale.totalAmount.toFixed(2)}</strong></p>
-      </div>
-      <div style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
-        <h4>Payment Details</h4>
-        <p><strong>Method:</strong> ${escapeHtml(sale.paymentMethod)}</p>
-        <p><strong>Notes:</strong> ${escapeHtml(sale.notes || 'No notes')}</p>
-      </div>
-    `;
-    
-    modal.style.display = 'flex';
+    if (modal && content) {
+      content.innerHTML = `
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+          <h4>Invoice Details</h4>
+          <p><strong>Invoice #:</strong> ${escapeHtml(sale.invoiceNo)}</p>
+          <p><strong>Date:</strong> ${escapeHtml(sale.saleDate)}</p>
+          <p><strong>Payment Status:</strong> ${escapeHtml(sale.paymentStatus)}</p>
+        </div>
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+          <h4>Customer Details</h4>
+          <p><strong>Name:</strong> ${escapeHtml(sale.customerName)}</p>
+          <p><strong>Email:</strong> ${escapeHtml(sale.customerEmail || 'N/A')}</p>
+          <p><strong>Phone:</strong> ${escapeHtml(sale.customerPhone)}</p>
+        </div>
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+          <h4>Product Details</h4>
+          <p><strong>Product:</strong> ${escapeHtml(sale.productName)}</p>
+          <p><strong>Quantity:</strong> ${sale.quantity}</p>
+          <p><strong>Unit Price:</strong> ₹${sale.unitPrice.toFixed(2)}</p>
+          <p><strong>Subtotal:</strong> ₹${sale.subtotal.toFixed(2)}</p>
+          <p><strong>Discount:</strong> ${sale.discount}% (₹${sale.discountAmount.toFixed(2)})</p>
+          <p><strong>Tax:</strong> ${sale.tax}% (₹${sale.taxAmount.toFixed(2)})</p>
+          <p><strong>Total Amount:</strong> <strong>₹${sale.totalAmount.toFixed(2)}</strong></p>
+        </div>
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
+          <h4>Payment Details</h4>
+          <p><strong>Method:</strong> ${escapeHtml(sale.paymentMethod)}</p>
+          <p><strong>Notes:</strong> ${escapeHtml(sale.notes || 'No notes')}</p>
+        </div>
+      `;
+      modal.style.display = 'flex';
+    }
   };
 
   window.deleteSale = async function(saleId) {
@@ -774,21 +801,22 @@
     const tabs = document.querySelectorAll('.tab');
     
     if (tab === 'add') {
-      addForm.classList.add('active');
-      listForm.classList.remove('active');
-      tabs[0].classList.add('active');
-      tabs[1].classList.remove('active');
+      if (addForm) addForm.classList.add('active');
+      if (listForm) listForm.classList.remove('active');
+      if (tabs[0]) tabs[0].classList.add('active');
+      if (tabs[1]) tabs[1].classList.remove('active');
     } else {
-      addForm.classList.remove('active');
-      listForm.classList.add('active');
-      tabs[0].classList.remove('active');
-      tabs[1].classList.add('active');
+      if (addForm) addForm.classList.remove('active');
+      if (listForm) listForm.classList.add('active');
+      if (tabs[0]) tabs[0].classList.remove('active');
+      if (tabs[1]) tabs[1].classList.add('active');
       loadSales();
     }
   };
 
   window.closeModal = function() {
-    document.getElementById('viewModal').style.display = 'none';
+    const modal = document.getElementById('viewModal');
+    if (modal) modal.style.display = 'none';
   };
 
   function escapeHtml(str) {
@@ -810,10 +838,9 @@
   };
 
   // Initialize
-  if (getCompanyId()) {
+  const companyId = getCompanyId();
+  if (companyId) {
     loadSales();
-  } else {
-    window.location.href = 'login.html';
   }
 </script>
 </body>
