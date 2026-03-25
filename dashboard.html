@@ -520,9 +520,9 @@
   <div class="header-content">
     <div class="company-header">
       <i class="fas fa-chart-line"></i>
-      <h1 id="companyNameHeader">BudgetFlow</h1>
+      <h1 id="companyNameHeader">Loading...</h1>
     </div>
-    <div class="company-avatar" onclick="toggleDropdown()">
+    <div class="company-avatar" onclick="toggleDropdown(event)">
       <div class="avatar-circle" id="avatarLetter">A</div>
       <div class="dropdown-menu" id="dropdownMenu">
         <div class="dropdown-item" onclick="showProfile()">
@@ -703,12 +703,13 @@
   let currentCompany = null;
   let salesPurchaseChart = null;
   let inventoryChart = null;
-  let salesData = [];
-  let purchaseData = [];
 
   function checkAuth() {
     const isLoggedIn = sessionStorage.getItem('isLoggedIn');
     const companyData = sessionStorage.getItem('currentCompany');
+    
+    console.log("Checking auth - isLoggedIn:", isLoggedIn);
+    console.log("Company data:", companyData);
     
     if (!isLoggedIn || !companyData) {
       window.location.href = 'login.html';
@@ -716,17 +717,33 @@
     }
     
     currentCompany = JSON.parse(companyData);
+    console.log("Current company loaded:", currentCompany);
+    
+    // Update header with company name
+    const companyHeader = document.getElementById('companyNameHeader');
+    if (companyHeader) {
+      companyHeader.innerHTML = currentCompany.name;
+    }
+    
+    // Update avatar with first letter
     const firstLetter = currentCompany.name.charAt(0).toUpperCase();
-    document.getElementById('avatarLetter').innerHTML = firstLetter;
-    document.getElementById('companyNameHeader').innerHTML = currentCompany.name;
+    const avatarLetter = document.getElementById('avatarLetter');
+    if (avatarLetter) {
+      avatarLetter.innerHTML = firstLetter;
+    }
+    
     return true;
   }
 
   function updateDateTime() {
     const now = new Date();
     const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    document.getElementById('currentDate').innerHTML = now.toLocaleDateString('en-US', options);
-    document.getElementById('currentTime').innerHTML = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const dateElement = document.getElementById('currentDate');
+    const timeElement = document.getElementById('currentTime');
+    const greetingElement = document.getElementById('greeting');
+    
+    if (dateElement) dateElement.innerHTML = now.toLocaleDateString('en-US', options);
+    if (timeElement) timeElement.innerHTML = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
     const hour = now.getHours();
     let greeting = '';
@@ -734,7 +751,9 @@
     else if (hour < 17) greeting = 'Good Afternoon';
     else greeting = 'Good Evening';
     
-    document.getElementById('greeting').innerHTML = `${greeting}, ${currentCompany.name}! Welcome back!`;
+    if (greetingElement && currentCompany) {
+      greetingElement.innerHTML = `${greeting}, ${currentCompany.name}! Welcome back!`;
+    }
   }
 
   setInterval(updateDateTime, 1000);
@@ -742,25 +761,35 @@
 
   async function loadStats() {
     try {
+      if (!currentCompany) return;
+      
+      // Load users count
+      const usersRef = collection(db, `companies/${currentCompany.id}/users`);
+      const usersSnap = await getDocs(usersRef);
+      document.getElementById('totalUsers').innerHTML = usersSnap.size;
+      
+      // Load sales count
       const salesRef = collection(db, `companies/${currentCompany.id}/sales`);
       const salesSnap = await getDocs(salesRef);
       const totalSales = salesSnap.size;
       document.getElementById('totalSales').innerHTML = totalSales;
       
+      // Load purchases count
       const purchasesRef = collection(db, `companies/${currentCompany.id}/purchases`);
       const purchasesSnap = await getDocs(purchasesRef);
       const totalPurchases = purchasesSnap.size;
       document.getElementById('totalPurchases').innerHTML = totalPurchases;
       
+      // Load stocks count
       const stocksRef = collection(db, `companies/${currentCompany.id}/stocks`);
       const stocksSnap = await getDocs(stocksRef);
       const totalStocks = stocksSnap.size;
       document.getElementById('totalStocks').innerHTML = totalStocks;
       
-      // Sample data for charts (in production, fetch actual data)
-      salesData = [12500, 15000, 18000, 22000, 28000, 32000];
-      purchaseData = [8000, 10000, 12000, 15000, 18000, 21000];
+      // Sample data for charts
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+      const salesData = [12500, 15000, 18000, 22000, 28000, 32000];
+      const purchaseData = [8000, 10000, 12000, 15000, 18000, 21000];
       
       updateCharts(months, salesData, purchaseData, totalStocks);
     } catch (error) {
@@ -769,77 +798,84 @@
   }
 
   function updateCharts(months, sales, purchases, stockCount) {
-    if (salesPurchaseChart) {
+    const ctx1 = document.getElementById('salesPurchaseChart');
+    if (ctx1 && salesPurchaseChart) {
       salesPurchaseChart.destroy();
     }
     
-    const ctx1 = document.getElementById('salesPurchaseChart').getContext('2d');
-    salesPurchaseChart = new Chart(ctx1, {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: [
-          {
-            label: 'Sales',
-            data: sales,
-            borderColor: '#667eea',
-            backgroundColor: 'rgba(102, 126, 234, 0.1)',
-            tension: 0.4,
-            fill: true
-          },
-          {
-            label: 'Purchases',
-            data: purchases,
-            borderColor: '#f59e0b',
-            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-            tension: 0.4,
-            fill: true
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
+    const chart1Canvas = document.getElementById('salesPurchaseChart');
+    if (chart1Canvas) {
+      const ctx = chart1Canvas.getContext('2d');
+      salesPurchaseChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [
+            {
+              label: 'Sales (₹)',
+              data: sales,
+              borderColor: '#667eea',
+              backgroundColor: 'rgba(102, 126, 234, 0.1)',
+              tension: 0.4,
+              fill: true
+            },
+            {
+              label: 'Purchases (₹)',
+              data: purchases,
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              tension: 0.4,
+              fill: true
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+            }
           }
         }
-      }
-    });
+      });
+    }
     
-    if (inventoryChart) {
+    const chart2Canvas = document.getElementById('inventoryChart');
+    if (chart2Canvas && inventoryChart) {
       inventoryChart.destroy();
     }
     
-    const ctx2 = document.getElementById('inventoryChart').getContext('2d');
-    inventoryChart = new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: ['Raw Materials', 'Finished Goods', 'Packaging', 'Spare Parts'],
-        datasets: [{
-          data: [Math.floor(stockCount * 0.4), Math.floor(stockCount * 0.35), Math.floor(stockCount * 0.15), Math.floor(stockCount * 0.1)],
-          backgroundColor: ['#667eea', '#f59e0b', '#10b981', '#ef4444'],
-          borderWidth: 0
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
+    if (chart2Canvas) {
+      const ctx = chart2Canvas.getContext('2d');
+      inventoryChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Raw Materials', 'Finished Goods', 'Packaging', 'Spare Parts'],
+          datasets: [{
+            data: [Math.floor(stockCount * 0.4), Math.floor(stockCount * 0.35), Math.floor(stockCount * 0.15), Math.floor(stockCount * 0.1)],
+            backgroundColor: ['#667eea', '#f59e0b', '#10b981', '#ef4444'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+            }
           }
         }
-      }
-    });
+      });
+    }
   }
 
   async function loadUsers() {
     try {
+      if (!currentCompany) return [];
       const usersRef = collection(db, `companies/${currentCompany.id}/users`);
       const querySnapshot = await getDocs(usersRef);
-      document.getElementById('totalUsers').innerHTML = querySnapshot.size;
       return querySnapshot;
     } catch (error) {
       console.error("Error loading users:", error);
@@ -849,6 +885,7 @@
 
   async function loadCompanyDetails() {
     try {
+      if (!currentCompany) return null;
       const companyRef = doc(db, 'companies', currentCompany.id);
       const companySnap = await getDoc(companyRef);
       if (companySnap.exists()) {
@@ -866,6 +903,8 @@
     const usersSnapshot = await loadUsers();
     const modal = document.getElementById('profileModal');
     const content = document.getElementById('profileContent');
+    
+    if (!modal || !content) return;
     
     let usersHtml = '<h4 style="margin: 1rem 0 0.5rem;"><i class="fas fa-users"></i> Team Members</h4>';
     
@@ -903,17 +942,27 @@
   };
 
   window.closeModal = function(modalId) {
-    document.getElementById(modalId).classList.remove('show');
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.remove('show');
+    }
   };
 
   window.openAddUserModal = function() {
     closeModal('profileModal');
     setTimeout(() => {
-      document.getElementById('addUserModal').classList.add('show');
-      document.getElementById('userFullName').value = '';
-      document.getElementById('userEmail').value = '';
-      document.getElementById('userPassword').value = '';
-      document.getElementById('addUserMessage').className = 'message';
+      const modal = document.getElementById('addUserModal');
+      if (modal) {
+        modal.classList.add('show');
+        const nameInput = document.getElementById('userFullName');
+        const emailInput = document.getElementById('userEmail');
+        const passwordInput = document.getElementById('userPassword');
+        const messageDiv = document.getElementById('addUserMessage');
+        if (nameInput) nameInput.value = '';
+        if (emailInput) emailInput.value = '';
+        if (passwordInput) passwordInput.value = '';
+        if (messageDiv) messageDiv.className = 'message';
+      }
     }, 200);
   };
 
@@ -924,13 +973,17 @@
     const messageDiv = document.getElementById('addUserMessage');
     
     if (!fullName) {
-      messageDiv.innerHTML = 'Full name is required';
-      messageDiv.className = 'message error';
+      if (messageDiv) {
+        messageDiv.innerHTML = 'Full name is required';
+        messageDiv.className = 'message error';
+      }
       return;
     }
     if (!password) {
-      messageDiv.innerHTML = 'Password is required';
-      messageDiv.className = 'message error';
+      if (messageDiv) {
+        messageDiv.innerHTML = 'Password is required';
+        messageDiv.className = 'message error';
+      }
       return;
     }
     
@@ -943,17 +996,21 @@
         createdAt: Date.now()
       });
       
-      messageDiv.innerHTML = '<i class="fas fa-check-circle"></i> Team member added successfully!';
-      messageDiv.className = 'message success';
+      if (messageDiv) {
+        messageDiv.innerHTML = '<i class="fas fa-check-circle"></i> Team member added successfully!';
+        messageDiv.className = 'message success';
+      }
       
       setTimeout(() => {
         closeModal('addUserModal');
-        loadUsers();
+        loadStats();
       }, 1500);
     } catch (error) {
       console.error("Error adding user:", error);
-      messageDiv.innerHTML = '❌ Error adding team member. Please try again.';
-      messageDiv.className = 'message error';
+      if (messageDiv) {
+        messageDiv.innerHTML = '❌ Error adding team member. Please try again.';
+        messageDiv.className = 'message error';
+      }
     }
   };
 
@@ -972,9 +1029,12 @@
     }
   };
 
-  window.toggleDropdown = function() {
+  window.toggleDropdown = function(event) {
+    event.stopPropagation();
     const dropdown = document.getElementById('dropdownMenu');
-    dropdown.classList.toggle('show');
+    if (dropdown) {
+      dropdown.classList.toggle('show');
+    }
   };
 
   window.logout = function() {
@@ -994,24 +1054,18 @@
   }
 
   // Close dropdown when clicking outside
-  window.onclick = function(event) {
+  document.addEventListener('click', function(event) {
     const dropdown = document.getElementById('dropdownMenu');
     const avatar = document.querySelector('.company-avatar');
-    if (avatar && !avatar.contains(event.target) && dropdown && dropdown.classList.contains('show')) {
+    if (dropdown && avatar && !avatar.contains(event.target)) {
       dropdown.classList.remove('show');
     }
-    
-    const modals = document.querySelectorAll('.modal');
-    modals.forEach(modal => {
-      if (event.target === modal) {
-        modal.classList.remove('show');
-      }
-    });
-  };
+  });
 
+  // Initialize dashboard
   if (checkAuth()) {
     loadStats();
-    loadUsers();
+    updateDateTime();
   }
 </script>
 </body>
