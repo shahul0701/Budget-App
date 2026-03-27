@@ -23,7 +23,7 @@
     }
 
     .container {
-      max-width: 600px;
+      max-width: 700px;
       width: 100%;
     }
 
@@ -250,7 +250,7 @@
     }
 
     .company-list {
-      max-height: 400px;
+      max-height: 500px;
       overflow-y: auto;
       margin-top: 1rem;
     }
@@ -267,6 +267,7 @@
     .company-card:hover {
       border-color: #667eea;
       background: white;
+      transform: translateX(5px);
     }
 
     .company-header {
@@ -274,6 +275,8 @@
       justify-content: space-between;
       align-items: flex-start;
       margin-bottom: 8px;
+      flex-wrap: wrap;
+      gap: 10px;
     }
 
     .company-name {
@@ -373,6 +376,22 @@
       cursor: pointer;
       color: #64748b;
     }
+
+    .company-password-btn {
+      background: #64748b;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+
+    .company-password-btn:hover {
+      background: #475569;
+    }
   </style>
 </head>
 <body>
@@ -425,7 +444,7 @@
         </div>
         <div class="input-group">
           <label>Company Password *</label>
-          <input type="password" id="signupPassword" placeholder="Create strong password">
+          <input type="password" id="signupPassword" placeholder="Create strong password (min 6 chars)">
         </div>
         <div class="input-group">
           <label>Confirm Password *</label>
@@ -470,17 +489,33 @@
     </div>
     <div class="input-group">
       <label>New Password (leave blank to keep current)</label>
-      <input type="password" id="editCompanyPassword" placeholder="Enter new password">
+      <input type="password" id="editCompanyPassword" placeholder="Enter new password (min 6 chars)">
     </div>
     <button class="btn-primary" onclick="updateCompany()">💾 Update Company</button>
     <div id="editMessage"></div>
   </div>
 </div>
 
+<!-- Access Company Modal -->
+<div id="accessModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Access Company Dashboard</h3>
+      <button class="close-modal" onclick="closeAccessModal()">&times;</button>
+    </div>
+    <div class="input-group">
+      <label>Enter Company Password</label>
+      <input type="password" id="accessPassword" placeholder="Enter password to access dashboard">
+    </div>
+    <button class="btn-primary" onclick="verifyAndAccess()">🔓 Access Dashboard</button>
+    <div id="accessMessage"></div>
+  </div>
+</div>
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, query, getDocs, addDoc, where, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
+  import { getFirestore, collection, query, getDocs, addDoc, where, doc, deleteDoc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
@@ -494,29 +529,43 @@
   };
 
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
   const db = getFirestore(app);
+  const auth = getAuth(app);
 
   let currentUser = null;
   let currentCompanies = [];
-  let editingCompanyId = null;
+  let selectedCompany = null;
 
-  // Get current logged in user from session storage
+  // Get current logged in user from Firebase Auth
   function getCurrentUser() {
-    const userData = sessionStorage.getItem('budgetflow_user');
-    if (userData) {
-      currentUser = JSON.parse(userData);
-      document.getElementById('currentUserName').textContent = currentUser.fullName || currentUser.email;
+    const user = auth.currentUser;
+    if (user) {
+      currentUser = {
+        id: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.email.split('@')[0]
+      };
+      document.getElementById('currentUserName').textContent = currentUser.displayName;
       return true;
     }
     return false;
   }
 
   // Check if user is logged in
-  if (!getCurrentUser()) {
-    alert('Please login first!');
-    window.location.href = 'index.html';
-  }
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      currentUser = {
+        id: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.email.split('@')[0]
+      };
+      document.getElementById('currentUserName').textContent = currentUser.displayName;
+      loadUserCompanies();
+    } else {
+      // Redirect to login page
+      window.location.href = 'index.html';
+    }
+  });
 
   window.switchTab = function(tab) {
     const companiesForm = document.getElementById('companiesForm');
@@ -543,7 +592,7 @@
     }
   };
 
-  // Load ONLY companies created by current user
+  // Load ONLY companies created by current user (based on userId field)
   async function loadUserCompanies() {
     if (!currentUser) return;
     
@@ -581,6 +630,7 @@
               </div>
               <div class="company-actions">
                 <button class="btn-edit" onclick="editCompany('${companyId}')">✏️ Edit</button>
+                <button class="company-password-btn" onclick="accessCompany('${companyId}', '${escapeHtml(company.companyName)}')">🔑 Access</button>
                 <button class="btn-danger" onclick="deleteCompany('${companyId}', '${escapeHtml(company.companyName)}')">🗑️ Delete</button>
               </div>
             </div>
@@ -604,6 +654,48 @@
     }
   }
 
+  // Access company with password verification
+  window.accessCompany = function(companyId, companyName) {
+    selectedCompany = currentCompanies.find(c => c.id === companyId);
+    if (!selectedCompany) return;
+    
+    document.getElementById('accessPassword').value = '';
+    document.getElementById('accessMessage').innerHTML = '';
+    document.getElementById('accessModal').classList.add('active');
+  };
+
+  window.verifyAndAccess = function() {
+    const enteredPassword = document.getElementById('accessPassword').value;
+    const messageDiv = document.getElementById('accessMessage');
+    
+    if (!enteredPassword) {
+      messageDiv.innerHTML = '<div class="error-msg">❌ Please enter the password</div>';
+      return;
+    }
+    
+    if (enteredPassword === selectedCompany.password) {
+      // Save company info to session storage
+      sessionStorage.setItem('currentCompany', JSON.stringify({
+        id: selectedCompany.id,
+        name: selectedCompany.companyName,
+        type: selectedCompany.companyType
+      }));
+      sessionStorage.setItem('isCompanyLoggedIn', 'true');
+      
+      closeAccessModal();
+      alert(`✅ Access granted to ${selectedCompany.companyName}!`);
+      // Redirect to dashboard
+      window.location.href = 'dashboard.html';
+    } else {
+      messageDiv.innerHTML = '<div class="error-msg">❌ Incorrect password! Access denied.</div>';
+    }
+  };
+
+  window.closeAccessModal = function() {
+    document.getElementById('accessModal').classList.remove('active');
+    selectedCompany = null;
+  };
+
   // Edit company
   window.editCompany = function(companyId) {
     const company = currentCompanies.find(c => c.id === companyId);
@@ -618,6 +710,8 @@
     
     document.getElementById('editModal').classList.add('active');
   };
+
+  let editingCompanyId = null;
 
   // Update company
   window.updateCompany = async function() {
@@ -643,6 +737,9 @@
       
       if (newPassword && newPassword.length >= 6) {
         updateData.password = newPassword;
+      } else if (newPassword && newPassword.length < 6) {
+        messageDiv.innerHTML = '<div class="error-msg">❌ Password must be at least 6 characters</div>';
+        return;
       }
       
       await updateDoc(companyRef, updateData);
@@ -656,13 +753,13 @@
       
     } catch (error) {
       console.error("Error updating company:", error);
-      messageDiv.innerHTML = '<div class="error-msg">❌ Error updating company</div>';
+      messageDiv.innerHTML = '<div class="error-msg">❌ Error updating company: ' + error.message + '</div>';
     }
   };
 
   // Delete company
   window.deleteCompany = async function(companyId, companyName) {
-    const confirmDelete = confirm(`Are you sure you want to delete "${companyName}"?\n\nThis action cannot be undone!`);
+    const confirmDelete = confirm(`Are you sure you want to delete "${companyName}"?\n\n⚠️ This action cannot be undone! All company data will be permanently deleted.`);
     
     if (!confirmDelete) return;
     
@@ -758,11 +855,15 @@
     }
   };
 
-  window.logoutUser = function() {
-    sessionStorage.removeItem('budgetflow_user');
-    sessionStorage.removeItem('currentCompany');
-    sessionStorage.removeItem('isLoggedIn');
-    window.location.href = 'index.html';
+  window.logoutUser = async function() {
+    try {
+      await signOut(auth);
+      sessionStorage.removeItem('currentCompany');
+      sessionStorage.removeItem('isCompanyLoggedIn');
+      window.location.href = 'index.html';
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   function escapeHtml(str) {
@@ -775,14 +876,15 @@
     });
   }
 
-  // Load companies on page load
-  loadUserCompanies();
-
   // Close modal when clicking outside
   window.onclick = function(event) {
-    const modal = document.getElementById('editModal');
-    if (event.target === modal) {
+    const editModal = document.getElementById('editModal');
+    const accessModal = document.getElementById('accessModal');
+    if (event.target === editModal) {
       closeEditModal();
+    }
+    if (event.target === accessModal) {
+      closeAccessModal();
     }
   };
 </script>
