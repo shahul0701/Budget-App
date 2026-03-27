@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BudgetFlow | Company Login</title>
+  <title>BudgetFlow | Company Management</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <style>
     * {
@@ -205,10 +205,6 @@
       margin-top: 4px;
     }
 
-    .password-input-group {
-      margin-top: 1rem;
-    }
-
     .loading {
       text-align: center;
       padding: 2rem;
@@ -225,7 +221,7 @@
   <div class="card">
     <div class="header">
       <h1>🏢 BudgetFlow</h1>
-      <p>Secure Company Management System</p>
+      <p>Company Management System</p>
     </div>
     
     <div class="tabs">
@@ -234,15 +230,15 @@
     </div>
 
     <div class="form-container">
-      <!-- Login Form -->
+      <!-- Login Form - Shows ONLY companies created by the current user -->
       <div id="loginForm" class="form active">
-        <h3 style="margin-bottom: 1.5rem;">Select Your Company</h3>
+        <h3 style="margin-bottom: 1.5rem;">Your Companies</h3>
         <div id="companyList">
-          <div class="loading">Loading companies...</div>
+          <div class="loading">Loading your companies...</div>
         </div>
       </div>
 
-      <!-- Signup Form -->
+      <!-- Signup Form - Create new company for current user -->
       <div id="signupForm" class="form">
         <h3 style="margin-bottom: 1.5rem;">Register New Company</h3>
         <div class="input-group">
@@ -281,7 +277,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, query, getDocs, addDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, collection, query, getDocs, addDoc, where, doc, getDoc, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
 
   const firebaseConfig = {
@@ -299,7 +295,33 @@
   const analytics = getAnalytics(app);
   const db = getFirestore(app);
 
+  let currentUser = null;
   let currentCompanies = [];
+
+  // Get or create user from localStorage (simple user tracking without login page)
+  function initializeUser() {
+    let userId = localStorage.getItem('budgetflow_userId');
+    let userName = localStorage.getItem('budgetflow_userName');
+    
+    if (!userId) {
+      // Create a new anonymous user
+      userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      userName = 'User_' + Math.floor(Math.random() * 10000);
+      localStorage.setItem('budgetflow_userId', userId);
+      localStorage.setItem('budgetflow_userName', userName);
+    }
+    
+    currentUser = {
+      id: userId,
+      name: userName
+    };
+    
+    // Update header to show current user
+    const header = document.querySelector('.header p');
+    if (header) {
+      header.innerHTML = `Welcome, ${userName} • Your private companies only`;
+    }
+  }
 
   window.switchTab = function(tab) {
     const loginForm = document.getElementById('loginForm');
@@ -311,7 +333,7 @@
       signupForm.classList.remove('active');
       tabs[0].classList.add('active');
       tabs[1].classList.remove('active');
-      loadCompanies();
+      loadUserCompanies(); // Load ONLY this user's companies
     } else {
       loginForm.classList.remove('active');
       signupForm.classList.add('active');
@@ -320,16 +342,23 @@
     }
   };
 
-  async function loadCompanies() {
+  // Load ONLY companies created by this user
+  async function loadUserCompanies() {
+    if (!currentUser) return;
+    
+    const companyListDiv = document.getElementById('companyList');
+    companyListDiv.innerHTML = '<div class="loading">Loading your companies...</div>';
+    
     try {
+      // Query companies where userId matches current user's ID
       const companiesRef = collection(db, 'companies');
-      const querySnapshot = await getDocs(companiesRef);
-      const companyListDiv = document.getElementById('companyList');
+      const userCompaniesQuery = query(companiesRef, where("userId", "==", currentUser.id));
+      const querySnapshot = await getDocs(userCompaniesQuery);
       
       if (querySnapshot.empty) {
         companyListDiv.innerHTML = `
           <div style="text-align: center; padding: 2rem;">
-            <p style="color: #64748b;">No companies found.</p>
+            <p style="color: #64748b;">📭 You haven't created any companies yet.</p>
             <p style="color: #64748b; font-size: 0.85rem;">Switch to "Create Company" to get started.</p>
           </div>
         `;
@@ -351,11 +380,12 @@
       });
       html += '</div>';
       companyListDiv.innerHTML = html;
+      
     } catch (error) {
       console.error("Error loading companies:", error);
-      document.getElementById('companyList').innerHTML = `
+      companyListDiv.innerHTML = `
         <div style="text-align: center; padding: 2rem; color: #dc2626;">
-          ❌ Error loading companies. Please refresh.
+          ❌ Error loading your companies. Please refresh.
         </div>
       `;
     }
@@ -377,6 +407,7 @@
       }));
       sessionStorage.setItem('isLoggedIn', 'true');
       
+      alert(`✅ Access granted to ${companyName}!`);
       // Redirect to dashboard
       window.location.href = 'dashboard.html';
     } else {
@@ -385,6 +416,11 @@
   };
 
   window.createCompany = async function() {
+    if (!currentUser) {
+      alert('Error: User not found. Please refresh the page.');
+      return;
+    }
+    
     const companyName = document.getElementById('companyName').value.trim();
     const companyType = document.getElementById('companyType').value;
     const password = document.getElementById('signupPassword').value.trim();
@@ -410,34 +446,33 @@
     }
     
     try {
+      // Check if this user already has a company with same name
       const companiesRef = collection(db, 'companies');
-      const q = query(companiesRef, where("companyName", "==", companyName));
-      const querySnapshot = await getDocs(q);
+      const userCompanyQuery = query(
+        companiesRef, 
+        where("userId", "==", currentUser.id), 
+        where("companyName", "==", companyName)
+      );
+      const existingCheck = await getDocs(userCompanyQuery);
       
-      if (!querySnapshot.empty) {
-        messageDiv.innerHTML = '<div class="error-msg">❌ Company name already exists!</div>';
+      if (!existingCheck.empty) {
+        messageDiv.innerHTML = '<div class="error-msg">❌ You already have a company with this name!</div>';
         return;
       }
       
-      // Create company
+      // Create company with userId to link it to current user
       const docRef = await addDoc(collection(db, 'companies'), {
         companyName: companyName,
         companyType: companyType,
         password: password,
         details: details,
-        createdAt: Date.now()
+        userId: currentUser.id,
+        userIdentifier: currentUser.id,
+        createdAt: new Date().toISOString(),
+        createdTimestamp: Date.now()
       });
       
-      // Create default admin user
-      await addDoc(collection(db, `companies/${docRef.id}/users`), {
-        fullName: "Admin Manager",
-        email: "admin@" + companyName.replace(/\s/g,'') + ".local",
-        password: "admin123",
-        role: "owner",
-        createdAt: Date.now()
-      });
-      
-      messageDiv.innerHTML = '<div class="success-msg">✅ Company created successfully! You can now login.</div>';
+      messageDiv.innerHTML = '<div class="success-msg">✅ Company created successfully! It will appear in your companies list.</div>';
       
       // Clear form
       document.getElementById('companyName').value = '';
@@ -445,7 +480,7 @@
       document.getElementById('confirmPassword').value = '';
       document.getElementById('companyDetails').value = '';
       
-      // Switch to login tab after 2 seconds
+      // Switch back to login tab after 2 seconds
       setTimeout(() => {
         switchTab('login');
         messageDiv.innerHTML = '';
@@ -467,8 +502,9 @@
     });
   }
 
-  // Load companies on page load
-  loadCompanies();
+  // Initialize user and load companies
+  initializeUser();
+  loadUserCompanies();
 </script>
 </body>
 </html>
