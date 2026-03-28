@@ -705,34 +705,46 @@
   let inventoryChart = null;
 
   function checkAuth() {
-    const isLoggedIn = sessionStorage.getItem('isLoggedIn');
+    // FIXED: Check for 'companyLoggedIn' instead of 'isLoggedIn'
+    const companyLoggedIn = sessionStorage.getItem('companyLoggedIn');
     const companyData = sessionStorage.getItem('currentCompany');
     
-    console.log("Checking auth - isLoggedIn:", isLoggedIn);
+    console.log("Checking auth - companyLoggedIn:", companyLoggedIn);
     console.log("Company data:", companyData);
     
-    if (!isLoggedIn || !companyData) {
-      window.location.href = 'login.html';
+    // Also check for companyAuth as backup
+    const companyAuth = sessionStorage.getItem('companyAuth');
+    
+    if ((!companyLoggedIn && !companyAuth) || !companyData) {
+      console.log("No valid session found, redirecting to index.html");
+      window.location.href = 'index.html';
       return false;
     }
     
-    currentCompany = JSON.parse(companyData);
-    console.log("Current company loaded:", currentCompany);
-    
-    // Update header with company name
-    const companyHeader = document.getElementById('companyNameHeader');
-    if (companyHeader) {
-      companyHeader.innerHTML = currentCompany.name;
+    try {
+      currentCompany = JSON.parse(companyData);
+      console.log("Current company loaded:", currentCompany);
+      
+      // Update header with company name
+      const companyHeader = document.getElementById('companyNameHeader');
+      if (companyHeader) {
+        companyHeader.innerHTML = currentCompany.name || currentCompany.companyName;
+      }
+      
+      // Update avatar with first letter
+      const companyName = currentCompany.name || currentCompany.companyName;
+      const firstLetter = companyName ? companyName.charAt(0).toUpperCase() : 'C';
+      const avatarLetter = document.getElementById('avatarLetter');
+      if (avatarLetter) {
+        avatarLetter.innerHTML = firstLetter;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error("Error parsing company data:", error);
+      window.location.href = 'index.html';
+      return false;
     }
-    
-    // Update avatar with first letter
-    const firstLetter = currentCompany.name.charAt(0).toUpperCase();
-    const avatarLetter = document.getElementById('avatarLetter');
-    if (avatarLetter) {
-      avatarLetter.innerHTML = firstLetter;
-    }
-    
-    return true;
   }
 
   function updateDateTime() {
@@ -751,8 +763,9 @@
     else if (hour < 17) greeting = 'Good Afternoon';
     else greeting = 'Good Evening';
     
+    const companyName = currentCompany ? (currentCompany.name || currentCompany.companyName) : 'there';
     if (greetingElement && currentCompany) {
-      greetingElement.innerHTML = `${greeting}, ${currentCompany.name}! Welcome back!`;
+      greetingElement.innerHTML = `${greeting}, ${companyName}! Welcome back!`;
     }
   }
 
@@ -763,25 +776,27 @@
     try {
       if (!currentCompany) return;
       
+      const companyId = currentCompany.id;
+      
       // Load users count
-      const usersRef = collection(db, `companies/${currentCompany.id}/users`);
+      const usersRef = collection(db, `companies/${companyId}/users`);
       const usersSnap = await getDocs(usersRef);
       document.getElementById('totalUsers').innerHTML = usersSnap.size;
       
       // Load sales count
-      const salesRef = collection(db, `companies/${currentCompany.id}/sales`);
+      const salesRef = collection(db, `companies/${companyId}/sales`);
       const salesSnap = await getDocs(salesRef);
       const totalSales = salesSnap.size;
       document.getElementById('totalSales').innerHTML = totalSales;
       
       // Load purchases count
-      const purchasesRef = collection(db, `companies/${currentCompany.id}/purchases`);
+      const purchasesRef = collection(db, `companies/${companyId}/purchases`);
       const purchasesSnap = await getDocs(purchasesRef);
       const totalPurchases = purchasesSnap.size;
       document.getElementById('totalPurchases').innerHTML = totalPurchases;
       
       // Load stocks count
-      const stocksRef = collection(db, `companies/${currentCompany.id}/stocks`);
+      const stocksRef = collection(db, `companies/${companyId}/stocks`);
       const stocksSnap = await getDocs(stocksRef);
       const totalStocks = stocksSnap.size;
       document.getElementById('totalStocks').innerHTML = totalStocks;
@@ -925,11 +940,12 @@
       usersHtml += '<p style="color: #64748b;">No team members added yet.</p>';
     }
     
+    const companyName = currentCompany.name || currentCompany.companyName;
     content.innerHTML = `
       <div class="profile-details">
         <h4><i class="fas fa-user-circle"></i> Admin Profile</h4>
         <p><i class="fas fa-user"></i> <strong>Name:</strong> Admin Manager</p>
-        <p><i class="fas fa-envelope"></i> <strong>Email:</strong> admin@${currentCompany.name.replace(/\s/g,'')}.local</p>
+        <p><i class="fas fa-envelope"></i> <strong>Email:</strong> admin@${companyName.replace(/\s/g,'')}.local</p>
         <p><i class="fas fa-briefcase"></i> <strong>Role:</strong> Company Owner</p>
         <p><i class="fas fa-calendar"></i> <strong>Joined:</strong> ${new Date(companyData?.createdAt).toLocaleDateString() || 'Recently'}</p>
       </div>
@@ -1038,9 +1054,12 @@
   };
 
   window.logout = function() {
-    sessionStorage.removeItem('isLoggedIn');
+    // Clear all session storage items
+    sessionStorage.removeItem('companyLoggedIn');
     sessionStorage.removeItem('currentCompany');
-    window.location.href = 'login.html';
+    sessionStorage.removeItem('companyAuth');
+    sessionStorage.removeItem('companyLoginTime');
+    window.location.href = 'index.html';
   };
 
   function escapeHtml(str) {
