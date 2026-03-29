@@ -237,6 +237,12 @@
     }
     .balance-valid { background: #d4edda; color: #155724; }
     .balance-invalid { background: #f8d7da; color: #721c24; }
+    .no-data-message {
+      text-align: center;
+      padding: 40px;
+      color: #6b7280;
+      font-size: 1rem;
+    }
     @media (max-width: 768px) {
       .kpi-value { font-size: 1.4rem; }
       .bs-item { flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -428,12 +434,19 @@
     try {
       const q = collection(db, "users", currentUser.uid, "transactions");
       const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(tx => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      console.log(`Fetched ${all.length} total transactions for user.`);
+      const filtered = all.filter(tx => {
         if (!tx.DATE) return false;
         let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
         return d >= start && d <= end;
       });
-    } catch(e) { console.error(e); return []; }
+      console.log(`Period ${formatPeriod(start, end)}: ${filtered.length} transactions found.`);
+      if (filtered.length === 0) {
+        console.warn("No transactions in this period. Check your data or change the period.");
+      }
+      return filtered;
+    } catch(e) { console.error("fetchTransactions error", e); return []; }
   }
 
   async function loadCOA() {
@@ -445,6 +458,7 @@
         const data = doc.data();
         map[data.name] = { type: data.type, category: data.category };
       });
+      console.log("COA loaded:", map);
       return map;
     } catch(e) { return {}; }
   }
@@ -475,7 +489,19 @@
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       if (net === 0) return;
-      const coaInfo = coaMap[acc];
+      // Try case‑insensitive match with COA
+      let coaInfo = null;
+      const exactMatch = coaMap[acc];
+      if (exactMatch) coaInfo = exactMatch;
+      else {
+        const lowerAcc = acc.toLowerCase();
+        for (let [coaName, info] of Object.entries(coaMap)) {
+          if (coaName.toLowerCase() === lowerAcc) {
+            coaInfo = info;
+            break;
+          }
+        }
+      }
       const type = classifyAccount(acc, coaInfo);
       if (type === 'Asset') {
         if (isBankAccount(acc, coaInfo)) {
@@ -507,7 +533,18 @@
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
-      const coaInfo = coaMap[acc];
+      let coaInfo = null;
+      const exactMatch = coaMap[acc];
+      if (exactMatch) coaInfo = exactMatch;
+      else {
+        const lowerAcc = acc.toLowerCase();
+        for (let [coaName, info] of Object.entries(coaMap)) {
+          if (coaName.toLowerCase() === lowerAcc) {
+            coaInfo = info;
+            break;
+          }
+        }
+      }
       const type = classifyAccount(acc, coaInfo);
       const lower = acc.toLowerCase();
       if (type === 'Income' || type === 'Expense') {
@@ -606,25 +643,37 @@
     } else document.getElementById("bsAssetsTrend").innerHTML = "";
     // Assets breakdown
     const assetsContainer = document.getElementById("assetsBreakdown");
-    let assetsHtml = `<div class="bs-item"><div><strong>Bank Accounts</strong></div><div class="amount positive">${formatINR(Object.values(curr.banks).reduce((a,b)=>a+b,0))}</div></div>`;
-    for (let [name, val] of Object.entries(curr.banks)) {
-      assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
+    if (Object.values(curr.banks).length === 0 && Object.values(curr.otherAssets).length === 0) {
+      assetsContainer.innerHTML = '<div class="no-data-message"><i class="fas fa-info-circle"></i> No asset accounts with balance.</div>';
+    } else {
+      let assetsHtml = `<div class="bs-item"><div><strong>Bank Accounts</strong></div><div class="amount positive">${formatINR(Object.values(curr.banks).reduce((a,b)=>a+b,0))}</div></div>`;
+      for (let [name, val] of Object.entries(curr.banks)) {
+        assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
+      }
+      assetsHtml += `<div class="bs-item"><div><strong>Other Assets</strong></div><div class="amount positive">${formatINR(Object.values(curr.otherAssets).reduce((a,b)=>a+b,0))}</div></div>`;
+      for (let [name, val] of Object.entries(curr.otherAssets)) {
+        assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
+      }
+      assetsHtml += `<div class="bs-item bs-total"><div><strong>Total Assets</strong></div><div class="amount positive">${formatINR(totalAssets)}</div></div>`;
+      assetsContainer.innerHTML = assetsHtml;
     }
-    assetsHtml += `<div class="bs-item"><div><strong>Other Assets</strong></div><div class="amount positive">${formatINR(Object.values(curr.otherAssets).reduce((a,b)=>a+b,0))}</div></div>`;
-    for (let [name, val] of Object.entries(curr.otherAssets)) {
-      assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
-    }
-    assetsHtml += `<div class="bs-item bs-total"><div><strong>Total Assets</strong></div><div class="amount positive">${formatINR(totalAssets)}</div></div>`;
-    assetsContainer.innerHTML = assetsHtml;
     // Liabilities
     let liabHtml = '';
-    for (let [name, val] of Object.entries(curr.liabilities)) liabHtml += `<div class="bs-item"><div>${name}</div><div class="amount negative">${formatINR(val)}</div></div>`;
-    liabHtml += `<div class="bs-item bs-total"><div><strong>Total Liabilities</strong></div><div class="amount negative">${formatINR(totalLiab)}</div></div>`;
+    if (Object.values(curr.liabilities).length === 0) {
+      liabHtml = '<div class="no-data-message"><i class="fas fa-info-circle"></i> No liabilities.</div>';
+    } else {
+      for (let [name, val] of Object.entries(curr.liabilities)) liabHtml += `<div class="bs-item"><div>${name}</div><div class="amount negative">${formatINR(val)}</div></div>`;
+      liabHtml += `<div class="bs-item bs-total"><div><strong>Total Liabilities</strong></div><div class="amount negative">${formatINR(totalLiab)}</div></div>`;
+    }
     document.getElementById("liabilitiesBreakdown").innerHTML = liabHtml;
     // Equity
     let eqHtml = '';
-    for (let [name, val] of Object.entries(curr.equityAccounts)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
-    eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div></div>`;
+    if (Object.values(curr.equityAccounts).length === 0) {
+      eqHtml = '<div class="no-data-message"><i class="fas fa-info-circle"></i> No equity.</div>';
+    } else {
+      for (let [name, val] of Object.entries(curr.equityAccounts)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
+      eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div></div>`;
+    }
     document.getElementById("equityBreakdown").innerHTML = eqHtml;
   }
 
