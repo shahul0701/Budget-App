@@ -192,11 +192,6 @@
       padding: 12px 0;
       border-bottom: 1px solid #f1f5f9;
     }
-    .bs-subgroup {
-      margin-left: 20px;
-      border-left: 2px solid #e2e8f0;
-      padding-left: 16px;
-    }
     .bs-total {
       font-weight: 800;
       border-top: 2px solid #e2e8f0;
@@ -259,7 +254,6 @@
     </div>
   </header>
 
-  <!-- Controls -->
   <div class="controls-panel">
     <div class="filter-group"><label>REPORTING PERIOD</label>
       <select id="reportPeriod">
@@ -296,7 +290,6 @@
     </div>
   </div>
 
-  <!-- Period header -->
   <div class="period-header">
     <div class="period-badge"><i class="fas fa-calendar-alt"></i> Current: <span id="currentPeriodLabel">-</span></div>
     <div class="period-badge" id="prev1Wrapper" style="display:none;"><i class="fas fa-calendar-week"></i> Previous: <span id="prev1PeriodLabel">-</span></div>
@@ -308,13 +301,11 @@
     <button id="exportPDF" class="btn-icon"><i class="fas fa-file-pdf"></i> PDF</button>
   </div>
 
-  <!-- Tabs -->
   <div class="tabs">
     <button class="tab-btn active" data-tab="balance">Balance Sheet</button>
     <button class="tab-btn" data-tab="cashflow">Cash Flow Statement</button>
   </div>
 
-  <!-- Balance Sheet Tab -->
   <div id="balanceSheetTab" class="tab-content active">
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label"><i class="fas fa-building"></i> Total Assets</div><div class="kpi-value" id="bsTotalAssets">₹0</div><div class="kpi-trend" id="bsAssetsTrend"></div></div>
@@ -328,7 +319,6 @@
     <div class="bs-section"><div class="bs-header"><i class="fas fa-chart-line"></i> Equity</div><div id="equityBreakdown" class="bs-body"></div></div>
   </div>
 
-  <!-- Cash Flow Tab -->
   <div id="cashflowTab" class="tab-content">
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label"><i class="fas fa-chart-line"></i> Net Cash Flow</div><div class="kpi-value" id="cfNetCash">₹0</div><div class="kpi-trend" id="cfTrend"></div></div>
@@ -462,7 +452,7 @@
   function classifyAccount(name, coaInfo) {
     if (coaInfo && coaInfo.type) return coaInfo.type;
     const lower = name.toLowerCase();
-    if (lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis') || lower.includes('hdfc')) return 'Asset';
+    if (lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis')) return 'Asset';
     if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit')) return 'Liability';
     if (lower.includes('equity') || lower.includes('capital') || lower.includes('retained')) return 'Equity';
     if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income')) return 'Income';
@@ -477,7 +467,8 @@
   }
 
   function computeBalanceSheet(transactions, coaMap) {
-    let banks = {}, otherAssets = {}, liabilities = {}, equity = {};
+    let banks = {}, otherAssets = {}, liabilities = {}, equityAccounts = {};
+    let totalIncome = 0, totalExpense = 0;
     transactions.forEach(tx => {
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
       const inc = parseFloat(tx.INCOME) || 0;
@@ -495,14 +486,18 @@
       } else if (type === 'Liability') {
         liabilities[acc] = (liabilities[acc] || 0) + net;
       } else if (type === 'Equity') {
-        equity[acc] = (equity[acc] || 0) + net;
+        equityAccounts[acc] = (equityAccounts[acc] || 0) + net;
       } else if (type === 'Income') {
-        equity[acc] = (equity[acc] || 0) + net;
+        totalIncome += net;
       } else if (type === 'Expense') {
-        equity[acc] = (equity[acc] || 0) - Math.abs(net);
+        totalExpense += Math.abs(net);
       }
     });
-    return { banks, otherAssets, liabilities, equity };
+    const netProfit = totalIncome - totalExpense;
+    if (Math.abs(netProfit) > 0.01) {
+      equityAccounts["Net Profit / (Loss)"] = netProfit;
+    }
+    return { banks, otherAssets, liabilities, equityAccounts };
   }
 
   function computeCashFlow(transactions, coaMap) {
@@ -596,7 +591,7 @@
     const p1 = prev1Period?.bs, p2 = prev2Period?.bs;
     const totalAssets = (Object.values(curr.banks).reduce((a,b)=>a+b,0) + Object.values(curr.otherAssets).reduce((a,b)=>a+b,0));
     const totalLiab = Object.values(curr.liabilities).reduce((a,b)=>a+b,0);
-    const totalEq = Object.values(curr.equity).reduce((a,b)=>a+b,0);
+    const totalEq = Object.values(curr.equityAccounts).reduce((a,b)=>a+b,0);
     const balanced = Math.abs(totalAssets - (totalLiab + totalEq)) < 0.01;
     document.getElementById("bsTotalAssets").innerHTML = formatINR(totalAssets);
     document.getElementById("bsTotalLiabilities").innerHTML = formatINR(totalLiab);
@@ -628,7 +623,7 @@
     document.getElementById("liabilitiesBreakdown").innerHTML = liabHtml;
     // Equity
     let eqHtml = '';
-    for (let [name, val] of Object.entries(curr.equity)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
+    for (let [name, val] of Object.entries(curr.equityAccounts)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
     eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div></div>`;
     document.getElementById("equityBreakdown").innerHTML = eqHtml;
   }
@@ -657,7 +652,7 @@
     if (bsChart) bsChart.destroy();
     const totalAssets = (Object.values(currentBS.banks).reduce((a,b)=>a+b,0) + Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0));
     const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
-    const totalEq = Object.values(currentBS.equity).reduce((a,b)=>a+b,0);
+    const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
     bsChart = new Chart(ctx1, {
       type: document.getElementById("chartType").value,
       data: { labels: ["Assets", "Liabilities", "Equity"], datasets: [{ data: [totalAssets, totalLiab, totalEq], backgroundColor: ["#10b981", "#ef4444", "#3b82f6"] }] },
@@ -694,8 +689,8 @@
       wsData.push(["Total Liabilities", Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0)]);
       wsData.push([]);
       wsData.push(["Equity"]);
-      for (let [n,v] of Object.entries(currentBS.equity)) wsData.push([n, v]);
-      wsData.push(["Total Equity", Object.values(currentBS.equity).reduce((a,b)=>a+b,0)]);
+      for (let [n,v] of Object.entries(currentBS.equityAccounts)) wsData.push([n, v]);
+      wsData.push(["Total Equity", Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0)]);
     } else {
       wsData.push(["Cash Flow Statement", currentPeriod.text]);
       wsData.push([]);
@@ -740,8 +735,8 @@
         ["Total Liabilities", Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0)],
         [],
         ["Equity", ""],
-        ...Object.entries(currentBS.equity).map(([n,v]) => [n, v]),
-        ["Total Equity", Object.values(currentBS.equity).reduce((a,b)=>a+b,0)]
+        ...Object.entries(currentBS.equityAccounts).map(([n,v]) => [n, v]),
+        ["Total Equity", Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0)]
       ];
     } else {
       tableData = [
