@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Profit & Loss | Intelligent Period Comparison</title>
+<title>Profit & Loss | Smart Period Comparison</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -195,7 +195,7 @@ select, input, .ctrl-btn {
 .pl-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 600px;
+  min-width: 500px;
 }
 .pl-table th {
   text-align: left;
@@ -360,7 +360,7 @@ select, input, .ctrl-btn {
 
   <div class="profitloss-table">
     <div class="table-header"><h3><i class="fas fa-file-invoice-dollar"></i> Profit & Loss Statement</h3></div>
-    <table class="pl-table" id="pnlTable"><thead id="pnlTableHead"></thead><tbody id="pnlTableBody">叭<td colspan="6">Loading data......</td> </tr></tbody> </table>
+    <table class="pl-table" id="pnlTable"><thead id="pnlTableHead"></thead><tbody id="pnlTableBody">叭<td colspan="6">Loading data...  </td>  </tr>  </tbody>  </table>
   </div>
 
   <div class="comparison-section">
@@ -381,9 +381,9 @@ const app = initializeApp({ apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A", a
 const db = getFirestore(app);
 const auth = getAuth(app);
 let currentUser = null, currentChart = null;
-let currentPeriod = { transactions: [], summary: null, periodText: "", start: null, end: null };
-let prevPeriod1 = { transactions: [], summary: null, periodText: "" };
-let prevPeriod2 = { transactions: [], summary: null, periodText: "" };
+let currentPeriod = { summary: null, periodText: "", start: null, end: null };
+let prev1Summary = null;    // summary of previous period
+let prev2Summary = null;    // summary of prior‑previous (only for two‑step comparisons)
 let showThreePeriods = false;
 
 function formatINR(amt) { return `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
@@ -489,52 +489,55 @@ async function loadReport() {
     const { start, end } = getDateRange(period, customStart, customEnd);
     currentPeriod.start = start; currentPeriod.end = end;
     currentPeriod.periodText = formatPeriod(start, end);
-    currentPeriod.transactions = await fetchTransactions(start, end);
-    currentPeriod.summary = processTransactions(currentPeriod.transactions);
+    const currTransactions = await fetchTransactions(start, end);
+    currentPeriod.summary = processTransactions(currTransactions);
     
     const compType = document.getElementById("comparisonType").value;
     const compStart = document.getElementById("compareStartDate").value, compEnd = document.getElementById("compareEndDate").value;
     const compRange = getComparisonRange(start, end, compType, compStart, compEnd);
     
-    // Determine if we need three periods (only for "two*" types)
     showThreePeriods = (compType === 'twoQuartersBack' || compType === 'twoYearsBack');
     
     if (compRange) {
       const trans1 = await fetchTransactions(compRange.start, compRange.end);
-      prevPeriod1 = { transactions: trans1, summary: processTransactions(trans1), periodText: formatPeriod(compRange.start, compRange.end), start: compRange.start, end: compRange.end };
+      prev1Summary = processTransactions(trans1);
+      const prevPeriodText = formatPeriod(compRange.start, compRange.end);
+      // store period text for display
       if (showThreePeriods) {
         const compRange2 = getComparisonRange(compRange.start, compRange.end, compType, compStart, compEnd);
         if (compRange2) {
           const trans2 = await fetchTransactions(compRange2.start, compRange2.end);
-          prevPeriod2 = { transactions: trans2, summary: processTransactions(trans2), periodText: formatPeriod(compRange2.start, compRange2.end) };
-        } else { prevPeriod2 = { transactions: [], summary: null, periodText: "" }; }
+          prev2Summary = processTransactions(trans2);
+          document.getElementById("prev2PeriodLabel").innerHTML = formatPeriod(compRange2.start, compRange2.end);
+          document.getElementById("prev2Wrapper").style.display = "flex";
+        } else {
+          prev2Summary = null;
+          document.getElementById("prev2Wrapper").style.display = "none";
+        }
+        document.getElementById("prev1PeriodLabel").innerHTML = prevPeriodText;
+        document.getElementById("prev1Wrapper").style.display = "flex";
       } else {
-        prevPeriod2 = { transactions: [], summary: null, periodText: "" };
+        prev2Summary = null;
+        document.getElementById("prev1PeriodLabel").innerHTML = prevPeriodText;
+        document.getElementById("prev1Wrapper").style.display = "flex";
+        document.getElementById("prev2Wrapper").style.display = "none";
       }
     } else {
-      prevPeriod1 = { transactions: [], summary: null, periodText: "" };
-      prevPeriod2 = { transactions: [], summary: null, periodText: "" };
+      prev1Summary = null;
+      prev2Summary = null;
+      document.getElementById("prev1Wrapper").style.display = "none";
+      document.getElementById("prev2Wrapper").style.display = "none";
     }
     
-    // update period header badges
     document.getElementById("currentPeriodLabel").innerHTML = currentPeriod.periodText;
-    if (prevPeriod1.summary) {
-      document.getElementById("prev1Wrapper").style.display = "flex";
-      document.getElementById("prev1PeriodLabel").innerHTML = prevPeriod1.periodText;
-    } else { document.getElementById("prev1Wrapper").style.display = "none"; }
-    if (prevPeriod2.summary && showThreePeriods) {
-      document.getElementById("prev2Wrapper").style.display = "flex";
-      document.getElementById("prev2PeriodLabel").innerHTML = prevPeriod2.periodText;
-    } else { document.getElementById("prev2Wrapper").style.display = "none"; }
-    
     renderDashboard();
   } finally { loading.style.display = "none"; }
 }
 
 function renderDashboard() {
   const curr = currentPeriod.summary;
-  const p1 = prevPeriod1.summary;
-  const p2 = showThreePeriods ? prevPeriod2.summary : null;
+  const p1 = prev1Summary;
+  const p2 = showThreePeriods ? prev2Summary : null;
   document.getElementById("totalIncome").innerHTML = formatINR(curr.totalIncome);
   document.getElementById("totalExpenses").innerHTML = formatINR(curr.totalExpense);
   const netElem = document.getElementById("netProfit");
@@ -570,11 +573,11 @@ function renderDashboard() {
 
 function renderPNLTable(curr, p1, p2) {
   const thead = document.getElementById("pnlTableHead");
-  let headerHtml = `叭<th>ACCOUNT</th><th style="text-align:right;">CURRENT NET (₹)</th>`;
+  let headerHtml = `叭<th>ACCOUNT</th><th style="text-align:right;">NET (₹)</th>`;
   if (p1) headerHtml += `<th style="text-align:right;">PREVIOUS NET (₹)</th>`;
-  if (p2) headerHtml += `<th style="text-align:right;">PRIOR-PREV NET (₹)</th>`;
+  if (p2) headerHtml += `<th style="text-align:right;">PRIOR‑PREV NET (₹)</th>`;
   if (p1) headerHtml += `<th style="text-align:right;">Δ vs PREV</th>`;
-  if (p2) headerHtml += `<th style="text-align:right;">Δ vs PRIOR-PREV</th>`;
+  if (p2) headerHtml += `<th style="text-align:right;">Δ vs PRIOR‑PREV</th>`;
   headerHtml += `</tr>`;
   thead.innerHTML = headerHtml;
   
@@ -618,8 +621,8 @@ function renderPNLTable(curr, p1, p2) {
 }
 
 function renderTopLists(curr) {
-  document.getElementById("topIncomeList").innerHTML = curr.incomeCategories.slice(0,5).map(([c,a])=>`<div class="comparison-item"><span>${c}</span><span class="income-amount">${formatINR(a)}</span></div>`).join('') || '<div>No data</div>';
-  document.getElementById("topExpenseList").innerHTML = curr.expenseCategories.slice(0,5).map(([c,a])=>`<div class="comparison-item"><span>${c}</span><span class="expense-amount">${formatINR(a)}</span></div>`).join('') || '<div>No data</div>';
+  document.getElementById("topIncomeList").innerHTML = curr.incomeCategories.slice(0,5).map(([c,a])=>`<div class="comparison-item"><span>${c}</span><span class="income-amount">${formatINR(a)}</span></div>`).join('') || '<div>No income data</div>';
+  document.getElementById("topExpenseList").innerHTML = curr.expenseCategories.slice(0,5).map(([c,a])=>`<div class="comparison-item"><span>${c}</span><span class="expense-amount">${formatINR(a)}</span></div>`).join('') || '<div>No expense data</div>';
 }
 
 function renderInsights(curr, p1, p2) {
@@ -652,9 +655,9 @@ async function exportToPDF() {
   doc.setFillColor(30,64,175); doc.rect(0,0,297,45,'F');
   doc.setTextColor(255,255,255); doc.setFontSize(22); doc.text("PROFIT & LOSS STATEMENT",148,20,{align:'center'});
   doc.setFontSize(10); doc.text(currentPeriod.periodText,148,32,{align:'center'});
-  if (prevPeriod1.summary) doc.text(`Compared to: ${prevPeriod1.periodText}`,148,38,{align:'center'});
+  if (prev1Summary) doc.text(`Compared to: ${document.getElementById("prev1PeriodLabel").innerText}`,148,38,{align:'center'});
   doc.setTextColor(0,0,0);
-  const curr = currentPeriod.summary, p1 = prevPeriod1.summary, p2 = showThreePeriods ? prevPeriod2.summary : null;
+  const curr = currentPeriod.summary, p1 = prev1Summary, p2 = showThreePeriods ? prev2Summary : null;
   const allCats = [...new Set([...curr.incomeCategories.map(i=>i[0]), ...curr.expenseCategories.map(e=>e[0])])];
   const tableData = [];
   for (let cat of allCats.slice(0,30)) {
@@ -676,7 +679,7 @@ async function exportToPDF() {
 
 function exportToExcel() {
   if (!currentPeriod.summary) { Swal.fire("No Data", "Generate report first", "warning"); return; }
-  const curr = currentPeriod.summary, p1 = prevPeriod1.summary, p2 = showThreePeriods ? prevPeriod2.summary : null;
+  const curr = currentPeriod.summary, p1 = prev1Summary, p2 = showThreePeriods ? prev2Summary : null;
   let data = [["Account", "Current Net (₹)"]];
   if (p1) data[0].push("Previous Net (₹)");
   if (p2) data[0].push("Prior-Previous Net (₹)");
