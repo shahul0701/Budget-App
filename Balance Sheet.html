@@ -345,7 +345,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, collection, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
   const firebaseConfig = {
@@ -436,7 +436,7 @@
   async function fetchTransactions(start, end) {
     if (!currentUser) return [];
     try {
-      const q = query(collection(db, "users", currentUser.uid, "transactions"));
+      const q = collection(db, "users", currentUser.uid, "transactions");
       const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(tx => {
         if (!tx.DATE) return false;
@@ -450,7 +450,7 @@
     if (!currentUser) return {};
     try {
       const snap = await getDocs(collection(db, "users", currentUser.uid, "chartOfAccounts"));
-      const map = {}; // store account name -> { type, category }
+      const map = {};
       snap.forEach(doc => {
         const data = doc.data();
         map[data.name] = { type: data.type, category: data.category };
@@ -462,7 +462,7 @@
   function classifyAccount(name, coaInfo) {
     if (coaInfo && coaInfo.type) return coaInfo.type;
     const lower = name.toLowerCase();
-    if (lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis')) return 'Asset';
+    if (lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis') || lower.includes('hdfc')) return 'Asset';
     if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit')) return 'Liability';
     if (lower.includes('equity') || lower.includes('capital') || lower.includes('retained')) return 'Equity';
     if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income')) return 'Income';
@@ -591,6 +591,7 @@
   }
 
   function renderBalanceSheet() {
+    if (!currentBS) return;
     const curr = currentBS;
     const p1 = prev1Period?.bs, p2 = prev2Period?.bs;
     const totalAssets = (Object.values(curr.banks).reduce((a,b)=>a+b,0) + Object.values(curr.otherAssets).reduce((a,b)=>a+b,0));
@@ -633,6 +634,7 @@
   }
 
   function renderCashFlow() {
+    if (!currentCF) return;
     const curr = currentCF;
     const p1 = prev1Period?.cf, p2 = prev2Period?.cf;
     document.getElementById("cfNetCash").innerHTML = formatINR(curr.netCash);
@@ -650,6 +652,7 @@
   }
 
   function renderCharts() {
+    if (!currentBS || !currentCF) return;
     const ctx1 = document.getElementById("bsChart").getContext("2d");
     if (bsChart) bsChart.destroy();
     const totalAssets = (Object.values(currentBS.banks).reduce((a,b)=>a+b,0) + Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0));
@@ -670,6 +673,10 @@
   }
 
   function exportToExcel() {
+    if (!currentBS || !currentCF) {
+      Swal.fire("No Data", "Please generate a report first.", "warning");
+      return;
+    }
     const activeTab = document.querySelector(".tab-content.active").id;
     const wsData = [];
     if (activeTab === "balanceSheetTab") {
@@ -704,6 +711,10 @@
   }
 
   function exportToPDF() {
+    if (!currentBS || !currentCF) {
+      Swal.fire("No Data", "Please generate a report first.", "warning");
+      return;
+    }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     doc.setFillColor(30,64,175); doc.rect(0,0,297,45,'F');
@@ -768,7 +779,6 @@
       btn.classList.add("active");
       const activeId = btn.dataset.tab + "Tab";
       document.getElementById(activeId).classList.add("active");
-      // Ensure data is visible after tab switch (refresh if needed)
       if (activeId === "balanceSheetTab") {
         renderBalanceSheet();
         if (bsChart) bsChart.update();
