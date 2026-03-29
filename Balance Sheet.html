@@ -715,54 +715,76 @@
     });
   }
 
-  // ========== FIXED EXPORT FUNCTIONS ==========
+  // ========== EXPORT FUNCTIONS – USE DOM CONTENT ==========
   function exportToExcel() {
-    if (!currentBS || !currentCF) {
-      Swal.fire("No Data", "Please generate a report first.", "warning");
-      return;
-    }
     const activeTab = document.querySelector(".tab-content.active").id;
     const wsData = [];
     if (activeTab === "balanceSheetTab") {
       wsData.push(["Balance Sheet", currentPeriod.text]);
       wsData.push([]);
+      // Extract from DOM
       wsData.push(["Assets"]);
       // Bank Accounts
-      const bankTotal = Object.values(currentBS.banks).reduce((a,b)=>a+b,0);
-      wsData.push(["Bank Accounts", bankTotal]);
-      for (let [n, v] of Object.entries(currentBS.banks)) {
-        wsData.push([`  ${n}`, v]);
+      const bankItems = document.querySelectorAll("#assetsBreakdown .bs-item");
+      let inBankSection = false;
+      let otherSection = false;
+      for (let item of bankItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? parseFloat(amountElem.innerText.replace(/[^0-9.-]/g, '')) : 0;
+        if (text === "Bank Accounts") {
+          wsData.push(["Bank Accounts", amount]);
+          inBankSection = true;
+          otherSection = false;
+        } else if (text === "Other Assets") {
+          wsData.push(["Other Assets", amount]);
+          inBankSection = false;
+          otherSection = true;
+        } else if (text === "Total Assets") {
+          wsData.push(["Total Assets", amount]);
+        } else if (inBankSection && text && text !== "Bank Accounts") {
+          wsData.push([`  ${text}`, amount]);
+        } else if (otherSection && text && text !== "Other Assets") {
+          wsData.push([`  ${text}`, amount]);
+        }
       }
-      // Other Assets
-      const otherTotal = Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0);
-      wsData.push(["Other Assets", otherTotal]);
-      for (let [n, v] of Object.entries(currentBS.otherAssets)) {
-        wsData.push([`  ${n}`, v]);
-      }
-      wsData.push(["Total Assets", bankTotal + otherTotal]);
       wsData.push([]);
-      // Liabilities
       wsData.push(["Liabilities"]);
-      for (let [n, v] of Object.entries(currentBS.liabilities)) {
-        wsData.push([n, v]);
+      const liabItems = document.querySelectorAll("#liabilitiesBreakdown .bs-item");
+      for (let item of liabItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? parseFloat(amountElem.innerText.replace(/[^0-9.-]/g, '')) : 0;
+        if (text !== "Total Liabilities") {
+          wsData.push([text, amount]);
+        } else {
+          wsData.push(["Total Liabilities", amount]);
+        }
       }
-      const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
-      wsData.push(["Total Liabilities", totalLiab]);
       wsData.push([]);
-      // Equity
       wsData.push(["Equity"]);
-      for (let [n, v] of Object.entries(currentBS.equityAccounts)) {
-        wsData.push([n, v]);
+      const eqItems = document.querySelectorAll("#equityBreakdown .bs-item");
+      for (let item of eqItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? parseFloat(amountElem.innerText.replace(/[^0-9.-]/g, '')) : 0;
+        if (text !== "Total Equity") {
+          wsData.push([text, amount]);
+        } else {
+          wsData.push(["Total Equity", amount]);
+        }
       }
-      const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
-      wsData.push(["Total Equity", totalEq]);
     } else {
+      // Cash Flow tab
       wsData.push(["Cash Flow Statement", currentPeriod.text]);
       wsData.push([]);
-      wsData.push(["Operating", currentCF.operating]);
-      wsData.push(["Investing", currentCF.investing]);
-      wsData.push(["Financing", currentCF.financing]);
-      wsData.push(["Net Cash Flow", currentCF.netCash]);
+      const cfItems = document.querySelectorAll("#cashflowBreakdown .bs-item");
+      for (let item of cfItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? parseFloat(amountElem.innerText.replace(/[^0-9.-]/g, '')) : 0;
+        wsData.push([text, amount]);
+      }
     }
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), activeTab === "balanceSheetTab" ? "Balance Sheet" : "Cash Flow");
@@ -771,19 +793,11 @@
   }
 
   function exportToPDF() {
-    if (!currentBS || !currentCF) {
-      Swal.fire("No Data", "Please generate a report first.", "warning");
-      return;
-    }
-    // Log data to console for debugging
-    console.log("Exporting PDF with currentBS:", currentBS);
-    console.log("Exporting PDF with currentCF:", currentCF);
-
+    const activeTab = document.querySelector(".tab-content.active").id;
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     doc.setFillColor(30,64,175); doc.rect(0,0,297,45,'F');
     doc.setTextColor(255,255,255); doc.setFontSize(22);
-    const activeTab = document.querySelector(".tab-content.active").id;
     const title = activeTab === "balanceSheetTab" ? "BALANCE SHEET" : "CASH FLOW STATEMENT";
     doc.text(title,148,20,{align:'center'});
     doc.setFontSize(10); doc.text(`Period: ${currentPeriod.text}`,148,32,{align:'center'});
@@ -791,42 +805,57 @@
     doc.setTextColor(0,0,0);
     let tableData = [];
     if (activeTab === "balanceSheetTab") {
-      // Build table data exactly like the screen
-      tableData = [
-        ["Assets", "Amount"],
-        ["Bank Accounts", (Object.values(currentBS.banks).reduce((a,b)=>a+b,0))],
-      ];
-      for (let [n, v] of Object.entries(currentBS.banks)) {
-        tableData.push([`  ${n}`, v]);
+      // Extract from DOM
+      tableData.push(["Assets", "Amount"]);
+      const bankItems = document.querySelectorAll("#assetsBreakdown .bs-item");
+      let inBankSection = false, otherSection = false;
+      for (let item of bankItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? amountElem.innerText : "₹0.00";
+        if (text === "Bank Accounts") {
+          tableData.push(["Bank Accounts", amount]);
+          inBankSection = true;
+          otherSection = false;
+        } else if (text === "Other Assets") {
+          tableData.push(["Other Assets", amount]);
+          inBankSection = false;
+          otherSection = true;
+        } else if (text === "Total Assets") {
+          tableData.push(["Total Assets", amount]);
+        } else if (inBankSection && text && text !== "Bank Accounts") {
+          tableData.push([`  ${text}`, amount]);
+        } else if (otherSection && text && text !== "Other Assets") {
+          tableData.push([`  ${text}`, amount]);
+        }
       }
-      tableData.push(["Other Assets", (Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0))]);
-      for (let [n, v] of Object.entries(currentBS.otherAssets)) {
-        tableData.push([`  ${n}`, v]);
-      }
-      const totalAssets = (Object.values(currentBS.banks).reduce((a,b)=>a+b,0) + Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0));
-      tableData.push(["Total Assets", totalAssets]);
       tableData.push([]);
       tableData.push(["Liabilities", ""]);
-      for (let [n, v] of Object.entries(currentBS.liabilities)) {
-        tableData.push([n, v]);
+      const liabItems = document.querySelectorAll("#liabilitiesBreakdown .bs-item");
+      for (let item of liabItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? amountElem.innerText : "₹0.00";
+        tableData.push([text, amount]);
       }
-      const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
-      tableData.push(["Total Liabilities", totalLiab]);
       tableData.push([]);
       tableData.push(["Equity", ""]);
-      for (let [n, v] of Object.entries(currentBS.equityAccounts)) {
-        tableData.push([n, v]);
+      const eqItems = document.querySelectorAll("#equityBreakdown .bs-item");
+      for (let item of eqItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? amountElem.innerText : "₹0.00";
+        tableData.push([text, amount]);
       }
-      const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
-      tableData.push(["Total Equity", totalEq]);
     } else {
-      tableData = [
-        ["Cash Flow", "Amount"],
-        ["Operating", currentCF.operating],
-        ["Investing", currentCF.investing],
-        ["Financing", currentCF.financing],
-        ["Net Cash Flow", currentCF.netCash]
-      ];
+      tableData.push(["Cash Flow", "Amount"]);
+      const cfItems = document.querySelectorAll("#cashflowBreakdown .bs-item");
+      for (let item of cfItems) {
+        const text = item.querySelector("div:first-child")?.innerText.trim();
+        const amountElem = item.querySelector(".amount");
+        const amount = amountElem ? amountElem.innerText : "₹0.00";
+        tableData.push([text, amount]);
+      }
     }
     doc.autoTable({ startY: 50, head: [[""]], body: tableData, theme: 'grid', styles: { fontSize: 8 } });
     doc.save(`${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${new Date().toISOString().slice(0,10)}.pdf`);
