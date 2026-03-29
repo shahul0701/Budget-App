@@ -450,24 +450,30 @@
     if (!currentUser) return {};
     try {
       const snap = await getDocs(collection(db, "users", currentUser.uid, "chartOfAccounts"));
-      const map = {};
+      const map = {}; // store account name -> { type, category }
       snap.forEach(doc => {
         const data = doc.data();
-        map[data.name] = data.type;
+        map[data.name] = { type: data.type, category: data.category };
       });
       return map;
     } catch(e) { return {}; }
   }
 
-  function classifyAccount(name, coaMap) {
-    if (coaMap[name]) return coaMap[name];
+  function classifyAccount(name, coaInfo) {
+    if (coaInfo && coaInfo.type) return coaInfo.type;
     const lower = name.toLowerCase();
     if (lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis')) return 'Asset';
     if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit')) return 'Liability';
     if (lower.includes('equity') || lower.includes('capital') || lower.includes('retained')) return 'Equity';
     if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income')) return 'Income';
-    if (lower.includes('expense') || lower.includes('cost') || lower.includes('salary')) return 'Expense';
+    if (lower.includes('expense') || lower.includes('cost') || lower.includes('salary') || lower.includes('petrol')) return 'Expense';
     return 'Expense';
+  }
+
+  function isBankAccount(name, coaInfo) {
+    if (coaInfo && coaInfo.type === 'Asset' && coaInfo.category === 'Bank') return true;
+    const lower = name.toLowerCase();
+    return lower.includes('bank') || lower.includes('cash') || lower.includes('sbi') || lower.includes('axis');
   }
 
   function computeBalanceSheet(transactions, coaMap) {
@@ -478,9 +484,10 @@
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       if (net === 0) return;
-      const type = classifyAccount(acc, coaMap);
+      const coaInfo = coaMap[acc];
+      const type = classifyAccount(acc, coaInfo);
       if (type === 'Asset') {
-        if (acc.toLowerCase().includes('bank') || acc.toLowerCase().includes('cash') || acc.toLowerCase().includes('sbi') || acc.toLowerCase().includes('axis')) {
+        if (isBankAccount(acc, coaInfo)) {
           banks[acc] = (banks[acc] || 0) + net;
         } else {
           otherAssets[acc] = (otherAssets[acc] || 0) + net;
@@ -505,7 +512,8 @@
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
-      const type = classifyAccount(acc, coaMap);
+      const coaInfo = coaMap[acc];
+      const type = classifyAccount(acc, coaInfo);
       const lower = acc.toLowerCase();
       if (type === 'Income' || type === 'Expense') {
         operating += net;
@@ -619,8 +627,8 @@
     document.getElementById("liabilitiesBreakdown").innerHTML = liabHtml;
     // Equity
     let eqHtml = '';
-    for (let [name, val] of Object.entries(curr.equity)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
-    eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount positive">${formatINR(totalEq)}</div></div>`;
+    for (let [name, val] of Object.entries(curr.equity)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
+    eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div></div>`;
     document.getElementById("equityBreakdown").innerHTML = eqHtml;
   }
 
@@ -661,7 +669,6 @@
     });
   }
 
-  // Export functions that capture ONLY the active tab
   function exportToExcel() {
     const activeTab = document.querySelector(".tab-content.active").id;
     const wsData = [];
@@ -759,7 +766,16 @@
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
       btn.classList.add("active");
-      document.getElementById(btn.dataset.tab + "Tab").classList.add("active");
+      const activeId = btn.dataset.tab + "Tab";
+      document.getElementById(activeId).classList.add("active");
+      // Ensure data is visible after tab switch (refresh if needed)
+      if (activeId === "balanceSheetTab") {
+        renderBalanceSheet();
+        if (bsChart) bsChart.update();
+      } else {
+        renderCashFlow();
+        if (cfChart) cfChart.update();
+      }
     });
   });
   onAuthStateChanged(auth, async (user) => {
