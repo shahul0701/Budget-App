@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Profit & Loss | Xero-Style Smart Comparison</title>
+<title>Profit & Loss | Smart Period Comparison</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -343,7 +343,6 @@ select, input, .ctrl-btn {
     </div>
   </div>
 
-  <!-- dynamic period header -->
   <div class="period-header">
     <div class="period-badge"><i class="fas fa-calendar-alt"></i> Current: <span id="currentPeriodLabel">-</span></div>
     <div class="period-badge" id="prev1Wrapper" style="display:none;"><i class="fas fa-calendar-week"></i> Previous: <span id="prev1PeriodLabel">-</span></div>
@@ -389,7 +388,15 @@ let prev1Summary = null;
 let prev2Summary = null;
 let showThreePeriods = false;
 
-function formatINR(amt) { return `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function formatINR(amt) { 
+  return `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; 
+}
+
+function formatNumberForPDF(amt) {
+  // This returns just the number string without ₹ symbol for PDF tables
+  return amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function formatDateShort(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function formatPeriod(start, end) { return `${start.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} – ${end.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}`; }
 
@@ -454,7 +461,6 @@ function getComparisonRange(mainStart, mainEnd, compType, customStart=null, cust
   return null;
 }
 
-// Get second previous period for three-period comparison
 function getSecondComparisonRange(mainStart, mainEnd, compType) {
   if (compType === 'twoQuartersBack') {
     let start = new Date(mainStart);
@@ -516,7 +522,6 @@ async function loadReport() {
     const compStart = document.getElementById("compareStartDate").value, compEnd = document.getElementById("compareEndDate").value;
     const compRange = getComparisonRange(start, end, compType, compStart, compEnd);
     
-    // Check if we need three-period comparison
     showThreePeriods = (compType === 'twoQuartersBack' || compType === 'twoYearsBack');
     
     if (compRange) {
@@ -525,7 +530,6 @@ async function loadReport() {
       const prevPeriodText = formatPeriod(compRange.start, compRange.end);
       
       if (showThreePeriods) {
-        // Get second previous period
         const compRange2 = getSecondComparisonRange(start, end, compType);
         if (compRange2) {
           const trans2 = await fetchTransactions(compRange2.start, compRange2.end);
@@ -633,7 +637,6 @@ function renderPNLTable(curr, p1, p2) {
     }
     tbody += `</tr>`;
   }
-  // totals row
   tbody += `<tr class="total-row"><td><strong>TOTAL NET</strong></td><td class="amount"><strong>${formatINR(curr.netProfit)}</strong></td>`;
   if (p1) tbody += `<td class="amount"><strong>${formatINR(p1.netProfit)}</strong></td>`;
   if (p2) tbody += `<td class="amount"><strong>${formatINR(p2.netProfit)}</strong></td>`;
@@ -675,29 +678,77 @@ async function exportToPDF() {
   if (!currentPeriod.summary) { Swal.fire("No Data", "Generate report first", "warning"); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  
+  // Header
   doc.setFillColor(30,64,175); doc.rect(0,0,297,45,'F');
   doc.setTextColor(255,255,255); doc.setFontSize(22); doc.text("PROFIT & LOSS STATEMENT",148,20,{align:'center'});
   doc.setFontSize(10); doc.text(currentPeriod.periodText,148,32,{align:'center'});
   if (prev1Summary) doc.text(`Compared to: ${document.getElementById("prev1PeriodLabel").innerText}`,148,38,{align:'center'});
   doc.setTextColor(0,0,0);
-  const curr = currentPeriod.summary, p1 = prev1Summary, p2 = showThreePeriods ? prev2Summary : null;
+  
+  const curr = currentPeriod.summary;
+  const p1 = prev1Summary;
+  const p2 = showThreePeriods ? prev2Summary : null;
+  
+  // Get all unique categories
   const allCats = [...new Set([...curr.incomeCategories.map(i=>i[0]), ...curr.expenseCategories.map(e=>e[0])])];
   const tableData = [];
-  for (let cat of allCats.slice(0,30)) {
-    let row = [cat, formatINR((curr.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (curr.expenseCategories.find(e=>e[0]===cat)?.[1]||0))];
-    if (p1) row.push(formatINR((p1.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p1.expenseCategories.find(e=>e[0]===cat)?.[1]||0)));
-    if (p2) row.push(formatINR((p2.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p2.expenseCategories.find(e=>e[0]===cat)?.[1]||0)));
+  
+  // Build table data - ensure we use proper number formatting without extra characters
+  for (let cat of allCats.slice(0, 35)) {
+    const currNet = (curr.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (curr.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+    let row = [cat, formatNumberForPDF(currNet)];
+    
+    if (p1) {
+      const p1Net = (p1.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p1.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+      row.push(formatNumberForPDF(p1Net));
+    }
+    if (p2) {
+      const p2Net = (p2.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p2.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+      row.push(formatNumberForPDF(p2Net));
+    }
     tableData.push(row);
   }
-  let headers = ["Account", "Current Net"];
-  if (p1) headers.push("Previous Net");
-  if (p2) headers.push("Prior-Previous Net");
-  tableData.push(["TOTAL NET", formatINR(curr.netProfit)]);
-  if (p1) tableData[tableData.length-1].push(formatINR(p1.netProfit));
-  if (p2) tableData[tableData.length-1].push(formatINR(p2.netProfit));
-  doc.autoTable({ startY: 50, head: [headers], body: tableData, theme: 'grid', headStyles: { fillColor: [30,64,175], textColor: [255,255,255] }, styles: { fontSize: 8 } });
-  doc.save(`PnL_${showThreePeriods?'3Period':'Comparison'}_${new Date().toISOString().slice(0,10)}.pdf`);
-  Swal.fire("Success","PDF generated","success");
+  
+  // Add total row
+  let totalRow = ["TOTAL NET", formatNumberForPDF(curr.netProfit)];
+  if (p1) totalRow.push(formatNumberForPDF(p1.netProfit));
+  if (p2) totalRow.push(formatNumberForPDF(p2.netProfit));
+  tableData.push(totalRow);
+  
+  // Build headers
+  let headers = ["Account", "Current Net (₹)"];
+  if (p1) headers.push("Previous Net (₹)");
+  if (p2) headers.push("Prior-Previous Net (₹)");
+  
+  // Generate table
+  doc.autoTable({
+    startY: 50,
+    head: [headers],
+    body: tableData,
+    theme: 'grid',
+    headStyles: { fillColor: [30,64,175], textColor: [255,255,255], fontSize: 9, halign: 'center' },
+    bodyStyles: { fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 80, halign: 'left' },
+      1: { cellWidth: 50, halign: 'right' },
+      2: { cellWidth: 50, halign: 'right' },
+      3: { cellWidth: 50, halign: 'right' }
+    },
+    didDrawCell: function(data) {
+      // Ensure numbers are properly formatted
+      if (data.column.index > 0 && data.cell.raw) {
+        const rawValue = parseFloat(data.cell.raw.toString().replace(/,/g, ''));
+        if (!isNaN(rawValue)) {
+          data.cell.text = [rawValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })];
+        }
+      }
+    }
+  });
+  
+  const fileName = `PnL_${showThreePeriods ? '3Period' : 'Comparison'}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(fileName);
+  Swal.fire("Success", "PDF generated successfully", "success");
 }
 
 function exportToExcel() {
@@ -706,20 +757,42 @@ function exportToExcel() {
   let data = [["Account", "Current Net (₹)"]];
   if (p1) data[0].push("Previous Net (₹)");
   if (p2) data[0].push("Prior-Previous Net (₹)");
+  
   const allCats = [...new Set([...curr.incomeCategories.map(i=>i[0]), ...curr.expenseCategories.map(e=>e[0])])];
   for (let cat of allCats) {
-    let row = [cat, (curr.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (curr.expenseCategories.find(e=>e[0]===cat)?.[1]||0)];
-    if (p1) row.push((p1.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p1.expenseCategories.find(e=>e[0]===cat)?.[1]||0));
-    if (p2) row.push((p2.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p2.expenseCategories.find(e=>e[0]===cat)?.[1]||0));
+    const currNet = (curr.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (curr.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+    let row = [cat, currNet];
+    if (p1) {
+      const p1Net = (p1.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p1.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+      row.push(p1Net);
+    }
+    if (p2) {
+      const p2Net = (p2.incomeCategories.find(i=>i[0]===cat)?.[1]||0) - (p2.expenseCategories.find(e=>e[0]===cat)?.[1]||0);
+      row.push(p2Net);
+    }
     data.push(row);
   }
+  
   data.push(["TOTAL NET", curr.netProfit]);
   if (p1) data[data.length-1].push(p1.netProfit);
   if (p2) data[data.length-1].push(p2.netProfit);
+  
   const ws = XLSX.utils.aoa_to_sheet(data);
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "P&L");
-  XLSX.writeFile(wb, `PnL_${showThreePeriods?'3Period':'Comparison'}_${new Date().toISOString().slice(0,10)}.xlsx`);
-  Swal.fire("Success","Excel exported","success");
+  // Apply number formatting to Excel columns
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+  for (let row = range.s.r + 1; row <= range.e.r; row++) {
+    for (let col = 1; col <= (p1 ? (p2 ? 3 : 2) : 1); col++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+      if (ws[cellAddress] && typeof ws[cellAddress].v === 'number') {
+        ws[cellAddress].z = '#,##0.00';
+      }
+    }
+  }
+  
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "P&L Statement");
+  XLSX.writeFile(wb, `PnL_${showThreePeriods ? '3Period' : 'Comparison'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  Swal.fire("Success", "Excel exported successfully", "success");
 }
 
 function setDefaultDates() {
@@ -730,19 +803,37 @@ function setDefaultDates() {
   document.getElementById("compareEndDate").value = formatDateShort(new Date(today.getFullYear(), today.getMonth(), 0));
 }
 
-document.getElementById("reportPeriod").addEventListener("change",()=>{ document.getElementById("customDateRange").style.display = document.getElementById("reportPeriod").value==="custom"?"flex":"none"; });
-document.getElementById("comparisonType").addEventListener("change",()=>{ document.getElementById("customComparisonRange").style.display = document.getElementById("comparisonType").value==="custom"?"flex":"none"; });
-document.getElementById("generateReportBtn").addEventListener("click",loadReport);
-document.getElementById("exportExcel").addEventListener("click",exportToExcel);
-document.getElementById("exportPDF").addEventListener("click",exportToPDF);
-document.getElementById("chartType").addEventListener("change",()=>{ if(currentPeriod.summary) updateChart(currentPeriod.summary); });
-document.getElementById("homeBtn").addEventListener("click",()=>{ window.location.href="home.html"; });
-
-onAuthStateChanged(auth, async (user)=>{
-  if(user) { currentUser=user; const name=user.displayName||user.email?.split('@')[0]||"User"; document.getElementById("username").innerHTML=name; document.getElementById("userInitials").innerHTML=name.charAt(0).toUpperCase(); setDefaultDates(); await loadReport(); }
-  else window.location.href="index.html";
+// Event Listeners
+document.getElementById("reportPeriod").addEventListener("change", () => {
+  document.getElementById("customDateRange").style.display = document.getElementById("reportPeriod").value === "custom" ? "flex" : "none";
 });
-document.getElementById("logoutBtn").addEventListener("click",async()=>{ await signOut(auth); window.location.href="index.html"; });
+document.getElementById("comparisonType").addEventListener("change", () => {
+  document.getElementById("customComparisonRange").style.display = document.getElementById("comparisonType").value === "custom" ? "flex" : "none";
+});
+document.getElementById("generateReportBtn").addEventListener("click", loadReport);
+document.getElementById("exportExcel").addEventListener("click", exportToExcel);
+document.getElementById("exportPDF").addEventListener("click", exportToPDF);
+document.getElementById("chartType").addEventListener("change", () => { if (currentPeriod.summary) updateChart(currentPeriod.summary); });
+document.getElementById("homeBtn").addEventListener("click", () => { window.location.href = "home.html"; });
+
+// Authentication
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    currentUser = user;
+    const name = user.displayName || user.email?.split('@')[0] || "User";
+    document.getElementById("username").innerHTML = name;
+    document.getElementById("userInitials").innerHTML = name.charAt(0).toUpperCase();
+    setDefaultDates();
+    await loadReport();
+  } else {
+    window.location.href = "index.html";
+  }
+});
+
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "index.html";
+});
 </script>
 </body>
 </html>
