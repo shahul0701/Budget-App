@@ -22,7 +22,6 @@
     }
     .container { max-width: 1600px; margin: 0 auto; }
     
-    /* Header */
     header {
       background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
       padding: 16px 24px;
@@ -75,7 +74,6 @@
     #homeBtn:hover, #logoutBtn:hover { background: rgba(255,255,255,0.2); }
     #logoutBtn { background: rgba(239,68,68,0.3); border-color: rgba(239,68,68,0.5); }
 
-    /* Controls */
     .controls-panel {
       background: white;
       border-radius: 20px;
@@ -126,7 +124,6 @@
       border: 1px solid #e2e8f0;
     }
 
-    /* Period Header */
     .period-header {
       background: linear-gradient(135deg, #1e293b, #0f172a);
       border-radius: 20px;
@@ -156,7 +153,6 @@
     .period-dates { font-size: 0.95rem; font-weight: 600; color: #f1f5f9; }
     .period-dates i { margin-right: 6px; color: #60a5fa; font-size: 0.8rem; }
 
-    /* Tabs */
     .tabs {
       display: flex;
       gap: 8px;
@@ -180,7 +176,6 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
-    /* KPI Cards */
     .kpi-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -198,11 +193,6 @@
     .kpi-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
     .kpi-label i { font-size: 1rem; color: #3b82f6; }
     .kpi-value { font-size: 2.2rem; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
-    .kpi-trend { font-size: 0.8rem; margin-top: 12px; display: flex; flex-wrap: wrap; gap: 16px; }
-    .trend-item { display: flex; align-items: center; gap: 6px; }
-    .trend-up { color: #10b981; }
-    .trend-down { color: #ef4444; }
-    .trend-neutral { color: #64748b; }
 
     .balance-validation {
       padding: 16px 20px;
@@ -215,7 +205,6 @@
     .balance-valid { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
     .balance-invalid { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 
-    /* Section Styles */
     .section-card {
       background: white;
       border-radius: 20px;
@@ -260,8 +249,17 @@
     .statement-table td:first-child { text-align: left; font-weight: 500; }
     .statement-table td:not(:first-child) { text-align: right; font-family: 'Monaco', 'Menlo', monospace; font-weight: 500; }
     .statement-table .indent { padding-left: 40px !important; }
+    .statement-table .sub-indent { padding-left: 60px !important; }
     .statement-table .total-row { font-weight: 700; background: #f8fafc; border-top: 2px solid #e2e8f0; }
     .statement-table .total-row td { font-weight: 800; }
+    .statement-table .section-header-row td {
+      background: #f1f5f9;
+      font-weight: 700;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      color: #475569;
+      padding: 10px 20px;
+    }
     
     .amount-positive { color: #059669; }
     .amount-negative { color: #dc2626; }
@@ -308,13 +306,6 @@
     .loading-content i { color: #3b82f6; margin-bottom: 16px; }
     .loading-content p { font-weight: 600; color: #475569; }
 
-    .no-data-message {
-      text-align: center;
-      padding: 48px;
-      color: #94a3b8;
-      font-size: 1rem;
-      font-style: italic;
-    }
     .reconciled-badge {
       background: #d1fae5;
       color: #065f46;
@@ -323,6 +314,15 @@
       padding: 2px 8px;
       border-radius: 20px;
       margin-left: 8px;
+    }
+
+    .account-type-badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-left: 8px;
+      background: #e2e8f0;
+      color: #475569;
     }
 
     @media (max-width: 768px) {
@@ -454,7 +454,7 @@
   let data = { current: { bs: null, cf: null }, prev1: { bs: null, cf: null }, prev2: { bs: null, cf: null } };
   let showThree = false;
   let bsChart, cfChart;
-  let coaMap = {};
+  let coaMap = {}; // Store full COA data
 
   function formatINR(amt) { 
     if (amt === null || amt === undefined || isNaN(amt)) return '₹0.00';
@@ -568,10 +568,18 @@
       const map = {};
       snap.forEach(doc => { 
         const data = doc.data(); 
-        map[data.name] = { type: data.type, category: data.category };
+        map[data.name] = { 
+          type: data.type, 
+          category: data.category,
+          name: data.name
+        };
       });
+      console.log("COA Loaded:", map); // Debug log
       return map;
-    } catch(e) { console.error("Error loading COA:", e); return {}; }
+    } catch(e) { 
+      console.error("Error loading COA:", e); 
+      return {}; 
+    }
   }
 
   async function fetchAllTransactionsUpTo(endDate) {
@@ -602,51 +610,86 @@
     } catch(e) { console.error(e); return []; }
   }
 
-  function getAccountType(accountName) {
-    const coaInfo = coaMap[accountName];
-    if (coaInfo) return coaInfo.type;
+  function getAccountInfo(accountName) {
+    // First check COA
+    if (coaMap[accountName]) {
+      return coaMap[accountName];
+    }
+    // Fallback to keyword matching
     const lower = accountName.toLowerCase();
-    if (lower.includes('bank') || lower.includes('cash')) return 'Asset';
-    if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit')) return 'Liability';
-    if (lower.includes('equity') || lower.includes('capital') || lower.includes('retained')) return 'Equity';
-    if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income')) return 'Income';
-    return 'Expense';
+    if (lower.includes('bank') || lower.includes('axis') || lower.includes('bom') || lower.includes('cash')) {
+      return { type: 'Asset', category: 'Bank' };
+    }
+    if (lower.includes('petty cash')) {
+      return { type: 'Asset', category: 'Cash' };
+    }
+    if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit')) {
+      return { type: 'Liability', category: 'Loans' };
+    }
+    if (lower.includes('equity') || lower.includes('capital') || lower.includes('owner')) {
+      return { type: 'Equity', category: 'Equity' };
+    }
+    if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income') || lower.includes('salary')) {
+      return { type: 'Income', category: 'Income' };
+    }
+    return { type: 'Expense', category: 'General' };
   }
 
   function isBankAccount(accountName) {
-    const coaInfo = coaMap[accountName];
-    if (coaInfo) return coaInfo.type === 'Asset' && (coaInfo.category === 'Bank' || coaInfo.category === 'Cash');
-    const lower = accountName.toLowerCase();
-    return lower.includes('bank') || lower.includes('cash');
+    const info = getAccountInfo(accountName);
+    return info.type === 'Asset' && (info.category === 'Bank' || info.category === 'Cash');
   }
 
   function computeBalanceSheet(transactions) {
     let banks = {}, otherAssets = {}, liabilities = {}, equityAccounts = {};
     let totalIncome = 0, totalExpense = 0;
     
+    // Initialize from COA to show zero-balance accounts
+    for (let [name, info] of Object.entries(coaMap)) {
+      if (info.type === 'Asset') {
+        if (info.category === 'Bank' || info.category === 'Cash') {
+          banks[name] = 0;
+        } else {
+          otherAssets[name] = 0;
+        }
+      } else if (info.type === 'Liability') {
+        liabilities[name] = 0;
+      } else if (info.type === 'Equity') {
+        equityAccounts[name] = 0;
+      }
+    }
+    
     transactions.forEach(tx => {
-      const acc = tx.ACCOUNT_HEADER || tx.accountName || "Uncategorized";
-      const inc = parseFloat(tx.INCOME) || 0;
-      const exp = parseFloat(tx.EXPENSE) || 0;
-      const net = inc - exp;
+      const acc = tx.ACCOUNT_HEADER || tx.accountName || tx.account || "Uncategorized";
+      const inc = parseFloat(tx.INCOME) || parseFloat(tx.income) || 0;
+      const exp = parseFloat(tx.EXPENSE) || parseFloat(tx.expense) || 0;
+      const amount = parseFloat(tx.AMOUNT) || parseFloat(tx.amount) || 0;
+      
+      let net = inc - exp;
+      if (net === 0 && amount !== 0) {
+        // If using AMOUNT field with debit/credit
+        net = amount;
+      }
       if (net === 0) return;
       
-      const type = getAccountType(acc);
+      const info = getAccountInfo(acc);
       
-      if (type === 'Asset') {
-        if (isBankAccount(acc)) {
+      if (info.type === 'Asset') {
+        if (info.category === 'Bank' || info.category === 'Cash') {
           const isReconciled = tx.reconciled === true || tx.status === 'reconciled' || tx.RECONCILED === true;
-          if (isReconciled) banks[acc] = (banks[acc] || 0) + net;
+          if (isReconciled) {
+            banks[acc] = (banks[acc] || 0) + net;
+          }
         } else {
           otherAssets[acc] = (otherAssets[acc] || 0) + net;
         }
-      } else if (type === 'Liability') {
+      } else if (info.type === 'Liability') {
         liabilities[acc] = (liabilities[acc] || 0) + net;
-      } else if (type === 'Equity') {
+      } else if (info.type === 'Equity') {
         equityAccounts[acc] = (equityAccounts[acc] || 0) + net;
-      } else if (type === 'Income') {
+      } else if (info.type === 'Income' || info.type === 'OtherIncome') {
         totalIncome += net;
-      } else if (type === 'Expense' || type === 'COGS' || type === 'OtherExpense') {
+      } else if (info.type === 'Expense' || info.type === 'COGS' || info.type === 'OtherExpense') {
         totalExpense += Math.abs(net);
       }
     });
@@ -656,6 +699,9 @@
       equityAccounts["Retained Earnings"] = (equityAccounts["Retained Earnings"] || 0) + netProfit;
     }
     
+    console.log("Banks:", banks); // Debug log
+    console.log("Other Assets:", otherAssets); // Debug log
+    
     return { banks, otherAssets, liabilities, equityAccounts };
   }
 
@@ -663,22 +709,26 @@
     let operating = 0, investing = 0, financing = 0;
     
     transactions.forEach(tx => {
-      const inc = parseFloat(tx.INCOME) || 0;
-      const exp = parseFloat(tx.EXPENSE) || 0;
-      const net = inc - exp;
-      const acc = tx.ACCOUNT_HEADER || tx.accountName || "Uncategorized";
-      const type = getAccountType(acc);
+      const inc = parseFloat(tx.INCOME) || parseFloat(tx.income) || 0;
+      const exp = parseFloat(tx.EXPENSE) || parseFloat(tx.expense) || 0;
+      const amount = parseFloat(tx.AMOUNT) || parseFloat(tx.amount) || 0;
+      
+      let net = inc - exp;
+      if (net === 0 && amount !== 0) net = amount;
+      
+      const acc = tx.ACCOUNT_HEADER || tx.accountName || tx.account || "Uncategorized";
+      const info = getAccountInfo(acc);
       const lower = acc.toLowerCase();
       
-      if (type === 'Income' || type === 'Expense' || type === 'COGS' || type === 'OtherIncome' || type === 'OtherExpense') {
+      if (info.type === 'Income' || info.type === 'Expense' || info.type === 'COGS' || info.type === 'OtherIncome' || info.type === 'OtherExpense') {
         operating += net;
       } else if (lower.includes('asset') && (lower.includes('purchase') || lower.includes('equipment'))) {
         investing -= Math.abs(net);
       } else if (lower.includes('loan') || lower.includes('capital')) {
         financing += net;
-      } else if (type === 'Asset' && net < 0) {
+      } else if (info.type === 'Asset' && net < 0) {
         investing += net;
-      } else if (type === 'Liability' && net > 0) {
+      } else if (info.type === 'Liability' && net > 0) {
         financing += net;
       }
     });
@@ -779,15 +829,27 @@
   }
 
   function renderTableRow(label, currentVal, prev1Val, prev2Val, options = {}) {
-    const { isTotal = false, indent = false } = options;
-    const rowClass = isTotal ? 'total-row' : '';
-    const cellClass = indent ? 'indent' : '';
+    const { isTotal = false, indent = false, indent2 = false, isSection = false, badge = '' } = options;
+    const rowClass = isTotal ? 'total-row' : (isSection ? 'section-header-row' : '');
+    let cellClass = '';
+    if (indent2) cellClass = 'sub-indent';
+    else if (indent) cellClass = 'indent';
     
-    let html = `<tr class="${rowClass}"><td class="${cellClass}">${indent ? '↳ ' : ''}${label}`;
-    if (options.badge) html += ` <span class="reconciled-badge">${options.badge}</span>`;
-    html += `</td><td>${formatCell(currentVal)}</td>`;
-    if (periods.prev1) html += `<td>${formatCell(prev1Val)}</td>`;
-    if (periods.prev2 && showThree) html += `<td>${formatCell(prev2Val)}</td>`;
+    let html = `<tr class="${rowClass}"><td class="${cellClass}">`;
+    if (indent) html += '↳ ';
+    if (indent2) html += '↳ ';
+    html += label;
+    if (badge) html += ` <span class="reconciled-badge">${badge}</span>`;
+    html += `</td>`;
+    
+    if (isSection) {
+      const colspan = 1 + (periods.prev1 ? 1 : 0) + (periods.prev2 && showThree ? 1 : 0);
+      html += `<td colspan="${colspan}" style="text-align: left;"></td>`;
+    } else {
+      html += `<td>${formatCell(currentVal)}</td>`;
+      if (periods.prev1) html += `<td>${formatCell(prev1Val)}</td>`;
+      if (periods.prev2 && showThree) html += `<td>${formatCell(prev2Val)}</td>`;
+    }
     html += `</tr>`;
     return html;
   }
@@ -817,26 +879,72 @@
     validationDiv.innerHTML = balanced ? '<i class="fas fa-check-circle"></i> Balance Sheet is Balanced — Assets = Liabilities + Equity' : '<i class="fas fa-exclamation-triangle"></i> Balance Sheet is Out of Balance';
     validationDiv.className = `balance-validation ${balanced ? 'balance-valid' : 'balance-invalid'}`;
     
-    // Assets Table
+    // Assets Table with proper grouping
     let assetsHtml = getTableHeaders();
+    
+    // Current Assets section
+    assetsHtml += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-coins"></i> CURRENT ASSETS</td></tr>`;
+    
+    // Bank Accounts
     const prev1Banks = prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) : null;
     const prev2Banks = (prev2 && showThree) ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) : null;
     assetsHtml += renderTableRow('Bank Accounts', totalBanks, prev1Banks, prev2Banks, { badge: 'Reconciled Only' });
     
-    const sortedBanks = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
-    for (let [name, val] of sortedBanks) {
-      assetsHtml += renderTableRow(name, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0, { indent: true });
+    // Group bank accounts by category
+    const bankAccounts = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
+    const cashAccounts = bankAccounts.filter(([name]) => {
+      const info = getAccountInfo(name);
+      return info.category === 'Cash';
+    });
+    const regularBanks = bankAccounts.filter(([name]) => {
+      const info = getAccountInfo(name);
+      return info.category !== 'Cash';
+    });
+    
+    // Regular Bank Accounts
+    if (regularBanks.length > 0) {
+      assetsHtml += renderTableRow('Bank Accounts', 
+        regularBanks.reduce((sum, [_, v]) => sum + v, 0),
+        prev1 ? regularBanks.reduce((sum, [n]) => sum + (prev1.banks?.[n] || 0), 0) : null,
+        (prev2 && showThree) ? regularBanks.reduce((sum, [n]) => sum + (prev2.banks?.[n] || 0), 0) : null,
+        { indent: true });
+      
+      for (let [name, val] of regularBanks) {
+        if (Math.abs(val) > 0.01 || true) { // Show even zero balances
+          assetsHtml += renderTableRow(name, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0, { indent2: true });
+        }
+      }
     }
+    
+    // Cash Accounts
+    if (cashAccounts.length > 0) {
+      assetsHtml += renderTableRow('Cash Accounts', 
+        cashAccounts.reduce((sum, [_, v]) => sum + v, 0),
+        prev1 ? cashAccounts.reduce((sum, [n]) => sum + (prev1.banks?.[n] || 0), 0) : null,
+        (prev2 && showThree) ? cashAccounts.reduce((sum, [n]) => sum + (prev2.banks?.[n] || 0), 0) : null,
+        { indent: true });
+      
+      for (let [name, val] of cashAccounts) {
+        assetsHtml += renderTableRow(name, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0, { indent2: true });
+      }
+    }
+    
+    // Other Current Assets
+    assetsHtml += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-box"></i> OTHER ASSETS</td></tr>`;
     
     const prev1Other = prev1 ? Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0) : null;
     const prev2Other = (prev2 && showThree) ? Object.values(prev2.otherAssets).reduce((a,b)=>a+b,0) : null;
-    assetsHtml += renderTableRow('Other Assets', totalOther, prev1Other, prev2Other);
     
-    const sortedOther = Object.entries(curr.otherAssets).filter(([name]) => !curr.banks[name]).sort((a,b) => a[0].localeCompare(b[0]));
-    for (let [name, val] of sortedOther) {
-      if (Math.abs(val) > 0.01) {
-        assetsHtml += renderTableRow(name, val, prev1?.otherAssets?.[name] || 0, prev2?.otherAssets?.[name] || 0, { indent: true });
-      }
+    const otherAssetsList = Object.entries(curr.otherAssets)
+      .filter(([name]) => !curr.banks[name])
+      .sort((a,b) => a[0].localeCompare(b[0]));
+    
+    for (let [name, val] of otherAssetsList) {
+      assetsHtml += renderTableRow(name, val, prev1?.otherAssets?.[name] || 0, prev2?.otherAssets?.[name] || 0, { indent: true });
+    }
+    
+    if (otherAssetsList.length === 0) {
+      assetsHtml += renderTableRow('No other assets', 0, 0, 0, { indent: true });
     }
     
     const prev1Total = prev1 ? (Object.values(prev1.banks).reduce((a,b)=>a+b,0) + Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0)) : null;
@@ -846,29 +954,41 @@
     
     // Liabilities Table
     let liabHtml = getTableHeaders();
+    liabHtml += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-file-invoice"></i> LIABILITIES</td></tr>`;
+    
     const sortedLiab = Object.entries(curr.liabilities).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedLiab) {
-      if (Math.abs(val) > 0.01) {
-        liabHtml += renderTableRow(name, val, prev1?.liabilities?.[name] || 0, prev2?.liabilities?.[name] || 0);
-      }
+      liabHtml += renderTableRow(name, val, prev1?.liabilities?.[name] || 0, prev2?.liabilities?.[name] || 0, { indent: true });
     }
+    if (sortedLiab.length === 0) {
+      liabHtml += renderTableRow('No liabilities', 0, 0, 0, { indent: true });
+    }
+    
     const prev1Liab = prev1 ? Object.values(prev1.liabilities).reduce((a,b)=>a+b,0) : null;
     const prev2Liab = (prev2 && showThree) ? Object.values(prev2.liabilities).reduce((a,b)=>a+b,0) : null;
     liabHtml += renderTableRow('TOTAL LIABILITIES', totalLiab, prev1Liab, prev2Liab, { isTotal: true });
-    document.getElementById('liabilitiesTable').innerHTML = liabHtml || `<tr><td colspan="4" class="no-data-message">No liabilities recorded.</td></tr>`;
+    document.getElementById('liabilitiesTable').innerHTML = liabHtml;
     
     // Equity Table
     let eqHtml = getTableHeaders();
+    eqHtml += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-chart-pie"></i> EQUITY</td></tr>`;
+    
     const sortedEq = Object.entries(curr.equityAccounts).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedEq) {
-      if (Math.abs(val) > 0.01) {
-        eqHtml += renderTableRow(name, val, prev1?.equityAccounts?.[name] || 0, prev2?.equityAccounts?.[name] || 0);
-      }
+      eqHtml += renderTableRow(name, val, prev1?.equityAccounts?.[name] || 0, prev2?.equityAccounts?.[name] || 0, { indent: true });
     }
+    if (sortedEq.length === 0) {
+      eqHtml += renderTableRow('No equity accounts', 0, 0, 0, { indent: true });
+    }
+    
     const prev1Eq = prev1 ? Object.values(prev1.equityAccounts).reduce((a,b)=>a+b,0) : null;
     const prev2Eq = (prev2 && showThree) ? Object.values(prev2.equityAccounts).reduce((a,b)=>a+b,0) : null;
     eqHtml += renderTableRow('TOTAL EQUITY', totalEq, prev1Eq, prev2Eq, { isTotal: true });
-    document.getElementById('equityTable').innerHTML = eqHtml || `<tr><td colspan="4" class="no-data-message">No equity accounts recorded.</td></tr>`;
+    eqHtml += renderTableRow('TOTAL LIABILITIES + EQUITY', totalLiab + totalEq, 
+      prev1 ? (Object.values(prev1.liabilities).reduce((a,b)=>a+b,0) + Object.values(prev1.equityAccounts).reduce((a,b)=>a+b,0)) : null,
+      (prev2 && showThree) ? (Object.values(prev2.liabilities).reduce((a,b)=>a+b,0) + Object.values(prev2.equityAccounts).reduce((a,b)=>a+b,0)) : null,
+      { isTotal: true });
+    document.getElementById('equityTable').innerHTML = eqHtml;
   }
 
   function renderCashFlow() {
@@ -886,10 +1006,16 @@
     document.getElementById('cfKpiGrid').innerHTML = kpiHtml;
     
     let html = getTableHeaders();
-    html += renderTableRow('Operating Activities', curr.operating, prev1?.operating, prev2?.operating);
-    html += renderTableRow('Investing Activities', curr.investing, prev1?.investing, prev2?.investing);
-    html += renderTableRow('Financing Activities', curr.financing, prev1?.financing, prev2?.financing);
-    html += renderTableRow('NET CASH FLOW', curr.netCash, prev1?.netCash, prev2?.netCash, { isTotal: true });
+    html += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-arrow-right"></i> CASH FLOWS FROM OPERATING ACTIVITIES</td></tr>`;
+    html += renderTableRow('Net Operating Cash Flow', curr.operating, prev1?.operating, prev2?.operating, { indent: true });
+    
+    html += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-arrow-right"></i> CASH FLOWS FROM INVESTING ACTIVITIES</td></tr>`;
+    html += renderTableRow('Net Investing Cash Flow', curr.investing, prev1?.investing, prev2?.investing, { indent: true });
+    
+    html += `<tr class="section-header-row"><td colspan="4"><i class="fas fa-arrow-right"></i> CASH FLOWS FROM FINANCING ACTIVITIES</td></tr>`;
+    html += renderTableRow('Net Financing Cash Flow', curr.financing, prev1?.financing, prev2?.financing, { indent: true });
+    
+    html += renderTableRow('NET INCREASE/DECREASE IN CASH', curr.netCash, prev1?.netCash, prev2?.netCash, { isTotal: true });
     document.getElementById('cashflowTable').innerHTML = html;
   }
 
@@ -967,6 +1093,126 @@
     document.getElementById("compareEndDate").value = formatDateShort(new Date(today.getFullYear(), today.getMonth(), 0));
   }
 
+  function exportToExcel() {
+    const activeTab = document.querySelector(".tab-content.active").id;
+    const wsData = [];
+    
+    if (activeTab === "balanceSheetTab" && data.current.bs) {
+      wsData.push(["Balance Sheet", periods.current.text], []);
+      let headers = ["Account", "Current"];
+      if (periods.prev1) headers.push("Previous");
+      if (periods.prev2 && showThree) headers.push("Prior Previous");
+      wsData.push(headers);
+      
+      const curr = data.current.bs;
+      const prev1 = data.prev1.bs;
+      const prev2 = data.prev2.bs;
+      
+      // Assets
+      wsData.push(["ASSETS"]);
+      for (let [name, val] of Object.entries(curr.banks)) {
+        wsData.push([`  ${name}`, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0]);
+      }
+      for (let [name, val] of Object.entries(curr.otherAssets)) {
+        if (!curr.banks[name]) {
+          wsData.push([`  ${name}`, val, prev1?.otherAssets?.[name] || 0, prev2?.otherAssets?.[name] || 0]);
+        }
+      }
+      
+      const totalAssets = Object.values(curr.banks).reduce((a,b)=>a+b,0) + Object.values(curr.otherAssets).reduce((a,b)=>a+b,0);
+      const prev1Total = prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) + Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0) : null;
+      const prev2Total = (prev2 && showThree) ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) + Object.values(prev2.otherAssets).reduce((a,b)=>a+b,0) : null;
+      wsData.push(["TOTAL ASSETS", totalAssets, prev1Total, prev2Total], []);
+      
+      // Liabilities
+      wsData.push(["LIABILITIES"]);
+      for (let [name, val] of Object.entries(curr.liabilities)) {
+        wsData.push([`  ${name}`, val, prev1?.liabilities?.[name] || 0, prev2?.liabilities?.[name] || 0]);
+      }
+      const totalLiab = Object.values(curr.liabilities).reduce((a,b)=>a+b,0);
+      wsData.push(["TOTAL LIABILITIES", totalLiab, prev1 ? Object.values(prev1.liabilities).reduce((a,b)=>a+b,0) : null, (prev2 && showThree) ? Object.values(prev2.liabilities).reduce((a,b)=>a+b,0) : null], []);
+      
+      // Equity
+      wsData.push(["EQUITY"]);
+      for (let [name, val] of Object.entries(curr.equityAccounts)) {
+        wsData.push([`  ${name}`, val, prev1?.equityAccounts?.[name] || 0, prev2?.equityAccounts?.[name] || 0]);
+      }
+      const totalEq = Object.values(curr.equityAccounts).reduce((a,b)=>a+b,0);
+      wsData.push(["TOTAL EQUITY", totalEq, prev1 ? Object.values(prev1.equityAccounts).reduce((a,b)=>a+b,0) : null, (prev2 && showThree) ? Object.values(prev2.equityAccounts).reduce((a,b)=>a+b,0) : null]);
+      
+    } else if (activeTab === "cashflowTab" && data.current.cf) {
+      wsData.push(["Cash Flow Statement", periods.current.text], []);
+      let headers = ["Category", "Current"];
+      if (periods.prev1) headers.push("Previous");
+      if (periods.prev2 && showThree) headers.push("Prior Previous");
+      wsData.push(headers);
+      
+      wsData.push(["Operating Activities", data.current.cf.operating, data.prev1?.cf?.operating, data.prev2?.cf?.operating]);
+      wsData.push(["Investing Activities", data.current.cf.investing, data.prev1?.cf?.investing, data.prev2?.cf?.investing]);
+      wsData.push(["Financing Activities", data.current.cf.financing, data.prev1?.cf?.financing, data.prev2?.cf?.financing]);
+      wsData.push(["Net Cash Flow", data.current.cf.netCash, data.prev1?.cf?.netCash, data.prev2?.cf?.netCash]);
+    }
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), activeTab === "balanceSheetTab" ? "Balance Sheet" : "Cash Flow");
+    XLSX.writeFile(wb, `${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${formatDateShort(new Date())}.xlsx`);
+    Swal.fire("Success", "Excel exported successfully", "success");
+  }
+
+  function exportToPDF() {
+    const activeTab = document.querySelector(".tab-content.active").id;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    
+    doc.setFillColor(30,64,175); 
+    doc.rect(0,0,297,35,'F');
+    doc.setTextColor(255,255,255); 
+    doc.setFontSize(18);
+    const title = activeTab === "balanceSheetTab" ? "BALANCE SHEET" : "CASH FLOW STATEMENT";
+    doc.text(title,148,18,{align:'center'});
+    doc.setFontSize(8); 
+    doc.text(`Period: ${periods.current.text}`,148,26,{align:'center'});
+    
+    doc.setTextColor(0,0,0);
+    let headers = ["Account", "Current"];
+    if (periods.prev1) headers.push("Previous");
+    if (periods.prev2 && showThree) headers.push("Prior Prev");
+    
+    let tableBody = [];
+    
+    if (activeTab === "balanceSheetTab" && data.current.bs) {
+      const curr = data.current.bs;
+      const prev1 = data.prev1.bs;
+      const prev2 = data.prev2.bs;
+      
+      for (let [name, val] of Object.entries(curr.banks)) {
+        tableBody.push([`  ${name}`, formatINR(val), prev1?.banks?.[name] ? formatINR(prev1.banks[name]) : '', prev2?.banks?.[name] ? formatINR(prev2.banks[name]) : '']);
+      }
+      for (let [name, val] of Object.entries(curr.otherAssets)) {
+        if (!curr.banks[name]) {
+          tableBody.push([`  ${name}`, formatINR(val), prev1?.otherAssets?.[name] ? formatINR(prev1.otherAssets[name]) : '', prev2?.otherAssets?.[name] ? formatINR(prev2.otherAssets[name]) : '']);
+        }
+      }
+    } else if (activeTab === "cashflowTab" && data.current.cf) {
+      tableBody.push(["Operating", formatINR(data.current.cf.operating), data.prev1?.cf ? formatINR(data.prev1.cf.operating) : '', data.prev2?.cf ? formatINR(data.prev2.cf.operating) : '']);
+      tableBody.push(["Investing", formatINR(data.current.cf.investing), data.prev1?.cf ? formatINR(data.prev1.cf.investing) : '', data.prev2?.cf ? formatINR(data.prev2.cf.investing) : '']);
+      tableBody.push(["Financing", formatINR(data.current.cf.financing), data.prev1?.cf ? formatINR(data.prev1.cf.financing) : '', data.prev2?.cf ? formatINR(data.prev2.cf.financing) : '']);
+      tableBody.push(["Net Cash Flow", formatINR(data.current.cf.netCash), data.prev1?.cf ? formatINR(data.prev1.cf.netCash) : '', data.prev2?.cf ? formatINR(data.prev2.cf.netCash) : '']);
+    }
+    
+    doc.autoTable({ 
+      startY: 40, 
+      head: [headers], 
+      body: tableBody, 
+      theme: 'striped', 
+      styles: { fontSize: 7, cellPadding: 2 }, 
+      headStyles: { fillColor: [30,64,175], textColor: 255, fontStyle: 'bold' }
+    });
+    
+    doc.save(`${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${formatDateShort(new Date())}.pdf`);
+    Swal.fire("Success", "PDF generated successfully", "success");
+  }
+
   // Event Listeners
   document.getElementById("reportPeriod").addEventListener("change", (e) => { 
     document.getElementById("customDateRange").style.display = e.target.value === "custom" ? "flex" : "none"; 
@@ -982,8 +1228,8 @@
     document.getElementById("loadingModal").style.display = "none"; 
   });
   
-  document.getElementById("exportExcel").addEventListener("click", () => Swal.fire("Success", "Excel export ready", "success"));
-  document.getElementById("exportPDF").addEventListener("click", () => Swal.fire("Success", "PDF export ready", "success"));
+  document.getElementById("exportExcel").addEventListener("click", exportToExcel);
+  document.getElementById("exportPDF").addEventListener("click", exportToPDF);
   document.getElementById("chartType").addEventListener("change", renderCharts);
   document.getElementById("homeBtn").addEventListener("click", () => { window.location.href = "home.html"; });
   
