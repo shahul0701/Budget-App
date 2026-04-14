@@ -243,6 +243,17 @@
       color: #6b7280;
       font-size: 1rem;
     }
+    .reconciled-badge {
+      font-size: 0.7rem;
+      color: #10b981;
+      margin-left: 8px;
+    }
+    .info-note {
+      font-size: 0.7rem;
+      color: #6b7280;
+      margin-left: 8px;
+      font-weight: normal;
+    }
     @media (max-width: 768px) {
       .kpi-value { font-size: 1.4rem; }
       .bs-item { flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -429,7 +440,29 @@
     return null;
   }
 
-  async function fetchTransactions(start, end) {
+  // NEW: Fetch all transactions up to a specific end date (for cumulative balance sheet)
+  async function fetchAllTransactionsUpTo(endDate) {
+    if (!currentUser) return [];
+    try {
+      const q = collection(db, "users", currentUser.uid, "transactions");
+      const snap = await getDocs(q);
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Filter transactions up to the end date
+      const filtered = all.filter(tx => {
+        if (!tx.DATE) return false;
+        let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
+        return d <= endDate;
+      });
+      return filtered;
+    } catch(e) { 
+      console.error(e); 
+      return []; 
+    }
+  }
+
+  // Fetch transactions within a specific period (for cash flow and P&L)
+  async function fetchTransactionsInPeriod(start, end) {
     if (!currentUser) return [];
     try {
       const q = collection(db, "users", currentUser.uid, "transactions");
@@ -441,7 +474,10 @@
         return d >= start && d <= end;
       });
       return filtered;
-    } catch(e) { console.error(e); return []; }
+    } catch(e) { 
+      console.error(e); 
+      return []; 
+    }
   }
 
   async function loadCOA() {
@@ -449,9 +485,14 @@
     try {
       const snap = await getDocs(collection(db, "users", currentUser.uid, "chartOfAccounts"));
       const map = {};
-      snap.forEach(doc => { const data = doc.data(); map[data.name] = { type: data.type, category: data.category }; });
+      snap.forEach(doc => { 
+        const data = doc.data(); 
+        map[data.name] = { type: data.type, category: data.category }; 
+      });
       return map;
-    } catch(e) { return {}; }
+    } catch(e) { 
+      return {}; 
+    }
   }
 
   function classifyAccount(name, coaInfo) {
@@ -463,34 +504,59 @@
     if (lower.includes('sale') || lower.includes('revenue')) return 'Income';
     return 'Expense';
   }
+  
   function isBankAccount(name, coaInfo) {
     if (coaInfo && coaInfo.type === 'Asset' && coaInfo.category === 'Bank') return true;
     const lower = name.toLowerCase();
     return lower.includes('bank') || lower.includes('cash');
   }
+  
+  // UPDATED: Balance sheet now uses cumulative transactions and respects reconciliation status
   function computeBalanceSheet(transactions, coaMap) {
     let banks = {}, otherAssets = {}, liabilities = {}, equityAccounts = {};
     let totalIncome = 0, totalExpense = 0;
+    
     transactions.forEach(tx => {
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
       const inc = parseFloat(tx.INCOME) || 0;
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       if (net === 0) return;
+      
       let coaInfo = coaMap[acc] || null;
       const type = classifyAccount(acc, coaInfo);
+      
       if (type === 'Asset') {
-        if (isBankAccount(acc, coaInfo)) banks[acc] = (banks[acc] || 0) + net;
-        else otherAssets[acc] = (otherAssets[acc] || 0) + net;
-      } else if (type === 'Liability') liabilities[acc] = (liabilities[acc] || 0) + net;
-      else if (type === 'Equity') equityAccounts[acc] = (equityAccounts[acc] || 0) + net;
-      else if (type === 'Income') totalIncome += net;
-      else if (type === 'Expense') totalExpense += Math.abs(net);
+        // Check if this is a bank account and if the transaction is reconciled
+        if (isBankAccount(acc, coaInfo)) {
+          // Only include reconciled transactions for bank accounts
+          const isReconciled = tx.reconciled === true || tx.status === 'reconciled' || tx.RECONCILED === true;
+          if (isReconciled) {
+            banks[acc] = (banks[acc] || 0) + net;
+          }
+        } else {
+          // Non-bank assets always included
+          otherAssets[acc] = (otherAssets[acc] || 0) + net;
+        }
+      } else if (type === 'Liability') {
+        liabilities[acc] = (liabilities[acc] || 0) + net;
+      } else if (type === 'Equity') {
+        equityAccounts[acc] = (equityAccounts[acc] || 0) + net;
+      } else if (type === 'Income') {
+        totalIncome += net;
+      } else if (type === 'Expense') {
+        totalExpense += Math.abs(net);
+      }
     });
+    
     const netProfit = totalIncome - totalExpense;
-    if (Math.abs(netProfit) > 0.01) equityAccounts["Net Profit / (Loss)"] = netProfit;
+    if (Math.abs(netProfit) > 0.01) {
+      equityAccounts["Retained Earnings / Net Profit"] = netProfit;
+    }
+    
     return { banks, otherAssets, liabilities, equityAccounts };
   }
+  
   function computeCashFlow(transactions, coaMap) {
     let operating = 0, investing = 0, financing = 0;
     transactions.forEach(tx => {
@@ -510,46 +576,70 @@
     return { operating, investing, financing, netCash: operating + investing + financing };
   }
 
+  // UPDATED: Load all periods with proper cumulative balance sheet calculation
   async function loadAllPeriods() {
     const periodType = document.getElementById("reportPeriod").value;
-    const customStart = document.getElementById("startDate").value, customEnd = document.getElementById("endDate").value;
+    const customStart = document.getElementById("startDate").value, 
+          customEnd = document.getElementById("endDate").value;
+    
     const { start, end } = getDateRange(periodType, customStart, customEnd);
     currentPeriod = { start, end, text: formatPeriod(start, end) };
+    
     const compType = document.getElementById("comparisonType").value;
     showThree = (compType === 'twoQuartersBack' || compType === 'twoYearsBack');
-    const compRange = getComparisonRange(start, end, compType, document.getElementById("compareStartDate").value, document.getElementById("compareEndDate").value);
+    const compRange = getComparisonRange(start, end, compType, 
+      document.getElementById("compareStartDate").value, 
+      document.getElementById("compareEndDate").value);
     
-    const allTxs = await fetchTransactions(new Date(2000,0,1), new Date(2100,0,1));
     const coaMap = await loadCOA();
     
-    function getDataForRange(range) {
-      const filtered = allTxs.filter(tx => {
-        let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
-        return d >= range.start && d <= range.end;
-      });
-      const bs = computeBalanceSheet(filtered, coaMap);
-      const cf = computeCashFlow(filtered, coaMap);
-      return { bs, cf, text: formatPeriod(range.start, range.end) };
+    // For balance sheet, we need ALL transactions up to the period end date (cumulative)
+    const allTransactionsUpToCurrent = await fetchAllTransactionsUpTo(end);
+    
+    // For cash flow, we only want transactions WITHIN the period
+    const periodTransactions = await fetchTransactionsInPeriod(start, end);
+    
+    // Calculate current period data
+    currentBS = computeBalanceSheet(allTransactionsUpToCurrent, coaMap);
+    currentCF = computeCashFlow(periodTransactions, coaMap);
+    
+    // Handle comparison periods
+    if (compRange) {
+      // For previous period balance sheet, get transactions up to compRange.end (cumulative)
+      const allTransactionsUpToPrev1 = await fetchAllTransactionsUpTo(compRange.end);
+      const prev1PeriodTransactions = await fetchTransactionsInPeriod(compRange.start, compRange.end);
+      
+      prev1Period = {
+        bs: computeBalanceSheet(allTransactionsUpToPrev1, coaMap),
+        cf: computeCashFlow(prev1PeriodTransactions, coaMap),
+        text: formatPeriod(compRange.start, compRange.end)
+      };
+      
+      if (showThree) {
+        const compRange2 = getComparisonRange(compRange.start, compRange.end, compType,
+          document.getElementById("compareStartDate").value,
+          document.getElementById("compareEndDate").value);
+        
+        if (compRange2) {
+          const allTransactionsUpToPrev2 = await fetchAllTransactionsUpTo(compRange2.end);
+          const prev2PeriodTransactions = await fetchTransactionsInPeriod(compRange2.start, compRange2.end);
+          
+          prev2Period = {
+            bs: computeBalanceSheet(allTransactionsUpToPrev2, coaMap),
+            cf: computeCashFlow(prev2PeriodTransactions, coaMap),
+            text: formatPeriod(compRange2.start, compRange2.end)
+          };
+        } else {
+          prev2Period = null;
+        }
+      } else {
+        prev2Period = null;
+      }
+    } else {
+      prev1Period = null;
+      prev2Period = null;
     }
     
-    currentBS = computeBalanceSheet(allTxs.filter(tx => {
-      let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
-      return d >= start && d <= end;
-    }), coaMap);
-    currentCF = computeCashFlow(allTxs.filter(tx => {
-      let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
-      return d >= start && d <= end;
-    }), coaMap);
-    
-    if (compRange) {
-      const p1 = getDataForRange(compRange);
-      prev1Period = { bs: p1.bs, cf: p1.cf, text: p1.text };
-      if (showThree) {
-        const compRange2 = getComparisonRange(compRange.start, compRange.end, compType, document.getElementById("compareStartDate").value, document.getElementById("compareEndDate").value);
-        if (compRange2) { const p2 = getDataForRange(compRange2); prev2Period = { bs: p2.bs, cf: p2.cf, text: p2.text }; }
-        else prev2Period = null;
-      } else prev2Period = null;
-    } else { prev1Period = null; prev2Period = null; }
     renderPeriodHeader();
     renderBalanceSheet();
     renderCashFlow();
@@ -558,141 +648,361 @@
 
   function renderPeriodHeader() {
     document.getElementById("currentPeriodLabel").innerHTML = currentPeriod.text;
-    if (prev1Period) { document.getElementById("prev1Wrapper").style.display = "flex"; document.getElementById("prev1PeriodLabel").innerHTML = prev1Period.text; }
-    else document.getElementById("prev1Wrapper").style.display = "none";
-    if (prev2Period && showThree) { document.getElementById("prev2Wrapper").style.display = "flex"; document.getElementById("prev2PeriodLabel").innerHTML = prev2Period.text; }
-    else document.getElementById("prev2Wrapper").style.display = "none";
+    if (prev1Period) { 
+      document.getElementById("prev1Wrapper").style.display = "flex"; 
+      document.getElementById("prev1PeriodLabel").innerHTML = prev1Period.text; 
+    } else {
+      document.getElementById("prev1Wrapper").style.display = "none";
+    }
+    if (prev2Period && showThree) { 
+      document.getElementById("prev2Wrapper").style.display = "flex"; 
+      document.getElementById("prev2PeriodLabel").innerHTML = prev2Period.text; 
+    } else {
+      document.getElementById("prev2Wrapper").style.display = "none";
+    }
   }
 
-  function renderBalanceSheet() { /* unchanged, works */ 
+  // UPDATED: Render balance sheet with reconciliation indicators
+  function renderBalanceSheet() {
     if (!currentBS) return;
+    
     const curr = currentBS;
-    const totalAssets = (Object.values(curr.banks).reduce((a,b)=>a+b,0) + Object.values(curr.otherAssets).reduce((a,b)=>a+b,0));
+    const totalAssets = (Object.values(curr.banks).reduce((a,b)=>a+b,0) + 
+                        Object.values(curr.otherAssets).reduce((a,b)=>a+b,0));
     const totalLiab = Object.values(curr.liabilities).reduce((a,b)=>a+b,0);
     const totalEq = Object.values(curr.equityAccounts).reduce((a,b)=>a+b,0);
+    
     document.getElementById("bsTotalAssets").innerHTML = formatINR(totalAssets);
     document.getElementById("bsTotalLiabilities").innerHTML = formatINR(totalLiab);
     document.getElementById("bsTotalEquity").innerHTML = formatINR(totalEq);
+    
     const balanced = Math.abs(totalAssets - (totalLiab + totalEq)) < 0.01;
     const validationDiv = document.getElementById("bsValidation");
-    validationDiv.innerHTML = balanced ? '<i class="fas fa-check-circle"></i> Balance Sheet Balanced ✓' : '<i class="fas fa-exclamation-triangle"></i> Out of Balance! Assets ≠ Liabilities + Equity';
-    validationDiv.className = balanced ? "balance-validation balance-valid" : "balance-validation balance-invalid";
-    // build assets
-    let assetsHtml = `<div class="bs-item"><div><strong>Bank Accounts</strong></div><div class="amount positive">${formatINR(Object.values(curr.banks).reduce((a,b)=>a+b,0))}</div></div>`;
-    for (let [name, val] of Object.entries(curr.banks)) assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
-    assetsHtml += `<div class="bs-item"><div><strong>Other Assets</strong></div><div class="amount positive">${formatINR(Object.values(curr.otherAssets).reduce((a,b)=>a+b,0))}</div></div>`;
-    for (let [name, val] of Object.entries(curr.otherAssets)) assetsHtml += `<div class="bs-item" style="margin-left:20px;"><div>${name}</div><div class="amount positive">${formatINR(val)}</div></div>`;
-    assetsHtml += `<div class="bs-item bs-total"><div><strong>Total Assets</strong></div><div class="amount positive">${formatINR(totalAssets)}</div></div>`;
+    validationDiv.innerHTML = balanced ? 
+      '<i class="fas fa-check-circle"></i> Balance Sheet Balanced ✓' : 
+      '<i class="fas fa-exclamation-triangle"></i> Out of Balance! Assets ≠ Liabilities + Equity';
+    validationDiv.className = balanced ? 
+      "balance-validation balance-valid" : 
+      "balance-validation balance-invalid";
+    
+    // Build assets section with reconciliation indicator
+    const bankTotal = Object.values(curr.banks).reduce((a,b)=>a+b,0);
+    let assetsHtml = `<div class="bs-item">
+      <div>
+        <strong>Bank Accounts</strong> 
+        <span class="info-note">
+          <i class="fas fa-check-circle" style="color:#10b981;"></i> Reconciled transactions only
+        </span>
+      </div>
+      <div class="amount positive">${formatINR(bankTotal)}</div>
+    </div>`;
+    
+    // Sort bank accounts by name for better readability
+    const sortedBanks = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
+    for (let [name, val] of sortedBanks) {
+      assetsHtml += `<div class="bs-item" style="margin-left:20px;">
+        <div>${name} <i class="fas fa-check-circle" style="color:#10b981; font-size:0.7rem;"></i></div>
+        <div class="amount positive">${formatINR(val)}</div>
+      </div>`;
+    }
+    
+    const otherTotal = Object.values(curr.otherAssets).reduce((a,b)=>a+b,0);
+    assetsHtml += `<div class="bs-item">
+      <div><strong>Other Assets</strong></div>
+      <div class="amount positive">${formatINR(otherTotal)}</div>
+    </div>`;
+    
+    const sortedOther = Object.entries(curr.otherAssets).sort((a,b) => a[0].localeCompare(b[0]));
+    for (let [name, val] of sortedOther) {
+      assetsHtml += `<div class="bs-item" style="margin-left:20px;">
+        <div>${name}</div>
+        <div class="amount positive">${formatINR(val)}</div>
+      </div>`;
+    }
+    
+    assetsHtml += `<div class="bs-item bs-total">
+      <div><strong>Total Assets</strong></div>
+      <div class="amount positive">${formatINR(totalAssets)}</div>
+    </div>`;
+    
     document.getElementById("assetsBreakdown").innerHTML = assetsHtml;
+    
+    // Build liabilities section
     let liabHtml = '';
-    for (let [name, val] of Object.entries(curr.liabilities)) liabHtml += `<div class="bs-item"><div>${name}</div><div class="amount negative">${formatINR(val)}</div></div>`;
-    liabHtml += `<div class="bs-item bs-total"><div><strong>Total Liabilities</strong></div><div class="amount negative">${formatINR(totalLiab)}</div></div>`;
-    document.getElementById("liabilitiesBreakdown").innerHTML = liabHtml || '<div class="no-data-message">No liabilities.</div>';
+    const sortedLiab = Object.entries(curr.liabilities).sort((a,b) => a[0].localeCompare(b[0]));
+    for (let [name, val] of sortedLiab) {
+      liabHtml += `<div class="bs-item">
+        <div>${name}</div>
+        <div class="amount negative">${formatINR(val)}</div>
+      </div>`;
+    }
+    liabHtml += `<div class="bs-item bs-total">
+      <div><strong>Total Liabilities</strong></div>
+      <div class="amount negative">${formatINR(totalLiab)}</div>
+    </div>`;
+    
+    document.getElementById("liabilitiesBreakdown").innerHTML = 
+      liabHtml || '<div class="no-data-message">No liabilities recorded.</div>';
+    
+    // Build equity section
     let eqHtml = '';
-    for (let [name, val] of Object.entries(curr.equityAccounts)) eqHtml += `<div class="bs-item"><div>${name}</div><div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div></div>`;
-    eqHtml += `<div class="bs-item bs-total"><div><strong>Total Equity</strong></div><div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div></div>`;
-    document.getElementById("equityBreakdown").innerHTML = eqHtml || '<div class="no-data-message">No equity accounts.</div>';
+    const sortedEq = Object.entries(curr.equityAccounts).sort((a,b) => a[0].localeCompare(b[0]));
+    for (let [name, val] of sortedEq) {
+      eqHtml += `<div class="bs-item">
+        <div>${name}</div>
+        <div class="amount ${val>=0?'positive':'negative'}">${formatINR(val)}</div>
+      </div>`;
+    }
+    eqHtml += `<div class="bs-item bs-total">
+      <div><strong>Total Equity</strong></div>
+      <div class="amount ${totalEq>=0?'positive':'negative'}">${formatINR(totalEq)}</div>
+    </div>`;
+    
+    document.getElementById("equityBreakdown").innerHTML = 
+      eqHtml || '<div class="no-data-message">No equity accounts recorded.</div>';
+      
+    // Update trends if comparison exists
+    if (prev1Period && prev1Period.bs) {
+      const prevTotalAssets = (Object.values(prev1Period.bs.banks).reduce((a,b)=>a+b,0) + 
+                               Object.values(prev1Period.bs.otherAssets).reduce((a,b)=>a+b,0));
+      const prevTotalLiab = Object.values(prev1Period.bs.liabilities).reduce((a,b)=>a+b,0);
+      const prevTotalEq = Object.values(prev1Period.bs.equityAccounts).reduce((a,b)=>a+b,0);
+      
+      updateTrend('bsAssetsTrend', totalAssets, prevTotalAssets);
+      updateTrend('bsLiabTrend', totalLiab, prevTotalLiab);
+      updateTrend('bsEqTrend', totalEq, prevTotalEq);
+    }
   }
-  function renderCashFlow() { /* unchanged */
+  
+  function updateTrend(elementId, current, previous) {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+    
+    const change = current - previous;
+    const percentChange = previous !== 0 ? (change / Math.abs(previous)) * 100 : 0;
+    
+    if (Math.abs(change) < 0.01) {
+      element.innerHTML = `<span style="color:#6b7280;">No change</span>`;
+    } else if (change > 0) {
+      element.innerHTML = `<span class="trend-up"><i class="fas fa-arrow-up"></i> +${formatINR(change)} (${percentChange.toFixed(1)}%)</span>`;
+    } else {
+      element.innerHTML = `<span class="trend-down"><i class="fas fa-arrow-down"></i> ${formatINR(change)} (${Math.abs(percentChange).toFixed(1)}%)</span>`;
+    }
+  }
+
+  function renderCashFlow() {
     if (!currentCF) return;
+    
     document.getElementById("cfNetCash").innerHTML = formatINR(currentCF.netCash);
     document.getElementById("cfOperating").innerHTML = formatINR(currentCF.operating);
     document.getElementById("cfInvesting").innerHTML = formatINR(currentCF.investing);
-    let cfHtml = `<div class="bs-item"><div><strong>Cash Flow from Operating Activities</strong></div><div class="amount ${currentCF.operating>=0?'positive':'negative'}">${formatINR(currentCF.operating)}</div></div>`;
-    cfHtml += `<div class="bs-item"><div><strong>Cash Flow from Investing Activities</strong></div><div class="amount ${currentCF.investing>=0?'positive':'negative'}">${formatINR(currentCF.investing)}</div></div>`;
-    cfHtml += `<div class="bs-item"><div><strong>Cash Flow from Financing Activities</strong></div><div class="amount ${currentCF.financing>=0?'positive':'negative'}">${formatINR(currentCF.financing)}</div></div>`;
-    cfHtml += `<div class="bs-item bs-total"><div><strong>Net Cash Flow</strong></div><div class="amount ${currentCF.netCash>=0?'positive':'negative'}">${formatINR(currentCF.netCash)}</div></div>`;
+    
+    let cfHtml = `<div class="bs-item">
+      <div><strong>Cash Flow from Operating Activities</strong></div>
+      <div class="amount ${currentCF.operating>=0?'positive':'negative'}">${formatINR(currentCF.operating)}</div>
+    </div>`;
+    
+    cfHtml += `<div class="bs-item">
+      <div><strong>Cash Flow from Investing Activities</strong></div>
+      <div class="amount ${currentCF.investing>=0?'positive':'negative'}">${formatINR(currentCF.investing)}</div>
+    </div>`;
+    
+    cfHtml += `<div class="bs-item">
+      <div><strong>Cash Flow from Financing Activities</strong></div>
+      <div class="amount ${currentCF.financing>=0?'positive':'negative'}">${formatINR(currentCF.financing)}</div>
+    </div>`;
+    
+    cfHtml += `<div class="bs-item bs-total">
+      <div><strong>Net Cash Flow</strong></div>
+      <div class="amount ${currentCF.netCash>=0?'positive':'negative'}">${formatINR(currentCF.netCash)}</div>
+    </div>`;
+    
     document.getElementById("cashflowBreakdown").innerHTML = cfHtml;
-  }
-  function renderCharts() { /* unchanged */ 
-    if (!currentBS || !currentCF) return;
-    const ctx1 = document.getElementById("bsChart").getContext("2d");
-    if (bsChart) bsChart.destroy();
-    const totalAssets = (Object.values(currentBS.banks).reduce((a,b)=>a+b,0) + Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0));
-    const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
-    const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
-    bsChart = new Chart(ctx1, { type: document.getElementById("chartType").value, data: { labels: ["Assets", "Liabilities", "Equity"], datasets: [{ data: [totalAssets, totalLiab, totalEq], backgroundColor: ["#10b981", "#ef4444", "#3b82f6"] }] }, options: { responsive: true, plugins: { tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatINR(ctx.raw)}` } } } } });
-    const ctx2 = document.getElementById("cfChart").getContext("2d");
-    if (cfChart) cfChart.destroy();
-    cfChart = new Chart(ctx2, { type: 'bar', data: { labels: ["Operating", "Investing", "Financing"], datasets: [{ data: [currentCF.operating, currentCF.investing, currentCF.financing], backgroundColor: ["#10b981", "#f59e0b", "#3b82f6"] }] }, options: { responsive: true, plugins: { tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatINR(ctx.raw)}` } } } } });
+    
+    // Update trend
+    if (prev1Period && prev1Period.cf) {
+      updateTrend('cfTrend', currentCF.netCash, prev1Period.cf.netCash);
+    }
   }
 
-  // ========== FIXED EXPORT FUNCTIONS USING DATA OBJECTS ==========
+  function renderCharts() {
+    if (!currentBS || !currentCF) return;
+    
+    const ctx1 = document.getElementById("bsChart").getContext("2d");
+    if (bsChart) bsChart.destroy();
+    
+    const totalAssets = (Object.values(currentBS.banks).reduce((a,b)=>a+b,0) + 
+                        Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0));
+    const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
+    const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
+    
+    bsChart = new Chart(ctx1, { 
+      type: document.getElementById("chartType").value, 
+      data: { 
+        labels: ["Assets", "Liabilities", "Equity"], 
+        datasets: [{ 
+          data: [totalAssets, totalLiab, totalEq], 
+          backgroundColor: ["#10b981", "#ef4444", "#3b82f6"] 
+        }] 
+      }, 
+      options: { 
+        responsive: true, 
+        plugins: { 
+          tooltip: { 
+            callbacks: { 
+              label: ctx => `${ctx.label}: ${formatINR(ctx.raw)}` 
+            } 
+          } 
+        } 
+      } 
+    });
+    
+    const ctx2 = document.getElementById("cfChart").getContext("2d");
+    if (cfChart) cfChart.destroy();
+    
+    cfChart = new Chart(ctx2, { 
+      type: 'bar', 
+      data: { 
+        labels: ["Operating", "Investing", "Financing"], 
+        datasets: [{ 
+          data: [currentCF.operating, currentCF.investing, currentCF.financing], 
+          backgroundColor: ["#10b981", "#f59e0b", "#3b82f6"] 
+        }] 
+      }, 
+      options: { 
+        responsive: true, 
+        plugins: { 
+          tooltip: { 
+            callbacks: { 
+              label: ctx => `${ctx.label}: ${formatINR(ctx.raw)}` 
+            } 
+          } 
+        } 
+      } 
+    });
+  }
+
   function exportToExcel() {
     const activeTab = document.querySelector(".tab-content.active").id;
     const wsData = [];
+    
     if (activeTab === "balanceSheetTab" && currentBS) {
       wsData.push(["Balance Sheet", currentPeriod.text], []);
       wsData.push(["ASSETS"]);
       const totalBanks = Object.values(currentBS.banks).reduce((a,b)=>a+b,0);
-      wsData.push(["Bank Accounts", totalBanks]);
-      for (let [name, val] of Object.entries(currentBS.banks)) wsData.push([`  ${name}`, val]);
+      wsData.push(["Bank Accounts (Reconciled only)", totalBanks]);
+      for (let [name, val] of Object.entries(currentBS.banks).sort()) {
+        wsData.push([`  ${name}`, val]);
+      }
       const totalOther = Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0);
       wsData.push(["Other Assets", totalOther]);
-      for (let [name, val] of Object.entries(currentBS.otherAssets)) wsData.push([`  ${name}`, val]);
+      for (let [name, val] of Object.entries(currentBS.otherAssets).sort()) {
+        wsData.push([`  ${name}`, val]);
+      }
       const totalAssets = totalBanks + totalOther;
       wsData.push(["TOTAL ASSETS", totalAssets], []);
+      
       wsData.push(["LIABILITIES"]);
-      for (let [name, val] of Object.entries(currentBS.liabilities)) wsData.push([name, val]);
+      for (let [name, val] of Object.entries(currentBS.liabilities).sort()) {
+        wsData.push([name, val]);
+      }
       const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
       wsData.push(["TOTAL LIABILITIES", totalLiab], []);
+      
       wsData.push(["EQUITY"]);
-      for (let [name, val] of Object.entries(currentBS.equityAccounts)) wsData.push([name, val]);
+      for (let [name, val] of Object.entries(currentBS.equityAccounts).sort()) {
+        wsData.push([name, val]);
+      }
       const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
       wsData.push(["TOTAL EQUITY", totalEq]);
+      
     } else if (activeTab === "cashflowTab" && currentCF) {
       wsData.push(["Cash Flow Statement", currentPeriod.text], []);
       wsData.push(["Cash Flow from Operating Activities", currentCF.operating]);
       wsData.push(["Cash Flow from Investing Activities", currentCF.investing]);
       wsData.push(["Cash Flow from Financing Activities", currentCF.financing]);
       wsData.push(["Net Cash Flow", currentCF.netCash]);
-    } else { Swal.fire("Info", "No data available for export", "info"); return; }
+    } else { 
+      Swal.fire("Info", "No data available for export", "info"); 
+      return; 
+    }
+    
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), activeTab === "balanceSheetTab" ? "Balance Sheet" : "Cash Flow");
-    XLSX.writeFile(wb, `${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${currentPeriod.text.replace(/[^a-z0-9]/gi,'_')}.xlsx`);
-    Swal.fire("Success", "Excel exported", "success");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 
+      activeTab === "balanceSheetTab" ? "Balance Sheet" : "Cash Flow");
+    XLSX.writeFile(wb, `${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${formatDateShort(new Date())}.xlsx`);
+    Swal.fire("Success", "Excel exported successfully", "success");
   }
 
   function exportToPDF() {
     const activeTab = document.querySelector(".tab-content.active").id;
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    doc.setFillColor(30,64,175); doc.rect(0,0,210,40,'F');
-    doc.setTextColor(255,255,255); doc.setFontSize(20);
+    
+    doc.setFillColor(30,64,175); 
+    doc.rect(0,0,210,40,'F');
+    doc.setTextColor(255,255,255); 
+    doc.setFontSize(20);
     const title = activeTab === "balanceSheetTab" ? "BALANCE SHEET" : "CASH FLOW STATEMENT";
     doc.text(title,105,20,{align:'center'});
-    doc.setFontSize(9); doc.text(`Period: ${currentPeriod.text}`,105,32,{align:'center'});
+    doc.setFontSize(9); 
+    doc.text(`Period: ${currentPeriod.text}`,105,32,{align:'center'});
     if (prev1Period) doc.text(`Compared to: ${prev1Period.text}`,105,38,{align:'center'});
+    
     doc.setTextColor(0,0,0);
     let tableBody = [];
+    
     if (activeTab === "balanceSheetTab" && currentBS) {
       tableBody.push(["ASSETS", "Amount (₹)"]);
       const banksTotal = Object.values(currentBS.banks).reduce((a,b)=>a+b,0);
-      tableBody.push(["Bank Accounts", formatINR(banksTotal)]);
-      for (let [name, val] of Object.entries(currentBS.banks)) tableBody.push([`  ${name}`, formatINR(val)]);
+      tableBody.push(["Bank Accounts (Reconciled)", formatINR(banksTotal)]);
+      for (let [name, val] of Object.entries(currentBS.banks).sort()) {
+        tableBody.push([`  ${name}`, formatINR(val)]);
+      }
       const otherTotal = Object.values(currentBS.otherAssets).reduce((a,b)=>a+b,0);
       tableBody.push(["Other Assets", formatINR(otherTotal)]);
-      for (let [name, val] of Object.entries(currentBS.otherAssets)) tableBody.push([`  ${name}`, formatINR(val)]);
+      for (let [name, val] of Object.entries(currentBS.otherAssets).sort()) {
+        tableBody.push([`  ${name}`, formatINR(val)]);
+      }
       const totalAssets = banksTotal + otherTotal;
       tableBody.push(["TOTAL ASSETS", formatINR(totalAssets)], []);
+      
       tableBody.push(["LIABILITIES", ""]);
-      for (let [name, val] of Object.entries(currentBS.liabilities)) tableBody.push([name, formatINR(val)]);
+      for (let [name, val] of Object.entries(currentBS.liabilities).sort()) {
+        tableBody.push([name, formatINR(val)]);
+      }
       const totalLiab = Object.values(currentBS.liabilities).reduce((a,b)=>a+b,0);
       tableBody.push(["TOTAL LIABILITIES", formatINR(totalLiab)], []);
+      
       tableBody.push(["EQUITY", ""]);
-      for (let [name, val] of Object.entries(currentBS.equityAccounts)) tableBody.push([name, formatINR(val)]);
+      for (let [name, val] of Object.entries(currentBS.equityAccounts).sort()) {
+        tableBody.push([name, formatINR(val)]);
+      }
       const totalEq = Object.values(currentBS.equityAccounts).reduce((a,b)=>a+b,0);
       tableBody.push(["TOTAL EQUITY", formatINR(totalEq)]);
+      
     } else if (activeTab === "cashflowTab" && currentCF) {
       tableBody.push(["CASH FLOW ELEMENT", "Amount (₹)"]);
       tableBody.push(["Operating Activities", formatINR(currentCF.operating)]);
       tableBody.push(["Investing Activities", formatINR(currentCF.investing)]);
       tableBody.push(["Financing Activities", formatINR(currentCF.financing)]);
       tableBody.push(["NET CASH FLOW", formatINR(currentCF.netCash)]);
-    } else { Swal.fire("Info", "No data to export", "info"); return; }
-    doc.autoTable({ startY: 45, head: [["Description", "Amount"]], body: tableBody, theme: 'striped', styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [30,64,175], textColor: 255, fontStyle: 'bold' } });
-    doc.save(`${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${new Date().toISOString().slice(0,10)}.pdf`);
-    Swal.fire("Success", "PDF generated with values", "success");
+    } else { 
+      Swal.fire("Info", "No data to export", "info"); 
+      return; 
+    }
+    
+    doc.autoTable({ 
+      startY: 45, 
+      head: [["Description", "Amount"]], 
+      body: tableBody, 
+      theme: 'striped', 
+      styles: { fontSize: 8, cellPadding: 2 }, 
+      headStyles: { fillColor: [30,64,175], textColor: 255, fontStyle: 'bold' } 
+    });
+    
+    doc.save(`${activeTab === "balanceSheetTab" ? "Balance_Sheet" : "Cash_Flow"}_${formatDateShort(new Date())}.pdf`);
+    Swal.fire("Success", "PDF generated successfully", "success");
   }
 
   function setDefaultDates() {
@@ -703,13 +1013,32 @@
     document.getElementById("compareEndDate").value = formatDateShort(new Date(today.getFullYear(), today.getMonth(), 0));
   }
 
-  document.getElementById("reportPeriod").addEventListener("change",()=>{ document.getElementById("customDateRange").style.display = document.getElementById("reportPeriod").value==="custom"?"flex":"none"; });
-  document.getElementById("comparisonType").addEventListener("change",()=>{ document.getElementById("customComparisonRange").style.display = document.getElementById("comparisonType").value==="custom"?"flex":"none"; });
-  document.getElementById("generateBtn").addEventListener("click", async () => { const loading = document.getElementById("loadingModal"); loading.style.display="flex"; await loadAllPeriods(); loading.style.display="none"; });
+  // Event listeners
+  document.getElementById("reportPeriod").addEventListener("change",()=>{ 
+    document.getElementById("customDateRange").style.display = 
+      document.getElementById("reportPeriod").value==="custom"?"flex":"none"; 
+  });
+  
+  document.getElementById("comparisonType").addEventListener("change",()=>{ 
+    document.getElementById("customComparisonRange").style.display = 
+      document.getElementById("comparisonType").value==="custom"?"flex":"none"; 
+  });
+  
+  document.getElementById("generateBtn").addEventListener("click", async () => { 
+    const loading = document.getElementById("loadingModal"); 
+    loading.style.display="flex"; 
+    await loadAllPeriods(); 
+    loading.style.display="none"; 
+  });
+  
   document.getElementById("exportExcel").addEventListener("click", exportToExcel);
   document.getElementById("exportPDF").addEventListener("click", exportToPDF);
   document.getElementById("chartType").addEventListener("change", renderCharts);
-  document.getElementById("homeBtn").addEventListener("click",()=>{ window.location.href="home.html"; });
+  
+  document.getElementById("homeBtn").addEventListener("click",()=>{ 
+    window.location.href="home.html"; 
+  });
+  
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
@@ -719,6 +1048,7 @@
       document.getElementById(activeId).classList.add("active");
     });
   });
+  
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
@@ -730,9 +1060,15 @@
       loading.style.display = "flex";
       await loadAllPeriods();
       loading.style.display = "none";
-    } else window.location.href = "index.html";
+    } else {
+      window.location.href = "index.html";
+    }
   });
-  document.getElementById("logoutBtn").addEventListener("click", async () => { await signOut(auth); window.location.href = "index.html"; });
+  
+  document.getElementById("logoutBtn").addEventListener("click", async () => { 
+    await signOut(auth); 
+    window.location.href = "index.html"; 
+  });
 </script>
 </body>
 </html>
