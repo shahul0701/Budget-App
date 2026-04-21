@@ -84,6 +84,68 @@
     #logoutBtn { background: rgba(239,68,68,0.3); border-color: rgba(239,68,68,0.5); }
     #logoutBtn:hover { background: rgba(239,68,68,0.5); }
 
+    /* Bank Balance Card */
+    .bank-balance-card {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      border: 1px solid #334155;
+    }
+    .bank-balance-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .bank-balance-header i { color: #60a5fa; }
+    .bank-balance-value {
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: #f1f5f9;
+      letter-spacing: -1px;
+    }
+    .bank-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .bank-account-item {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .bank-account-name {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 4px;
+    }
+    .bank-account-balance {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+    .reconciliation-status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      margin-left: 8px;
+    }
+    .status-reconciled { background: #10b981; color: white; }
+    .status-pending { background: #f59e0b; color: white; }
+    .status-unreconciled { background: #ef4444; color: white; }
+
     /* Controls */
     .controls-panel {
       background: white;
@@ -414,11 +476,31 @@
       margin-left: 8px;
     }
 
+    /* Update Button */
+    .update-section {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .update-btn {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .update-btn:hover { background: #059669; }
+    .update-btn i { margin-right: 8px; }
+
     /* Responsive */
     @media (max-width: 900px) {
       .statement-table { font-size: 0.8rem; }
       .statement-table th, .statement-table td { padding: 10px 12px; }
       .kpi-value { font-size: 1.8rem; }
+      .bank-balance-value { font-size: 2rem; }
     }
     @media (max-width: 600px) {
       body { padding: 12px; }
@@ -445,6 +527,21 @@
       <button id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
     </div>
   </header>
+
+  <!-- Bank Balance Overview Card -->
+  <div class="bank-balance-card" id="bankBalanceCard">
+    <div class="bank-balance-header">
+      <i class="fas fa-university"></i>
+      <span>Total Bank Balance (Reconciled Only)</span>
+      <i class="fas fa-check-circle" style="color: #10b981; margin-left: auto;"></i>
+    </div>
+    <div class="bank-balance-value" id="totalBankBalance">₹0.00</div>
+    <div class="bank-detail-grid" id="bankDetailGrid"></div>
+    <div class="update-section">
+      <button class="update-btn" id="refreshBankBalance"><i class="fas fa-sync-alt"></i> Refresh Bank Balance</button>
+      <button class="update-btn" id="reconcileAllBtn" style="background: #8b5cf6;"><i class="fas fa-check-double"></i> Mark All as Reconciled</button>
+    </div>
+  </div>
 
   <!-- Controls -->
   <div class="controls-panel">
@@ -565,7 +662,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, collection, getDocs, doc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
   const firebaseConfig = {
@@ -586,6 +683,8 @@
   let data = { current: { bs: null, cf: null }, prev1: { bs: null, cf: null }, prev2: { bs: null, cf: null } };
   let showThree = false;
   let bsChart, cfChart;
+  let allTransactions = [];
+  let coaMap = {};
 
   // Utility Functions
   function formatINR(amt) { 
@@ -697,33 +796,31 @@
     return null;
   }
 
-  async function fetchAllTransactionsUpTo(endDate) {
+  async function fetchAllTransactions() {
     if (!currentUser) return [];
     try {
       const q = collection(db, "users", currentUser.uid, "transactions");
       const snap = await getDocs(q);
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      return all.filter(tx => {
-        if (!tx.DATE) return false;
-        let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
-        return d <= endDate;
-      });
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
     } catch(e) { console.error(e); return []; }
   }
 
+  async function fetchAllTransactionsUpTo(endDate) {
+    const all = await fetchAllTransactions();
+    return all.filter(tx => {
+      if (!tx.DATE) return false;
+      let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
+      return d <= endDate;
+    });
+  }
+
   async function fetchTransactionsInPeriod(start, end) {
-    if (!currentUser) return [];
-    try {
-      const q = collection(db, "users", currentUser.uid, "transactions");
-      const snap = await getDocs(q);
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return all.filter(tx => {
-        if (!tx.DATE) return false;
-        let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
-        return d >= start && d <= end;
-      });
-    } catch(e) { console.error(e); return []; }
+    const all = await fetchAllTransactions();
+    return all.filter(tx => {
+      if (!tx.DATE) return false;
+      let d = tx.DATE.toDate ? tx.DATE.toDate() : new Date(tx.DATE);
+      return d >= start && d <= end;
+    });
   }
 
   async function loadCOA() {
@@ -751,6 +848,10 @@
     const lower = name.toLowerCase();
     return lower.includes('bank') || lower.includes('cash');
   }
+
+  function isReconciled(tx) {
+    return tx.reconciled === true || tx.status === 'reconciled' || tx.RECONCILED === true;
+  }
   
   function computeBalanceSheet(transactions, coaMap) {
     let banks = {}, otherAssets = {}, liabilities = {}, equityAccounts = {};
@@ -768,8 +869,9 @@
       
       if (type === 'Asset') {
         if (isBankAccount(acc, coaInfo)) {
-          const isReconciled = tx.reconciled === true || tx.status === 'reconciled' || tx.RECONCILED === true;
-          if (isReconciled) banks[acc] = (banks[acc] || 0) + net;
+          if (isReconciled(tx)) {
+            banks[acc] = (banks[acc] || 0) + net;
+          }
         } else {
           otherAssets[acc] = (otherAssets[acc] || 0) + net;
         }
@@ -820,6 +922,146 @@
     return { operating, investing, financing, netCash: operating + investing + financing };
   }
 
+  function updateBankBalanceDisplay() {
+    if (!data.current.bs) return;
+    
+    const curr = data.current.bs;
+    const totalBanks = Object.values(curr.banks).reduce((a,b)=>a+b,0);
+    document.getElementById('totalBankBalance').textContent = formatINR(totalBanks);
+    
+    // Build bank detail grid
+    const gridHtml = Object.entries(curr.banks)
+      .sort((a,b) => a[0].localeCompare(b[0]))
+      .map(([name, balance]) => `
+        <div class="bank-account-item">
+          <div class="bank-account-name">
+            <i class="fas fa-university" style="margin-right: 6px;"></i>${name}
+            <span class="reconciliation-status status-reconciled">Reconciled</span>
+          </div>
+          <div class="bank-account-balance">${formatINR(balance)}</div>
+        </div>
+      `).join('');
+    
+    document.getElementById('bankDetailGrid').innerHTML = gridHtml || '<div class="bank-account-item"><div class="bank-account-name">No bank accounts found</div><div class="bank-account-balance">₹0.00</div></div>';
+  }
+
+  async function refreshBankBalance() {
+    if (!currentUser) return;
+    
+    const loading = document.getElementById("loadingModal");
+    loading.style.display = "flex";
+    
+    try {
+      // Reload all data
+      await loadAllPeriods();
+      updateBankBalanceDisplay();
+      
+      Swal.fire({
+        icon: 'success',
+        title: 'Bank Balance Updated',
+        text: 'Bank balances have been refreshed successfully.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } catch(e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Update Failed',
+        text: 'Could not refresh bank balance: ' + e.message
+      });
+    } finally {
+      loading.style.display = "none";
+    }
+  }
+
+  async function reconcileAllTransactions() {
+    if (!currentUser) return;
+    
+    const result = await Swal.fire({
+      title: 'Reconcile All Bank Transactions?',
+      text: 'This will mark all bank-related transactions as reconciled. Continue?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Reconcile All',
+      cancelButtonText: 'Cancel'
+    });
+    
+    if (!result.isConfirmed) return;
+    
+    const loading = document.getElementById("loadingModal");
+    loading.style.display = "flex";
+    
+    try {
+      const allTx = await fetchAllTransactions();
+      const bankTx = allTx.filter(tx => {
+        const acc = tx.ACCOUNT_HEADER || "";
+        const coaInfo = coaMap[acc] || null;
+        return isBankAccount(acc, coaInfo) && !isReconciled(tx);
+      });
+      
+      if (bankTx.length === 0) {
+        Swal.fire({
+          icon: 'info',
+          title: 'No Changes',
+          text: 'All bank transactions are already reconciled.'
+        });
+        loading.style.display = "none";
+        return;
+      }
+      
+      // Batch update
+      const batch = writeBatch(db);
+      bankTx.forEach(tx => {
+        const txRef = doc(db, "users", currentUser.uid, "transactions", tx.id);
+        batch.update(txRef, { 
+          reconciled: true, 
+          status: 'reconciled',
+          RECONCILED: true,
+          reconciledAt: new Date().toISOString()
+        });
+      });
+      
+      await batch.commit();
+      
+      // Reload data
+      await loadAllPeriods();
+      updateBankBalanceDisplay();
+      
+      Swal.fire({
+        icon: 'success',
+        title: 'Reconciliation Complete',
+        text: `${bankTx.length} transaction(s) marked as reconciled.`
+      });
+    } catch(e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Reconciliation Failed',
+        text: 'Error: ' + e.message
+      });
+    } finally {
+      loading.style.display = "none";
+    }
+  }
+
+  async function checkBankBalance() {
+    if (!currentUser) return;
+    
+    const totalBanks = Object.values(data.current.bs?.banks || {}).reduce((a,b)=>a+b,0);
+    
+    let message = `Current Bank Balance: ${formatINR(totalBanks)}\n\n`;
+    message += `Bank Accounts:\n`;
+    Object.entries(data.current.bs?.banks || {}).forEach(([name, balance]) => {
+      message += `  • ${name}: ${formatINR(balance)}\n`;
+    });
+    
+    await Swal.fire({
+      title: 'Bank Balance Check',
+      text: message,
+      icon: 'info',
+      confirmButtonText: 'Close'
+    });
+  }
+
   async function loadAllPeriods() {
     const periodType = document.getElementById("reportPeriod").value;
     const customStart = document.getElementById("startDate").value; 
@@ -835,7 +1077,7 @@
       document.getElementById("compareStartDate").value, 
       document.getElementById("compareEndDate").value);
     
-    const coaMap = await loadCOA();
+    coaMap = await loadCOA();
     
     // Current period
     const allCurrent = await fetchAllTransactionsUpTo(end);
@@ -892,13 +1134,13 @@
     renderBalanceSheet();
     renderCashFlow();
     renderCharts();
+    updateBankBalanceDisplay();
   }
 
   function renderPeriodHeader() {
     const header = document.getElementById('periodHeader');
     let html = '';
     
-    // Current period
     html += `<div class="period-card">
       <div class="period-color current"></div>
       <div class="period-info">
@@ -907,7 +1149,6 @@
       </div>
     </div>`;
     
-    // Prev1 period
     if (periods.prev1) {
       html += `<div class="period-card">
         <div class="period-color prev1"></div>
@@ -918,7 +1159,6 @@
       </div>`;
     }
     
-    // Prev2 period
     if (periods.prev2 && showThree) {
       html += `<div class="period-card">
         <div class="period-color prev2"></div>
@@ -972,14 +1212,12 @@
     const prev1 = data.prev1.bs;
     const prev2 = data.prev2.bs;
     
-    // Totals
     const totalBanks = Object.values(curr.banks).reduce((a,b)=>a+b,0);
     const totalOther = Object.values(curr.otherAssets).reduce((a,b)=>a+b,0);
     const totalAssets = totalBanks + totalOther;
     const totalLiab = Object.values(curr.liabilities).reduce((a,b)=>a+b,0);
     const totalEq = Object.values(curr.equityAccounts).reduce((a,b)=>a+b,0);
     
-    // KPI Cards
     const kpiHtml = `
       <div class="kpi-card">
         <div class="kpi-label"><i class="fas fa-building"></i> Total Assets</div>
@@ -999,7 +1237,6 @@
     `;
     document.getElementById('bsKpiGrid').innerHTML = kpiHtml;
     
-    // Validation
     const balanced = Math.abs(totalAssets - (totalLiab + totalEq)) < 0.01;
     const validationDiv = document.getElementById("bsValidation");
     validationDiv.innerHTML = balanced ? 
@@ -1007,9 +1244,8 @@
       '<i class="fas fa-exclamation-triangle"></i> Balance Sheet is Out of Balance — Check Your Entries';
     validationDiv.className = `balance-validation ${balanced ? 'balance-valid' : 'balance-invalid'}`;
     
-    // Assets Table
     let assetsHtml = getTableHeaders();
-    assetsHtml += renderTableRow('Bank Accounts', totalBanks, prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) : null, { badge: 'Reconciled Only' });
+    assetsHtml += renderTableRow('Bank Accounts (Reconciled)', totalBanks, prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) : null, { badge: 'Reconciled Only' });
     
     const sortedBanks = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedBanks) {
@@ -1028,7 +1264,6 @@
     assetsHtml += renderTableRow('TOTAL ASSETS', totalAssets, prev1TotalAssets, prev2TotalAssets, { isTotal: true });
     document.getElementById('assetsTable').innerHTML = assetsHtml;
     
-    // Liabilities Table
     let liabHtml = getTableHeaders();
     const sortedLiab = Object.entries(curr.liabilities).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedLiab) {
@@ -1039,7 +1274,6 @@
     liabHtml += renderTableRow('TOTAL LIABILITIES', totalLiab, prev1TotalLiab, prev2TotalLiab, { isTotal: true });
     document.getElementById('liabilitiesTable').innerHTML = liabHtml || `<tr><td colspan="4" class="no-data-message">No liabilities recorded.</td></tr>`;
     
-    // Equity Table
     let eqHtml = getTableHeaders();
     const sortedEq = Object.entries(curr.equityAccounts).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedEq) {
@@ -1077,7 +1311,6 @@
     const prev1 = data.prev1.cf;
     const prev2 = data.prev2.cf;
     
-    // KPI Cards
     const kpiHtml = `
       <div class="kpi-card">
         <div class="kpi-label"><i class="fas fa-chart-line"></i> Net Cash Flow</div>
@@ -1097,7 +1330,6 @@
     `;
     document.getElementById('cfKpiGrid').innerHTML = kpiHtml;
     
-    // Cash Flow Table
     let html = getTableHeaders();
     html += renderTableRow('Operating Activities', curr.operating, prev1?.operating, prev2?.operating);
     html += renderTableRow('Investing Activities', curr.investing, prev1?.investing, prev2?.investing);
@@ -1201,14 +1433,58 @@
     });
   }
 
-  function exportToExcel() {
-    // Implementation similar to previous but using table data
-    Swal.fire("Success", "Excel export feature ready", "success");
+  async function exportToExcel() {
+    try {
+      const wb = XLSX.utils.book_new();
+      
+      // Bank Balance Sheet
+      const bankData = [['Bank Account', 'Balance']];
+      Object.entries(data.current.bs?.banks || {}).forEach(([name, bal]) => {
+        bankData.push([name, bal]);
+      });
+      bankData.push(['TOTAL', Object.values(data.current.bs?.banks || {}).reduce((a,b)=>a+b,0)]);
+      const ws1 = XLSX.utils.aoa_to_sheet(bankData);
+      XLSX.utils.book_append_sheet(wb, ws1, 'Bank Balance');
+      
+      // Assets
+      const assetData = [['Account', 'Current', 'Previous', 'Prior Previous']];
+      const ws2 = XLSX.utils.aoa_to_sheet(assetData);
+      XLSX.utils.book_append_sheet(wb, ws2, 'Assets');
+      
+      XLSX.writeFile(wb, `FinLedger_BankBalance_${formatDateShort(new Date())}.xlsx`);
+      Swal.fire("Success", "Excel file exported successfully", "success");
+    } catch(e) {
+      Swal.fire("Error", "Export failed: " + e.message, "error");
+    }
   }
 
-  function exportToPDF() {
-    // Implementation similar to previous
-    Swal.fire("Success", "PDF export feature ready", "success");
+  async function exportToPDF() {
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      doc.setFontSize(20);
+      doc.text('FinLedger Pro - Bank Balance Report', 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 30);
+      
+      const totalBanks = Object.values(data.current.bs?.banks || {}).reduce((a,b)=>a+b,0);
+      doc.text(`Total Bank Balance: ${formatINR(totalBanks)}`, 14, 45);
+      
+      const bankRows = Object.entries(data.current.bs?.banks || {}).map(([name, bal]) => [name, formatINR(bal)]);
+      
+      doc.autoTable({
+        head: [['Bank Account', 'Balance']],
+        body: bankRows,
+        startY: 55,
+        foot: [['TOTAL', formatINR(totalBanks)]]
+      });
+      
+      doc.save(`FinLedger_BankBalance_${formatDateShort(new Date())}.pdf`);
+      Swal.fire("Success", "PDF exported successfully", "success");
+    } catch(e) {
+      Swal.fire("Error", "Export failed: " + e.message, "error");
+    }
   }
 
   function setDefaultDates() {
@@ -1238,6 +1514,8 @@
   document.getElementById("exportExcel").addEventListener("click", exportToExcel);
   document.getElementById("exportPDF").addEventListener("click", exportToPDF);
   document.getElementById("chartType").addEventListener("change", renderCharts);
+  document.getElementById("refreshBankBalance").addEventListener("click", refreshBankBalance);
+  document.getElementById("reconcileAllBtn").addEventListener("click", reconcileAllTransactions);
   
   document.getElementById("homeBtn").addEventListener("click", () => { window.location.href = "home.html"; });
   
