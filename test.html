@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InventoryPro | Complete Connected Inventory System</title>
+    <title>InventoryPro | Complete Working System</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -40,22 +40,22 @@
         .form-control { width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 8px; font-size: 14px; transition: border-color 0.3s; }
         .form-control:focus { outline: none; border-color: var(--primary); }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 1000; }
         .modal.active { display: flex; }
         .modal-content { background: white; padding: 30px; border-radius: var(--radius); max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; animation: slideIn 0.3s ease; }
         @keyframes slideIn { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .action-buttons { display: flex; gap: 5px; flex-wrap: wrap; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .connected-badge { font-size: 10px; padding: 2px 8px; background: #e0e7ff; color: #4338ca; border-radius: 10px; margin-left: 5px; }
         .info-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 15px; border-radius: 10px; margin: 15px 0; }
-        @media (max-width: 768px) { .form-row, .form-row-3 { grid-template-columns: 1fr; } .header { flex-direction: column; text-align: center; } }
+        .item-row { background: #f8fafc; padding: 10px; border-radius: 8px; margin-bottom: 8px; }
+        @media (max-width: 768px) { .form-row, .form-row-3 { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     <div class="app-container">
         <div class="header">
-            <h1>📦 InventoryPro - Connected System</h1>
+            <h1>📦 InventoryPro - All Working</h1>
             <div style="display:flex;align-items:center;gap:15px;flex-wrap:wrap;">
                 <span id="userInfo" style="font-weight:600;"></span>
                 <button class="btn btn-danger btn-sm" onclick="logout()">🚪 Logout</button>
@@ -106,20 +106,21 @@
 
         document.getElementById('userInfo').textContent = `👤 ${COMPANY.userEmail || 'Admin'} | ${COMPANY.name}`;
         
+        // Setup tabs
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', function() {
                 switchTab(this.getAttribute('data-tab'));
             });
         });
 
-        loadTab('dashboard');
-        refreshAllData();
+        // Initial load
+        refreshAllData().then(() => loadTab('dashboard'));
 
         function switchTab(tabName) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             const activeTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
             if (activeTab) activeTab.classList.add('active');
-            loadTab(tabName);
+            refreshAllData().then(() => loadTab(tabName));
         }
         window.switchTab = switchTab;
 
@@ -133,8 +134,9 @@
                 prodSnap.forEach(d => productsData.push({ id: d.id, ...d.data() }));
                 suppliersData = [];
                 suppSnap.forEach(d => suppliersData.push({ id: d.id, ...d.data() }));
+                console.log('✅ Data refreshed:', productsData.length, 'products,', suppliersData.length, 'suppliers');
             } catch (error) {
-                console.error('Refresh error:', error);
+                console.error('❌ Refresh error:', error);
             }
         }
 
@@ -153,154 +155,123 @@
         }
 
         // ==================== DASHBOARD ====================
-        async function loadDashboard(container) {
-            await refreshAllData();
+        function loadDashboard(container) {
             const totalProducts = productsData.length;
             const totalStock = productsData.reduce((s, p) => s + (p.stock || 0), 0);
             const totalValue = productsData.reduce((s, p) => s + ((p.stock || 0) * (p.costPrice || 0)), 0);
             const lowStock = productsData.filter(p => (p.stock || 0) <= (p.reorderLevel || 10)).length;
-            const totalSuppliers = suppliersData.length;
-            const productsWithSupplier = productsData.filter(p => p.supplierId).length;
 
             container.innerHTML = `
-                <h2 style="margin-bottom:20px;">📊 Connected Dashboard</h2>
+                <h2>📊 Dashboard</h2>
                 <div class="stats-grid">
-                    <div class="stat-card" style="border-left-color: #4f46e5;" onclick="switchTab('products')"><p>Total Products</p><h3>${totalProducts}</h3></div>
-                    <div class="stat-card" style="border-left-color: #10b981;" onclick="switchTab('stock-in')"><p>Total Stock</p><h3>${totalStock.toLocaleString()}</h3></div>
-                    <div class="stat-card" style="border-left-color: #f59e0b;"><p>Inventory Value</p><h3>₹${totalValue.toLocaleString()}</h3></div>
-                    <div class="stat-card" style="border-left-color: #ef4444;" onclick="switchTab('products')"><p>Low Stock</p><h3>${lowStock}</h3></div>
-                    <div class="stat-card" style="border-left-color: #8b5cf6;" onclick="switchTab('suppliers')"><p>Suppliers</p><h3>${totalSuppliers}</h3></div>
-                    <div class="stat-card" style="border-left-color: #06b6d4;"><p>Linked Products</p><h3>${productsWithSupplier}</h3></div>
+                    <div class="stat-card" onclick="switchTab('products')"><p>Products</p><h3>${totalProducts}</h3></div>
+                    <div class="stat-card" onclick="switchTab('stock-in')"><p>Total Stock</p><h3>${totalStock.toLocaleString()}</h3></div>
+                    <div class="stat-card"><p>Value</p><h3>₹${totalValue.toLocaleString()}</h3></div>
+                    <div class="stat-card" onclick="switchTab('products')"><p>Low Stock</p><h3>${lowStock}</h3></div>
+                    <div class="stat-card" onclick="switchTab('suppliers')"><p>Suppliers</p><h3>${suppliersData.length}</h3></div>
+                    <div class="stat-card" onclick="switchTab('purchase-orders')"><p>Purchase Orders</p><h3 id="poCount">—</h3></div>
                 </div>
-                <div class="info-box">
-                    <strong>🔗 System Connections:</strong> Products → Suppliers | Stock In → Products + Suppliers | Purchase Orders → Suppliers + Products | Bills → Suppliers
-                </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
-                    <div><h3>📊 Stock Overview</h3><canvas id="stockChart" height="200"></canvas></div>
-                    <div><h3>⚠️ Low Stock</h3><div style="max-height:250px;overflow-y:auto;"><table><thead><tr><th>Product</th><th>Stock</th><th>Supplier</th></tr></thead><tbody>${productsData.filter(p=>(p.stock||0)<=(p.reorderLevel||10)).slice(0,8).map(p=>`<tr><td>${p.name}</td><td><span class="badge badge-${p.stock===0?'danger':'warning'}">${p.stock||0}</span></td><td>${suppliersData.find(s=>s.id===p.supplierId)?.name || '<span style="color:#94a3b8;">None</span>'}</td></tr>`).join('')||'<tr><td colspan="3">✅ All stocked!</td></tr>'}</tbody></table></div></div>
-                </div>
+                <div id="lowStockList"></div>
             `;
-            setTimeout(() => {
-                const ctx = document.getElementById('stockChart')?.getContext('2d');
-                if (ctx) new Chart(ctx, { type: 'bar', data: { labels: ['In Stock','Low Stock','Out of Stock'], datasets: [{ data: [productsData.filter(p=>(p.stock||0)>10).length, productsData.filter(p=>(p.stock||0)>0&&(p.stock||0)<=10).length, productsData.filter(p=>(p.stock||0)===0).length], backgroundColor: ['#10b981','#f59e0b','#ef4444'] }] } });
-            }, 300);
+
+            // Load PO count
+            getDocs(query(collection(db, 'purchaseOrders'), where('companyId', '==', COMPANY.id))).then(snap => {
+                document.getElementById('poCount').textContent = snap.size;
+            });
+
+            // Low stock list
+            const lowItems = productsData.filter(p => (p.stock || 0) <= (p.reorderLevel || 10)).slice(0, 5);
+            document.getElementById('lowStockList').innerHTML = lowItems.length ? 
+                `<h3>⚠️ Low Stock</h3><table><thead><tr><th>Product</th><th>Stock</th></tr></thead><tbody>${lowItems.map(p => `<tr><td>${p.name}</td><td><span class="badge badge-${p.stock===0?'danger':'warning'}">${p.stock}</span></td></tr>`).join('')}</tbody></table>` : 
+                '<p>✅ All products well stocked!</p>';
         }
 
-        // ==================== PRODUCTS (WITH SUPPLIER CONNECTION) ====================
-        async function loadProducts(container) {
-            await refreshAllData();
+        // ==================== PRODUCTS ====================
+        function loadProducts(container) {
             container.innerHTML = `
-                <div class="section-header">
-                    <h2>📦 Products (${productsData.length}) <span style="font-size:12px;color:#64748b;">Connected to Suppliers</span></h2>
-                    <button class="btn btn-primary" onclick="showProductForm()">➕ Add Product</button>
-                </div>
+                <div class="section-header"><h2>📦 Products (${productsData.length})</h2><button class="btn btn-primary" onclick="showProductForm()">➕ Add</button></div>
                 <input type="text" class="form-control" placeholder="🔍 Search..." oninput="searchProducts()" id="searchInput" style="margin-bottom:15px;">
-                <div style="overflow-x:auto;"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Cost</th><th>Sell</th><th>Value</th><th>Supplier</th><th>Status</th><th>Actions</th></tr></thead><tbody id="productsTableBody"></tbody></table></div>`;
-            displayProductsTable(productsData);
+                <div style="overflow-x:auto;"><table><thead><tr><th>Name</th><th>SKU</th><th>Category</th><th>Stock</th><th>Cost</th><th>Supplier</th><th>Status</th><th>Actions</th></tr></thead><tbody id="prodBody"></tbody></table></div>`;
+            displayProducts(productsData);
         }
 
-        function displayProductsTable(products) {
-            const tbody = document.getElementById('productsTableBody');
+        function displayProducts(products) {
+            const tbody = document.getElementById('prodBody');
             if (!tbody) return;
-            if (products.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;">No products. <a href="#" onclick="switchTab(\'suppliers\')">Add suppliers first</a> then products!</td></tr>';
-                return;
-            }
-            tbody.innerHTML = products.map(p => {
-                const supplier = suppliersData.find(s => s.id === p.supplierId);
-                const val = (p.stock||0)*(p.costPrice||0);
-                return `<tr>
-                    <td><strong>${p.name}</strong></td><td>${p.sku||'-'}</td><td><span class="badge badge-info">${p.category||'General'}</span></td>
-                    <td><strong>${p.stock||0}</strong></td><td>₹${(p.costPrice||0).toFixed(2)}</td><td>₹${(p.sellingPrice||0).toFixed(2)}</td>
-                    <td>₹${val.toFixed(2)}</td>
-                    <td>${supplier ? `<span style="color:#4f46e5;font-weight:600;">🏭 ${supplier.name}</span>` : '<span style="color:#94a3b8;">—</span>'}</td>
-                    <td><span class="badge badge-${(p.stock||0)===0?'danger':(p.stock||0)<=(p.reorderLevel||10)?'warning':'success'}">${(p.stock||0)===0?'Out':'OK'}</span></td>
-                    <td><div class="action-buttons">
-                        <button class="btn btn-primary btn-xs" onclick="editProductForm('${p.id}')">✏️</button>
-                        <button class="btn btn-success btn-xs" onclick="quickStockIn('${p.id}')">+📥</button>
-                        <button class="btn btn-danger btn-xs" onclick="deleteProductItem('${p.id}')">🗑️</button>
-                    </div></td></tr>`;
-            }).join('');
+            tbody.innerHTML = products.length === 0 ? '<tr><td colspan="8" style="text-align:center;padding:30px;">No products. Click ➕ Add to create!</td></tr>' :
+                products.map(p => {
+                    const supplier = suppliersData.find(s => s.id === p.supplierId);
+                    return `<tr>
+                        <td><strong>${p.name}</strong></td><td>${p.sku||'-'}</td><td><span class="badge badge-info">${p.category||'General'}</span></td>
+                        <td><strong>${p.stock||0}</strong></td><td>₹${(p.costPrice||0).toFixed(2)}</td>
+                        <td>${supplier ? supplier.name : '<span style="color:#94a3b8;">—</span>'}</td>
+                        <td><span class="badge badge-${(p.stock||0)===0?'danger':(p.stock||0)<=(p.reorderLevel||10)?'warning':'success'}">${(p.stock||0)===0?'Out':'OK'}</span></td>
+                        <td><div class="action-buttons">
+                            <button class="btn btn-primary btn-xs" onclick="showProductForm('${p.id}')">✏️</button>
+                            <button class="btn btn-success btn-xs" onclick="quickStockIn('${p.id}')">+📥</button>
+                            <button class="btn btn-danger btn-xs" onclick="deleteItem('products','${p.id}')">🗑️</button>
+                        </div></td></tr>`;
+                }).join('');
         }
 
         window.searchProducts = function() {
-            const search = (document.getElementById('searchInput')?.value||'').toLowerCase();
-            displayProductsTable(productsData.filter(p => p.name?.toLowerCase().includes(search) || p.sku?.toLowerCase().includes(search)));
+            const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
+            displayProducts(productsData.filter(p => p.name?.toLowerCase().includes(search)));
         };
 
         window.showProductForm = function(editId = null) {
             const product = editId ? productsData.find(p => p.id === editId) : null;
             document.getElementById('modalContent').innerHTML = `
                 <h2>${editId?'✏️ Edit':'➕ Add'} Product</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Name *</label><input class="form-control" id="pName" value="${product?.name||''}"></div>
-                    <div class="form-group"><label>SKU</label><input class="form-control" id="pSKU" value="${product?.sku||''}"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Category</label><select class="form-control" id="pCat">${['Electronics','Food','Clothing','Furniture','Medical','Hardware','General'].map(c=>`<option ${product?.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Unit</label><select class="form-control" id="pUnit">${['pcs','kg','liters','boxes'].map(u=>`<option ${product?.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Cost ₹</label><input type="number" step="0.01" class="form-control" id="pCost" value="${product?.costPrice||0}"></div>
-                    <div class="form-group"><label>Sell ₹</label><input type="number" step="0.01" class="form-control" id="pSell" value="${product?.sellingPrice||0}"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Stock</label><input type="number" class="form-control" id="pStock" value="${product?.stock||0}" ${editId?'readonly':''}></div>
-                    <div class="form-group"><label>Reorder Level</label><input type="number" class="form-control" id="pReorder" value="${product?.reorderLevel||10}"></div>
-                </div>
-                <div class="form-group"><label>🔗 Supplier</label>
-                    <select class="form-control" id="pSupplier">
-                        <option value="">-- Select Supplier --</option>
-                        ${suppliersData.map(s => `<option value="${s.id}" ${product?.supplierId===s.id?'selected':''}>${s.name}</option>`).join('')}
-                    </select>
-                    ${suppliersData.length === 0 ? '<small style="color:#ef4444;">⚠️ No suppliers! <a href="#" onclick="closeModal();switchTab(\'suppliers\')">Add supplier first</a></small>' : ''}
-                </div>
-                <button class="btn btn-primary" id="saveP">💾 ${editId?'Update':'Save'}</button>
+                <div class="form-row"><div class="form-group"><label>Name *</label><input class="form-control" id="pName" value="${product?.name||''}"></div><div class="form-group"><label>SKU</label><input class="form-control" id="pSKU" value="${product?.sku||''}"></div></div>
+                <div class="form-row"><div class="form-group"><label>Category</label><select class="form-control" id="pCat">${['Electronics','Food','Clothing','Furniture','Medical','Hardware','General'].map(c=>`<option ${product?.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="form-group"><label>Unit</label><select class="form-control" id="pUnit">${['pcs','kg','liters','boxes'].map(u=>`<option ${product?.unit===u?'selected':''}>${u}</option>`).join('')}</select></div></div>
+                <div class="form-row"><div class="form-group"><label>Cost ₹</label><input type="number" step="0.01" class="form-control" id="pCost" value="${product?.costPrice||0}"></div><div class="form-group"><label>Sell ₹</label><input type="number" step="0.01" class="form-control" id="pSell" value="${product?.sellingPrice||0}"></div></div>
+                <div class="form-row"><div class="form-group"><label>Stock</label><input type="number" class="form-control" id="pStock" value="${product?.stock||0}" ${editId?'readonly':''}></div><div class="form-group"><label>Reorder</label><input type="number" class="form-control" id="pReorder" value="${product?.reorderLevel||10}"></div></div>
+                <div class="form-group"><label>Supplier</label><select class="form-control" id="pSupplier"><option value="">-- None --</option>${suppliersData.map(s=>`<option value="${s.id}" ${product?.supplierId===s.id?'selected':''}>${s.name}</option>`).join('')}</select></div>
+                <button class="btn btn-primary" id="saveP">💾 Save</button>
                 <button class="btn" onclick="closeModal()" style="background:#e2e8f0;">Cancel</button>
             `;
             document.getElementById('modal').classList.add('active');
-            document.getElementById('saveP').addEventListener('click', () => saveProduct(editId));
+            document.getElementById('saveP').addEventListener('click', async () => {
+                const name = document.getElementById('pName').value.trim();
+                if (!name) return alert('Name required!');
+                const data = {
+                    name, sku: document.getElementById('pSKU').value,
+                    category: document.getElementById('pCat').value,
+                    unit: document.getElementById('pUnit').value,
+                    costPrice: parseFloat(document.getElementById('pCost').value)||0,
+                    sellingPrice: parseFloat(document.getElementById('pSell').value)||0,
+                    stock: parseInt(document.getElementById('pStock').value)||0,
+                    reorderLevel: parseInt(document.getElementById('pReorder').value)||10,
+                    supplierId: document.getElementById('pSupplier').value,
+                    companyId: COMPANY.id, updatedAt: new Date().toISOString()
+                };
+                try {
+                    if (editId) { await updateDoc(doc(db, 'products', editId), data); }
+                    else { data.createdAt = new Date().toISOString(); await addDoc(collection(db, 'products'), data); }
+                    closeModal(); switchTab('products');
+                } catch(e) { alert('Error: '+e.message); }
+            });
         };
 
-        async function saveProduct(editId) {
-            const name = document.getElementById('pName').value.trim();
-            if (!name) return alert('Name required!');
-            const data = {
-                name, sku: document.getElementById('pSKU').value,
-                category: document.getElementById('pCat').value,
-                unit: document.getElementById('pUnit').value,
-                costPrice: parseFloat(document.getElementById('pCost').value)||0,
-                sellingPrice: parseFloat(document.getElementById('pSell').value)||0,
-                stock: parseInt(document.getElementById('pStock').value)||0,
-                reorderLevel: parseInt(document.getElementById('pReorder').value)||10,
-                supplierId: document.getElementById('pSupplier').value,
-                companyId: COMPANY.id, updatedAt: new Date().toISOString()
-            };
-            try {
-                if (editId) { await updateDoc(doc(db, 'products', editId), data); }
-                else { data.createdAt = new Date().toISOString(); await addDoc(collection(db, 'products'), data); }
-                closeModal(); await refreshAllData(); loadTab('products');
-            } catch(e) { alert('Error: '+e.message); }
-        }
-
-        window.editProductForm = (id) => showProductForm(id);
-        window.deleteProductItem = async (id) => {
-            if (confirm('Delete?')) { await deleteDoc(doc(db, 'products', id)); await refreshAllData(); loadTab('products'); }
-        };
         window.quickStockIn = (pid) => { switchTab('stock-in'); setTimeout(()=>{ const s=document.getElementById('siProduct'); if(s)s.value=pid; },300); };
+        window.deleteItem = async (collectionName, id) => {
+            if (confirm('Delete permanently?')) {
+                await deleteDoc(doc(db, collectionName, id));
+                switchTab(collectionName === 'products' ? 'products' : 'suppliers');
+            }
+        };
 
         // ==================== SUPPLIERS ====================
-        async function loadSuppliers(container) {
-            await refreshAllData();
+        function loadSuppliers(container) {
             container.innerHTML = `
-                <div class="section-header"><h2>🚚 Suppliers (${suppliersData.length})</h2><button class="btn btn-primary" onclick="showSupplierForm()">➕ Add Supplier</button></div>
-                <div style="overflow-x:auto;"><table><thead><tr><th>Supplier</th><th>Contact</th><th>Email</th><th>Phone</th><th>Products</th><th>Actions</th></tr></thead>
-                <tbody>${suppliersData.length===0?'<tr><td colspan="6" style="text-align:center;padding:30px;">No suppliers. Add one to connect with products!</td></tr>':suppliersData.map(s=>{
-                    const linkedProducts = productsData.filter(p=>p.supplierId===s.id);
-                    return `<tr><td><strong>${s.name}</strong></td><td>${s.contactPerson||'-'}</td><td>${s.email||'-'}</td><td>${s.phone||'-'}</td><td>${linkedProducts.length>0?linkedProducts.map(p=>`<span class="badge badge-info" style="margin:2px;">${p.name}</span>`).join(' '):'<span style="color:#94a3b8;">No products</span>'}</td>
-                    <td><div class="action-buttons"><button class="btn btn-primary btn-xs" onclick="editSupplierForm('${s.id}')">✏️</button><button class="btn btn-success btn-xs" onclick="createPOForSupplier('${s.id}')">📋PO</button><button class="btn btn-danger btn-xs" onclick="deleteSupplierItem('${s.id}')">🗑️</button></div></td></tr>`;
-                }).join('')}</tbody></table></div>`;
-        };
+                <div class="section-header"><h2>🚚 Suppliers (${suppliersData.length})</h2><button class="btn btn-primary" onclick="showSupplierForm()">➕ Add</button></div>
+                <table><thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th><th>Linked Products</th><th>Actions</th></tr></thead>
+                <tbody id="suppBody">${suppliersData.length===0?'<tr><td colspan="6" style="text-align:center;padding:30px;">No suppliers</td></tr>':suppliersData.map(s=>{
+                    const linked = productsData.filter(p=>p.supplierId===s.id);
+                    return `<tr><td><strong>${s.name}</strong></td><td>${s.contactPerson||'-'}</td><td>${s.email||'-'}</td><td>${s.phone||'-'}</td><td>${linked.length} products</td><td><div class="action-buttons"><button class="btn btn-primary btn-xs" onclick="showSupplierForm('${s.id}')">✏️</button><button class="btn btn-success btn-xs" onclick="switchTab('purchase-orders');setTimeout(()=>{document.getElementById('poSupplier').value='${s.id}';},300)">📋PO</button><button class="btn btn-danger btn-xs" onclick="deleteItem('suppliers','${s.id}')">🗑️</button></div></td></tr>`;
+                }).join('')}</tbody></table>`;
+        }
 
         window.showSupplierForm = function(editId = null) {
             const s = editId ? suppliersData.find(x=>x.id===editId) : null;
@@ -310,208 +281,383 @@
                 <div class="form-row"><div class="form-group"><label>Email</label><input type="email" class="form-control" id="sEmail" value="${s?.email||''}"></div><div class="form-group"><label>Phone</label><input class="form-control" id="sPhone" value="${s?.phone||''}"></div></div>
                 <div class="form-group"><label>GST</label><input class="form-control" id="sGST" value="${s?.gst||''}"></div>
                 <div class="form-group"><label>Address</label><textarea class="form-control" id="sAddr" rows="2">${s?.address||''}</textarea></div>
-                <button class="btn btn-primary" id="saveS">💾 ${editId?'Update':'Save'}</button>
+                <button class="btn btn-primary" id="saveS">💾 Save</button>
                 <button class="btn" onclick="closeModal()" style="background:#e2e8f0;">Cancel</button>
             `;
             document.getElementById('modal').classList.add('active');
-            document.getElementById('saveS').addEventListener('click', () => saveSupplier(editId));
+            document.getElementById('saveS').addEventListener('click', async () => {
+                const name = document.getElementById('sName').value.trim();
+                if (!name) return alert('Name required!');
+                const data = { name, contactPerson: document.getElementById('sContact').value, email: document.getElementById('sEmail').value, phone: document.getElementById('sPhone').value, gst: document.getElementById('sGST').value, address: document.getElementById('sAddr').value, companyId: COMPANY.id, updatedAt: new Date().toISOString() };
+                try {
+                    if (editId) { await updateDoc(doc(db, 'suppliers', editId), data); }
+                    else { data.createdAt = new Date().toISOString(); await addDoc(collection(db, 'suppliers'), data); }
+                    closeModal(); switchTab('suppliers');
+                } catch(e) { alert('Error: '+e.message); }
+            });
         };
-
-        async function saveSupplier(editId) {
-            const name = document.getElementById('sName').value.trim();
-            if (!name) return alert('Name required!');
-            const data = { name, contactPerson: document.getElementById('sContact').value, email: document.getElementById('sEmail').value, phone: document.getElementById('sPhone').value, gst: document.getElementById('sGST').value, address: document.getElementById('sAddr').value, companyId: COMPANY.id, updatedAt: new Date().toISOString() };
-            try {
-                if (editId) { await updateDoc(doc(db, 'suppliers', editId), data); }
-                else { data.createdAt = new Date().toISOString(); await addDoc(collection(db, 'suppliers'), data); }
-                closeModal(); await refreshAllData(); loadTab('suppliers');
-            } catch(e) { alert('Error: '+e.message); }
-        };
-
-        window.editSupplierForm = (id) => showSupplierForm(id);
-        window.deleteSupplierItem = async (id) => {
-            const linkedCount = productsData.filter(p=>p.supplierId===id).length;
-            if (linkedCount > 0 && !confirm(`This supplier has ${linkedCount} linked products! Delete anyway?`)) return;
-            if (confirm('Delete supplier?')) { await deleteDoc(doc(db, 'suppliers', id)); await refreshAllData(); loadTab('suppliers'); }
-        };
-        window.createPOForSupplier = (sid) => { switchTab('purchase-orders'); setTimeout(()=>{ const s=document.getElementById('poSupplier'); if(s)s.value=sid; },300); };
 
         // ==================== STOCK IN ====================
-        async function loadStockIn(container) {
-            await refreshAllData();
+        function loadStockIn(container) {
             container.innerHTML = `
-                <h2>📥 Stock In (Receive from Supplier)</h2>
-                <div class="form-row" style="margin-top:20px;">
-                    <div class="form-group"><label>Product *</label><select class="form-control" id="siProduct"><option value="">-- Select --</option>${productsData.map(p=>`<option value="${p.id}">${p.name} (${p.stock}) ${p.supplierId?'🔗':''}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Quantity *</label><input type="number" class="form-control" id="siQty" min="1"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Supplier (Auto-filled)</label><select class="form-control" id="siSupplier"><option value="">-- Select --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Reference</label><input class="form-control" id="siRef" placeholder="PO/BILL #"></div>
-                </div>
-                <button class="btn btn-success" onclick="processStockIn()">✅ Receive Stock</button>
-                <div id="siInfo" style="margin-top:10px;"></div>
-                <h3 style="margin-top:30px;">Recent Receipts</h3><div id="recentSI"></div>
+                <h2>📥 Stock In</h2>
+                <div class="form-row"><div class="form-group"><label>Product *</label><select class="form-control" id="siProduct"><option value="">-- Select --</option>${productsData.map(p=>`<option value="${p.id}">${p.name} (${p.stock})</option>`).join('')}</select></div><div class="form-group"><label>Qty *</label><input type="number" class="form-control" id="siQty" min="1"></div></div>
+                <div class="form-row"><div class="form-group"><label>Supplier</label><select class="form-control" id="siSupplier"><option value="">-- None --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div><div class="form-group"><label>Ref</label><input class="form-control" id="siRef"></div></div>
+                <button class="btn btn-success" id="processSI">✅ Receive Stock</button>
+                <h3 style="margin-top:30px;">Recent</h3><div id="recentSI"></div>
             `;
-            document.getElementById('siProduct').addEventListener('change', function() {
-                const p = productsData.find(x=>x.id===this.value);
-                const siSupplier = document.getElementById('siSupplier');
-                const siInfo = document.getElementById('siInfo');
-                if (p?.supplierId) {
-                    siSupplier.value = p.supplierId;
-                    const s = suppliersData.find(x=>x.id===p.supplierId);
-                    siInfo.innerHTML = `<div class="info-box">🔗 Auto-linked to supplier: <strong>${s?.name||'Unknown'}</strong></div>`;
-                } else {
-                    siSupplier.value = '';
-                    siInfo.innerHTML = '';
-                }
-            });
-            loadRecentMovements('in', 'recentSI');
-        };
-
-        window.processStockIn = async function() {
-            const pid = document.getElementById('siProduct').value;
-            const qty = parseInt(document.getElementById('siQty').value);
-            if (!pid || !qty || qty<=0) return alert('Select product and qty!');
-            const product = productsData.find(p=>p.id===pid);
-            const sid = document.getElementById('siSupplier').value;
-            const supplier = suppliersData.find(s=>s.id===sid);
-            try {
+            document.getElementById('processSI').addEventListener('click', async () => {
+                const pid = document.getElementById('siProduct').value;
+                const qty = parseInt(document.getElementById('siQty').value);
+                if (!pid || !qty || qty<=0) return alert('Select product and qty!');
+                const product = productsData.find(p=>p.id===pid);
+                const sid = document.getElementById('siSupplier').value;
+                const supplier = suppliersData.find(s=>s.id===sid);
                 await updateDoc(doc(db, 'products', pid), { stock: (product.stock||0)+qty, updatedAt: new Date().toISOString() });
                 await addDoc(collection(db, 'stockMovements'), { productId: pid, productName: product.name, type: 'in', quantity: qty, supplierId: sid, supplierName: supplier?.name||'', reference: document.getElementById('siRef').value, companyId: COMPANY.id, timestamp: new Date().toISOString() });
-                alert(`✅ +${qty} ${product.name}${supplier?' from '+supplier.name:''}`);
-                await refreshAllData(); loadTab('stock-in');
-            } catch(e) { alert('Error: '+e.message); }
-        };
+                alert(`✅ +${qty} ${product.name}`);
+                switchTab('stock-in');
+            });
+            loadMovements('in', 'recentSI');
+        }
 
         // ==================== STOCK OUT ====================
-        async function loadStockOut(container) {
-            await refreshAllData();
+        function loadStockOut(container) {
             container.innerHTML = `
                 <h2>📤 Stock Out</h2>
                 <div class="form-row"><div class="form-group"><label>Product *</label><select class="form-control" id="soProduct"><option value="">-- Select --</option>${productsData.map(p=>`<option value="${p.id}">${p.name} (${p.stock})</option>`).join('')}</select></div><div class="form-group"><label>Qty *</label><input type="number" class="form-control" id="soQty" min="1"></div></div>
                 <div class="form-row"><div class="form-group"><label>Reason</label><select class="form-control" id="soReason"><option>Internal Use</option><option>Damaged</option><option>Expired</option><option>Other</option></select></div><div class="form-group"><label>Ref</label><input class="form-control" id="soRef"></div></div>
-                <button class="btn btn-danger" onclick="processStockOut()">📤 Issue Stock</button>
-                <h3 style="margin-top:30px;">Recent Issues</h3><div id="recentSO"></div>
+                <button class="btn btn-danger" id="processSO">📤 Issue Stock</button>
+                <h3 style="margin-top:30px;">Recent</h3><div id="recentSO"></div>
             `;
-            loadRecentMovements('out', 'recentSO');
-        };
-
-        window.processStockOut = async function() {
-            const pid = document.getElementById('soProduct').value;
-            const qty = parseInt(document.getElementById('soQty').value);
-            if (!pid||!qty||qty<=0) return alert('Invalid!');
-            const product = productsData.find(p=>p.id===pid);
-            if (qty > (product.stock||0)) return alert(`Only ${product.stock} available!`);
-            try {
+            document.getElementById('processSO').addEventListener('click', async () => {
+                const pid = document.getElementById('soProduct').value;
+                const qty = parseInt(document.getElementById('soQty').value);
+                if (!pid || !qty || qty<=0) return alert('Invalid!');
+                const product = productsData.find(p=>p.id===pid);
+                if (qty > (product.stock||0)) return alert(`Only ${product.stock} available!`);
                 await updateDoc(doc(db, 'products', pid), { stock: (product.stock||0)-qty, updatedAt: new Date().toISOString() });
                 await addDoc(collection(db, 'stockMovements'), { productId: pid, productName: product.name, type: 'out', quantity: qty, reason: document.getElementById('soReason').value, reference: document.getElementById('soRef').value, companyId: COMPANY.id, timestamp: new Date().toISOString() });
                 alert(`✅ -${qty} ${product.name}`);
-                await refreshAllData(); loadTab('stock-out');
-            } catch(e) { alert('Error: '+e.message); }
-        };
-
-        async function loadRecentMovements(type, elId) {
-            const snap = await getDocs(query(collection(db, 'stockMovements'), where('companyId','==',COMPANY.id), where('type','==',type), orderBy('timestamp','desc'), limit(10)));
-            const el = document.getElementById(elId);
-            if (!el) return;
-            el.innerHTML = snap.empty?'<p>No records</p>':`<table><thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Supplier</th><th>Ref</th></tr></thead><tbody>${snap.docs.map(d=>{const m=d.data();return`<tr><td>${new Date(m.timestamp).toLocaleString()}</td><td>${m.productName}</td><td>${m.quantity}</td><td>${m.supplierName||'-'}</td><td>${m.reference||'-'}</td></tr>`;}).join('')}</tbody></table>`;
+                switchTab('stock-out');
+            });
+            loadMovements('out', 'recentSO');
         }
 
-        // ==================== PURCHASE ORDERS ====================
-        async function loadPurchaseOrders(container) {
-            await refreshAllData();
+        async function loadMovements(type, elId) {
+            const snap = await getDocs(query(collection(db, 'stockMovements'), where('companyId','==',COMPANY.id), where('type','==',type), orderBy('timestamp','desc'), limit(8)));
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.innerHTML = snap.empty ? '<p>No records</p>' : `<table><thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Supplier</th></tr></thead><tbody>${snap.docs.map(d=>{const m=d.data();return`<tr><td>${new Date(m.timestamp).toLocaleDateString()}</td><td>${m.productName}</td><td>${m.quantity}</td><td>${m.supplierName||'-'}</td></tr>`;}).join('')}</tbody></table>`;
+        }
+
+        // ==================== PURCHASE ORDERS (FIXED) ====================
+        function loadPurchaseOrders(container) {
             container.innerHTML = `
-                <h2>📋 Purchase Orders (Supplier → Products)</h2>
-                <div class="form-row" style="margin-top:20px;"><div class="form-group"><label>Supplier *</label><select class="form-control" id="poSupplier"><option value="">-- Select --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div><div class="form-group"><label>Date</label><input type="date" class="form-control" id="poDate"></div></div>
-                <div id="poItems"><div class="form-row-3" style="margin-bottom:8px;"><select class="form-control"><option value="">Product</option>${productsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select><input type="number" class="form-control" placeholder="Qty" min="1"><input type="number" class="form-control" placeholder="Unit Price" step="0.01"></div></div>
-                <button class="btn btn-sm" onclick="addPOItem()" style="background:#e2e8f0;">➕ Add Item</button>
-                <button class="btn btn-primary" onclick="createPO()" style="margin-top:15px;">📋 Create PO</button>
-                <h3 style="margin-top:30px;">PO List</h3><div id="poList"></div>
+                <h2>📋 Purchase Orders</h2>
+                <div class="form-row" style="margin-top:15px;">
+                    <div class="form-group"><label>Supplier *</label><select class="form-control" id="poSupplier"><option value="">-- Select --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Date</label><input type="date" class="form-control" id="poDate"></div>
+                </div>
+                <div id="poItemsContainer">
+                    <div class="item-row form-row-3">
+                        <select class="form-control po-product"><option value="">Product</option>${productsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+                        <input type="number" class="form-control po-qty" placeholder="Qty" min="1">
+                        <input type="number" class="form-control po-price" placeholder="Unit Price ₹" step="0.01">
+                    </div>
+                </div>
+                <button class="btn btn-sm" onclick="addPOItemRow()" style="background:#e2e8f0;margin-top:10px;">➕ Add Item</button>
+                <button class="btn btn-primary" id="createPOBtn" style="margin-top:15px;">📋 Create Purchase Order</button>
+                <div id="poMessage" style="margin-top:10px;"></div>
+                <h3 style="margin-top:30px;">📋 Purchase Orders List</h3>
+                <div id="poListTable"></div>
             `;
             document.getElementById('poDate').valueAsDate = new Date();
-            loadPOList();
-        };
-
-        window.addPOItem = () => { const d=document.createElement('div'); d.className='form-row-3'; d.style.marginBottom='8px'; d.innerHTML=`<select class="form-control"><option value="">Product</option>${productsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select><input type="number" class="form-control" placeholder="Qty" min="1"><input type="number" class="form-control" placeholder="Unit Price" step="0.01">`; document.getElementById('poItems').appendChild(d); };
-
-        window.createPO = async () => {
-            const sid = document.getElementById('poSupplier').value;
-            if (!sid) return alert('Select supplier!');
-            const items = [];
-            document.querySelectorAll('#poItems .form-row-3').forEach(r => {
-                const s = r.querySelector('select'), i = r.querySelectorAll('input');
-                if (s.value && i[0].value) items.push({ productId: s.value, productName: productsData.find(p=>p.id===s.value)?.name||'', quantity: parseInt(i[0].value), unitPrice: parseFloat(i[1].value)||0 });
+            
+            document.getElementById('createPOBtn').addEventListener('click', async () => {
+                const supplierId = document.getElementById('poSupplier').value;
+                if (!supplierId) return alert('Please select a supplier!');
+                
+                const items = [];
+                document.querySelectorAll('#poItemsContainer .item-row').forEach(row => {
+                    const product = row.querySelector('.po-product').value;
+                    const qty = parseInt(row.querySelector('.po-qty').value);
+                    const price = parseFloat(row.querySelector('.po-price').value) || 0;
+                    if (product && qty && qty > 0) {
+                        items.push({
+                            productId: product,
+                            productName: productsData.find(p => p.id === product)?.name || '',
+                            quantity: qty,
+                            unitPrice: price
+                        });
+                    }
+                });
+                
+                if (items.length === 0) return alert('Add at least one item with quantity!');
+                
+                const total = items.reduce((s, i) => s + (i.quantity * i.unitPrice), 0);
+                const supplier = suppliersData.find(s => s.id === supplierId);
+                
+                try {
+                    const docRef = await addDoc(collection(db, 'purchaseOrders'), {
+                        supplierId,
+                        supplierName: supplier?.name || '',
+                        items,
+                        total,
+                        status: 'pending',
+                        orderDate: document.getElementById('poDate').value,
+                        companyId: COMPANY.id,
+                        createdAt: new Date().toISOString()
+                    });
+                    
+                    document.getElementById('poMessage').innerHTML = `<div class="info-box">✅ Purchase Order <strong>#PO-${docRef.id.slice(-6)}</strong> created successfully! Total: ₹${total.toLocaleString()}</div>`;
+                    
+                    // Clear form
+                    document.getElementById('poSupplier').value = '';
+                    document.getElementById('poItemsContainer').innerHTML = `
+                        <div class="item-row form-row-3">
+                            <select class="form-control po-product"><option value="">Product</option>${productsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+                            <input type="number" class="form-control po-qty" placeholder="Qty" min="1">
+                            <input type="number" class="form-control po-price" placeholder="Unit Price ₹" step="0.01">
+                        </div>`;
+                    
+                    // Reload PO list
+                    loadPOList();
+                } catch (error) {
+                    alert('Error creating PO: ' + error.message);
+                }
             });
-            if (!items.length) return alert('Add items!');
-            const total = items.reduce((s,i)=>s+(i.quantity*i.unitPrice),0);
-            const supplier = suppliersData.find(s=>s.id===sid);
-            await addDoc(collection(db, 'purchaseOrders'), { supplierId: sid, supplierName: supplier?.name||'', items, total, status: 'pending', orderDate: document.getElementById('poDate').value, companyId: COMPANY.id, createdAt: new Date().toISOString() });
-            alert('PO created!'); loadTab('purchase-orders');
+            
+            loadPOList();
+        }
+
+        window.addPOItemRow = function() {
+            const div = document.createElement('div');
+            div.className = 'item-row form-row-3';
+            div.innerHTML = `
+                <select class="form-control po-product"><option value="">Product</option>${productsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+                <input type="number" class="form-control po-qty" placeholder="Qty" min="1">
+                <input type="number" class="form-control po-price" placeholder="Unit Price ₹" step="0.01">
+            `;
+            document.getElementById('poItemsContainer').appendChild(div);
         };
 
         async function loadPOList() {
-            const snap = await getDocs(query(collection(db, 'purchaseOrders'), where('companyId','==',COMPANY.id), orderBy('createdAt','desc'), limit(10)));
-            const el = document.getElementById('poList');
+            const el = document.getElementById('poListTable');
             if (!el) return;
-            el.innerHTML = snap.empty ? '<p>No POs</p>' : `<table><thead><tr><th>PO #</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>${snap.docs.map(d=>{const po=d.data();return`<tr><td>#PO-${d.id.slice(-6)}</td><td>${po.supplierName}</td><td>${po.items?.length||0}</td><td>₹${po.total?.toLocaleString()}</td><td><span class="badge badge-${po.status==='received'?'success':'warning'}">${po.status}</span></td><td>${po.status==='pending'?`<button class="btn btn-success btn-xs" onclick="receivePO('${d.id}')">✅ Receive</button>`:'Done'}</td></tr>`;}).join('')}</tbody></table>`;
+            
+            try {
+                const snap = await getDocs(query(collection(db, 'purchaseOrders'), where('companyId', '==', COMPANY.id), orderBy('createdAt', 'desc'), limit(15)));
+                
+                if (snap.empty) {
+                    el.innerHTML = '<p style="color:#64748b;padding:20px;">No purchase orders yet. Create one above!</p>';
+                    return;
+                }
+                
+                el.innerHTML = `
+                    <table>
+                        <thead><tr><th>PO #</th><th>Supplier</th><th>Items</th><th>Total</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
+                        <tbody>
+                            ${snap.docs.map(d => {
+                                const po = d.data();
+                                const itemsList = po.items?.map(i => `${i.productName} (${i.quantity})`).join(', ') || '—';
+                                return `<tr>
+                                    <td><strong>#PO-${d.id.slice(-6)}</strong></td>
+                                    <td>${po.supplierName || '—'}</td>
+                                    <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${itemsList}">${itemsList}</td>
+                                    <td>₹${(po.total || 0).toLocaleString()}</td>
+                                    <td>${po.orderDate || '—'}</td>
+                                    <td><span class="badge badge-${po.status === 'received' ? 'success' : 'warning'}">${po.status || 'pending'}</span></td>
+                                    <td>${po.status === 'pending' ? `<button class="btn btn-success btn-xs" onclick="receivePO('${d.id}')">✅ Receive</button>` : '<span class="badge badge-success">Received</span>'}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>`;
+            } catch (error) {
+                console.error('Error loading POs:', error);
+                el.innerHTML = '<p style="color:#ef4444;">Error loading purchase orders. Check console.</p>';
+            }
         }
 
-        window.receivePO = async (poId) => {
-            const poDoc = await getDoc(doc(db, 'purchaseOrders', poId));
-            const po = poDoc.data();
-            for (const item of po.items||[]) {
-                const p = productsData.find(x=>x.id===item.productId);
-                if (p) {
-                    await updateDoc(doc(db, 'products', item.productId), { stock: (p.stock||0)+item.quantity });
-                    await addDoc(collection(db, 'stockMovements'), { productId: item.productId, productName: item.productName, type: 'in', quantity: item.quantity, supplierName: po.supplierName, reference: `PO-${poId.slice(-6)}`, companyId: COMPANY.id, timestamp: new Date().toISOString() });
+        window.receivePO = async function(poId) {
+            try {
+                const poDoc = await getDoc(doc(db, 'purchaseOrders', poId));
+                if (!poDoc.exists()) return alert('PO not found!');
+                
+                const po = poDoc.data();
+                
+                for (const item of po.items || []) {
+                    const product = productsData.find(p => p.id === item.productId);
+                    if (product) {
+                        await updateDoc(doc(db, 'products', item.productId), {
+                            stock: (product.stock || 0) + item.quantity,
+                            updatedAt: new Date().toISOString()
+                        });
+                        
+                        await addDoc(collection(db, 'stockMovements'), {
+                            productId: item.productId,
+                            productName: item.productName,
+                            type: 'in',
+                            quantity: item.quantity,
+                            supplierName: po.supplierName,
+                            reference: `PO-${poId.slice(-6)}`,
+                            companyId: COMPANY.id,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
                 }
+                
+                await updateDoc(doc(db, 'purchaseOrders', poId), { status: 'received' });
+                await refreshAllData();
+                alert('✅ PO received! Stock updated.');
+                switchTab('purchase-orders');
+            } catch (error) {
+                alert('Error receiving PO: ' + error.message);
             }
-            await updateDoc(doc(db, 'purchaseOrders', poId), { status: 'received' });
-            await refreshAllData(); alert('PO received! Stock updated.'); loadTab('purchase-orders');
         };
 
-        // ==================== BILLS ====================
-        async function loadBills(container) {
-            await refreshAllData();
+        // ==================== BILLS (FIXED) ====================
+        function loadBills(container) {
             container.innerHTML = `
-                <h2>🧾 Bills (Supplier Payments)</h2>
-                <div class="form-row"><div class="form-group"><label>Supplier *</label><select class="form-control" id="billSupplier"><option value="">-- Select --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div><div class="form-group"><label>Bill #</label><input class="form-control" id="billNo"></div><div class="form-group"><label>Date</label><input type="date" class="form-control" id="billDate"></div></div>
-                <div id="billItems"></div>
-                <button class="btn btn-sm" onclick="addBillItem()" style="background:#e2e8f0;margin-top:10px;">➕ Add Line</button>
-                <div class="form-row" style="margin-top:15px;"><div class="form-group"><label>Total ₹</label><input class="form-control" id="billTotal" readonly></div><div class="form-group"><label>Paid ₹</label><input type="number" step="0.01" class="form-control" id="billPaid" value="0"></div></div>
-                <button class="btn btn-primary" onclick="saveBill()">💾 Save Bill</button>
-                <h3 style="margin-top:30px;">Bills</h3><div id="billsList"></div>
+                <h2>🧾 Bills & Payments</h2>
+                <div class="form-row" style="margin-top:15px;">
+                    <div class="form-group"><label>Supplier *</label><select class="form-control" id="billSupplier"><option value="">-- Select --</option>${suppliersData.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Bill Number</label><input class="form-control" id="billNo" placeholder="e.g., INV-001"></div>
+                    <div class="form-group"><label>Date</label><input type="date" class="form-control" id="billDate"></div>
+                </div>
+                <div id="billItemsContainer">
+                    <div class="item-row form-row">
+                        <input class="form-control bill-desc" placeholder="Description (e.g., Raw materials)">
+                        <input type="number" step="0.01" class="form-control bill-amount" placeholder="Amount ₹" oninput="updateBillTotalDisplay()">
+                    </div>
+                </div>
+                <button class="btn btn-sm" onclick="addBillItemRow()" style="background:#e2e8f0;margin-top:10px;">➕ Add Line Item</button>
+                <div class="form-row" style="margin-top:15px;">
+                    <div class="form-group"><label>Total Amount ₹</label><input class="form-control" id="billTotalDisplay" readonly></div>
+                    <div class="form-group"><label>Amount Paid ₹</label><input type="number" step="0.01" class="form-control" id="billPaid" value="0"></div>
+                </div>
+                <button class="btn btn-primary" id="saveBillBtn">💾 Save Bill</button>
+                <div id="billMessage" style="margin-top:10px;"></div>
+                <h3 style="margin-top:30px;">🧾 Bills List</h3>
+                <div id="billsListTable"></div>
             `;
             document.getElementById('billDate').valueAsDate = new Date();
+            
+            document.getElementById('saveBillBtn').addEventListener('click', async () => {
+                const supplierId = document.getElementById('billSupplier').value;
+                if (!supplierId) return alert('Please select a supplier!');
+                
+                const items = [];
+                document.querySelectorAll('#billItemsContainer .item-row').forEach(row => {
+                    const desc = row.querySelector('.bill-desc').value.trim();
+                    const amount = parseFloat(row.querySelector('.bill-amount').value) || 0;
+                    if (desc && amount > 0) {
+                        items.push({ description: desc, amount: amount });
+                    }
+                });
+                
+                if (items.length === 0) return alert('Add at least one line item!');
+                
+                const total = items.reduce((s, i) => s + i.amount, 0);
+                const paid = parseFloat(document.getElementById('billPaid').value) || 0;
+                const supplier = suppliersData.find(s => s.id === supplierId);
+                
+                try {
+                    const docRef = await addDoc(collection(db, 'bills'), {
+                        supplierId,
+                        supplierName: supplier?.name || '',
+                        billNo: document.getElementById('billNo').value,
+                        billDate: document.getElementById('billDate').value,
+                        items,
+                        total,
+                        paid,
+                        balance: total - paid,
+                        status: paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending',
+                        companyId: COMPANY.id,
+                        createdAt: new Date().toISOString()
+                    });
+                    
+                    document.getElementById('billMessage').innerHTML = `<div class="info-box">✅ Bill <strong>${document.getElementById('billNo').value || '#'+docRef.id.slice(-6)}</strong> saved! Total: ₹${total.toLocaleString()} | Balance: ₹${(total-paid).toLocaleString()}</div>`;
+                    
+                    // Clear form
+                    document.getElementById('billSupplier').value = '';
+                    document.getElementById('billNo').value = '';
+                    document.getElementById('billPaid').value = '0';
+                    document.getElementById('billTotalDisplay').value = '';
+                    document.getElementById('billItemsContainer').innerHTML = `
+                        <div class="item-row form-row">
+                            <input class="form-control bill-desc" placeholder="Description">
+                            <input type="number" step="0.01" class="form-control bill-amount" placeholder="Amount ₹" oninput="updateBillTotalDisplay()">
+                        </div>`;
+                    
+                    loadBillsList();
+                } catch (error) {
+                    alert('Error saving bill: ' + error.message);
+                }
+            });
+            
             loadBillsList();
+        }
+
+        window.addBillItemRow = function() {
+            const div = document.createElement('div');
+            div.className = 'item-row form-row';
+            div.innerHTML = `
+                <input class="form-control bill-desc" placeholder="Description">
+                <input type="number" step="0.01" class="form-control bill-amount" placeholder="Amount ₹" oninput="updateBillTotalDisplay()">
+            `;
+            document.getElementById('billItemsContainer').appendChild(div);
         };
 
-        window.addBillItem = () => { const d=document.createElement('div'); d.className='form-row'; d.style.marginBottom='8px'; d.innerHTML=`<input class="form-control" placeholder="Description"><input type="number" step="0.01" class="form-control bill-amt" placeholder="Amount ₹" oninput="updateBillTotal()">`; document.getElementById('billItems').appendChild(d); };
-        window.updateBillTotal = () => { let t=0; document.querySelectorAll('.bill-amt').forEach(e=>t+=parseFloat(e.value)||0); document.getElementById('billTotal').value=t.toFixed(2); };
-
-        window.saveBill = async () => {
-            const sid = document.getElementById('billSupplier').value;
-            if (!sid) return alert('Select supplier!');
-            const items = [];
-            document.querySelectorAll('#billItems .form-row').forEach(r => { const i=r.querySelectorAll('input'); if(i[0].value) items.push({ description: i[0].value, amount: parseFloat(i[1].value)||0 }); });
-            const total = parseFloat(document.getElementById('billTotal').value), paid = parseFloat(document.getElementById('billPaid').value);
-            const supplier = suppliersData.find(s=>s.id===sid);
-            await addDoc(collection(db, 'bills'), { supplierId: sid, supplierName: supplier?.name||'', billNo: document.getElementById('billNo').value, billDate: document.getElementById('billDate').value, items, total, paid, balance: total-paid, status: paid>=total?'paid':paid>0?'partial':'pending', companyId: COMPANY.id, createdAt: new Date().toISOString() });
-            alert('Bill saved!'); loadTab('bills');
+        window.updateBillTotalDisplay = function() {
+            let total = 0;
+            document.querySelectorAll('.bill-amount').forEach(el => {
+                total += parseFloat(el.value) || 0;
+            });
+            const totalEl = document.getElementById('billTotalDisplay');
+            if (totalEl) totalEl.value = total.toFixed(2);
         };
 
         async function loadBillsList() {
-            const snap = await getDocs(query(collection(db, 'bills'), where('companyId','==',COMPANY.id), orderBy('createdAt','desc'), limit(10)));
-            const el = document.getElementById('billsList');
+            const el = document.getElementById('billsListTable');
             if (!el) return;
-            el.innerHTML = snap.empty?'<p>No bills</p>':`<table><thead><tr><th>Bill #</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>${snap.docs.map(d=>{const b=d.data();return`<tr><td>${b.billNo||'-'}</td><td>${b.supplierName}</td><td>₹${b.total?.toLocaleString()}</td><td>₹${b.paid?.toLocaleString()}</td><td>₹${b.balance?.toLocaleString()}</td><td><span class="badge badge-${b.status==='paid'?'success':b.status==='partial'?'warning':'danger'}">${b.status}</span></td></tr>`;}).join('')}</tbody></table>`;
+            
+            try {
+                const snap = await getDocs(query(collection(db, 'bills'), where('companyId', '==', COMPANY.id), orderBy('createdAt', 'desc'), limit(15)));
+                
+                if (snap.empty) {
+                    el.innerHTML = '<p style="color:#64748b;padding:20px;">No bills yet. Create one above!</p>';
+                    return;
+                }
+                
+                el.innerHTML = `
+                    <table>
+                        <thead><tr><th>Bill #</th><th>Supplier</th><th>Date</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+                        <tbody>
+                            ${snap.docs.map(d => {
+                                const b = d.data();
+                                return `<tr>
+                                    <td><strong>${b.billNo || '#'+d.id.slice(-6)}</strong></td>
+                                    <td>${b.supplierName || '—'}</td>
+                                    <td>${b.billDate || '—'}</td>
+                                    <td>₹${(b.total || 0).toLocaleString()}</td>
+                                    <td>₹${(b.paid || 0).toLocaleString()}</td>
+                                    <td>₹${(b.balance || 0).toLocaleString()}</td>
+                                    <td><span class="badge badge-${b.status === 'paid' ? 'success' : b.status === 'partial' ? 'warning' : 'danger'}">${b.status || 'pending'}</span></td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>`;
+            } catch (error) {
+                console.error('Error loading bills:', error);
+                el.innerHTML = '<p style="color:#ef4444;">Error loading bills.</p>';
+            }
         }
 
-        // Utilities
+        // ==================== UTILITIES ====================
         window.closeModal = () => document.getElementById('modal').classList.remove('active');
-        document.getElementById('modal').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
-        window.logout = () => { sessionStorage.clear(); window.location.href="dashboard.html"; };
+        document.getElementById('modal').addEventListener('click', function(e) { if(e.target === this) closeModal(); });
+        window.logout = () => { sessionStorage.clear(); window.location.href = "dashboard.html"; };
     </script>
 </body>
 </html>
