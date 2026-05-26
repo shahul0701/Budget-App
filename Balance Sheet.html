@@ -532,14 +532,15 @@
   <div class="bank-balance-card" id="bankBalanceCard">
     <div class="bank-balance-header">
       <i class="fas fa-university"></i>
-      <span>Total Bank Balance (Reconciled Only)</span>
-      <i class="fas fa-check-circle" style="color: #10b981; margin-left: auto;"></i>
+      <span>Bank Account Balances (All Transactions)</span>
+      <i class="fas fa-info-circle" style="color: #60a5fa; margin-left: auto;" title="Includes ALL bank transactions"></i>
     </div>
     <div class="bank-balance-value" id="totalBankBalance">₹0.00</div>
     <div class="bank-detail-grid" id="bankDetailGrid"></div>
     <div class="update-section">
       <button class="update-btn" id="refreshBankBalance"><i class="fas fa-sync-alt"></i> Refresh Bank Balance</button>
       <button class="update-btn" id="reconcileAllBtn" style="background: #8b5cf6;"><i class="fas fa-check-double"></i> Mark All as Reconciled</button>
+      <button class="update-btn" id="debugBtn" style="background: #f59e0b;"><i class="fas fa-bug"></i> Debug Info</button>
     </div>
   </div>
 
@@ -828,25 +829,71 @@
     try {
       const snap = await getDocs(collection(db, "users", currentUser.uid, "chartOfAccounts"));
       const map = {};
-      snap.forEach(doc => { const data = doc.data(); map[data.name] = { type: data.type, category: data.category }; });
+      snap.forEach(doc => { 
+        const data = doc.data(); 
+        // Store with lowercase keys for case-insensitive matching
+        map[data.name.toLowerCase()] = { 
+          type: data.type, 
+          category: data.category,
+          originalName: data.name 
+        };
+        // Also store with original case
+        map[data.name] = { 
+          type: data.type, 
+          category: data.category,
+          originalName: data.name 
+        };
+      });
+      console.log("COA Loaded:", map);
       return map;
-    } catch(e) { return {}; }
+    } catch(e) { 
+      console.error("Error loading COA:", e);
+      return {}; 
+    }
   }
 
   function classifyAccount(name, coaInfo) {
-    if (coaInfo?.type) return coaInfo.type;
+    // First check COA mapping
+    if (coaInfo?.type) {
+      return coaInfo.type;
+    }
+    
+    // Then check by name patterns
     const lower = name.toLowerCase();
-    if (lower.includes('bank') || lower.includes('cash')) return 'Asset';
-    if (lower.includes('loan') || lower.includes('payable')) return 'Liability';
-    if (lower.includes('equity') || lower.includes('capital')) return 'Equity';
-    if (lower.includes('sale') || lower.includes('revenue')) return 'Income';
+    if (lower.includes('bank') || lower.includes('cash') || lower.includes('hdfc') || 
+        lower.includes('sbi') || lower.includes('icici') || lower.includes('axis') ||
+        lower.includes('current account') || lower.includes('savings account')) {
+      return 'Asset';
+    }
+    if (lower.includes('loan') || lower.includes('payable') || lower.includes('credit card') || lower.includes('borrowing')) {
+      return 'Liability';
+    }
+    if (lower.includes('equity') || lower.includes('capital') || lower.includes('retained earnings') || lower.includes('owner')) {
+      return 'Equity';
+    }
+    if (lower.includes('sale') || lower.includes('revenue') || lower.includes('income') || lower.includes('service')) {
+      return 'Income';
+    }
     return 'Expense';
   }
   
   function isBankAccount(name, coaInfo) {
-    if (coaInfo?.type === 'Asset' && coaInfo?.category === 'Bank') return true;
+    // Check COA mapping first
+    if (coaInfo?.type === 'Asset' && coaInfo?.category === 'Bank') {
+      return true;
+    }
+    
+    // Check by name patterns
     const lower = name.toLowerCase();
-    return lower.includes('bank') || lower.includes('cash');
+    return lower.includes('bank') || 
+           lower.includes('cash') || 
+           lower.includes('hdfc') || 
+           lower.includes('sbi') || 
+           lower.includes('icici') ||
+           lower.includes('axis') ||
+           lower.includes('current account') ||
+           lower.includes('savings account') ||
+           (coaInfo?.type === 'Asset' && coaInfo?.category === 'Current Asset');
   }
 
   function isReconciled(tx) {
@@ -854,8 +901,11 @@
   }
   
   function computeBalanceSheet(transactions, coaMap) {
+    // UPDATED: Include ALL bank transactions, not just reconciled ones
     let banks = {}, otherAssets = {}, liabilities = {}, equityAccounts = {};
     let totalIncome = 0, totalExpense = 0;
+    
+    console.log("Computing Balance Sheet from", transactions.length, "transactions");
     
     transactions.forEach(tx => {
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
@@ -864,14 +914,17 @@
       const net = inc - exp;
       if (net === 0) return;
       
-      const coaInfo = coaMap[acc] || null;
+      // Try case-insensitive COA lookup
+      const coaInfo = coaMap[acc] || coaMap[acc.toLowerCase()] || null;
       const type = classifyAccount(acc, coaInfo);
+      
+      console.log(`Transaction: "${acc}" | Type: ${type} | Net: ${net} | COA Found: ${coaInfo ? 'Yes' : 'No'}`);
       
       if (type === 'Asset') {
         if (isBankAccount(acc, coaInfo)) {
-          if (isReconciled(tx)) {
-            banks[acc] = (banks[acc] || 0) + net;
-          }
+          // INCLUDE ALL bank transactions regardless of reconciliation status
+          banks[acc] = (banks[acc] || 0) + net;
+          console.log(`  -> Bank: ${acc} = ${banks[acc]}`);
         } else {
           otherAssets[acc] = (otherAssets[acc] || 0) + net;
         }
@@ -891,6 +944,7 @@
       equityAccounts["Retained Earnings"] = netProfit;
     }
     
+    console.log("Balance Sheet Result:", { banks, otherAssets, liabilities, equityAccounts });
     return { banks, otherAssets, liabilities, equityAccounts };
   }
   
@@ -902,7 +956,7 @@
       const exp = parseFloat(tx.EXPENSE) || 0;
       const net = inc - exp;
       const acc = tx.ACCOUNT_HEADER || "Uncategorized";
-      const coaInfo = coaMap[acc] || null;
+      const coaInfo = coaMap[acc] || coaMap[acc.toLowerCase()] || null;
       const type = classifyAccount(acc, coaInfo);
       const lower = acc.toLowerCase();
       
@@ -930,19 +984,26 @@
     document.getElementById('totalBankBalance').textContent = formatINR(totalBanks);
     
     // Build bank detail grid
-    const gridHtml = Object.entries(curr.banks)
-      .sort((a,b) => a[0].localeCompare(b[0]))
+    const bankEntries = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
+    
+    if (bankEntries.length === 0) {
+      document.getElementById('bankDetailGrid').innerHTML = 
+        '<div class="bank-account-item"><div class="bank-account-name">No bank transactions found</div><div class="bank-account-balance">₹0.00</div></div>';
+      return;
+    }
+    
+    const gridHtml = bankEntries
       .map(([name, balance]) => `
         <div class="bank-account-item">
           <div class="bank-account-name">
             <i class="fas fa-university" style="margin-right: 6px;"></i>${name}
-            <span class="reconciliation-status status-reconciled">Reconciled</span>
+            <span class="reconciliation-status status-reconciled">Active</span>
           </div>
           <div class="bank-account-balance">${formatINR(balance)}</div>
         </div>
       `).join('');
     
-    document.getElementById('bankDetailGrid').innerHTML = gridHtml || '<div class="bank-account-item"><div class="bank-account-name">No bank accounts found</div><div class="bank-account-balance">₹0.00</div></div>';
+    document.getElementById('bankDetailGrid').innerHTML = gridHtml;
   }
 
   async function refreshBankBalance() {
@@ -995,7 +1056,7 @@
       const allTx = await fetchAllTransactions();
       const bankTx = allTx.filter(tx => {
         const acc = tx.ACCOUNT_HEADER || "";
-        const coaInfo = coaMap[acc] || null;
+        const coaInfo = coaMap[acc] || coaMap[acc.toLowerCase()] || null;
         return isBankAccount(acc, coaInfo) && !isReconciled(tx);
       });
       
@@ -1043,23 +1104,79 @@
     }
   }
 
-  async function checkBankBalance() {
+  async function showDebugInfo() {
     if (!currentUser) return;
     
-    const totalBanks = Object.values(data.current.bs?.banks || {}).reduce((a,b)=>a+b,0);
+    const loading = document.getElementById("loadingModal");
+    loading.style.display = "flex";
     
-    let message = `Current Bank Balance: ${formatINR(totalBanks)}\n\n`;
-    message += `Bank Accounts:\n`;
-    Object.entries(data.current.bs?.banks || {}).forEach(([name, balance]) => {
-      message += `  • ${name}: ${formatINR(balance)}\n`;
-    });
-    
-    await Swal.fire({
-      title: 'Bank Balance Check',
-      text: message,
-      icon: 'info',
-      confirmButtonText: 'Close'
-    });
+    try {
+      // Fetch fresh data
+      const allTx = await fetchAllTransactions();
+      coaMap = await loadCOA();
+      
+      let debugText = "=== DEBUG INFORMATION ===\n\n";
+      debugText += `Total Transactions: ${allTx.length}\n`;
+      debugText += `COA Entries: ${Object.keys(coaMap).length}\n\n`;
+      
+      debugText += "--- COA Entries ---\n";
+      Object.entries(coaMap).forEach(([name, info]) => {
+        debugText += `  "${name}" -> Type: ${info.type}, Category: ${info.category}\n`;
+      });
+      
+      debugText += "\n--- Transaction Account Headers ---\n";
+      const uniqueAccounts = [...new Set(allTx.map(tx => tx.ACCOUNT_HEADER || "Uncategorized"))];
+      uniqueAccounts.forEach(acc => {
+        const coaInfo = coaMap[acc] || coaMap[acc.toLowerCase()] || null;
+        const type = classifyAccount(acc, coaInfo);
+        const isBank = isBankAccount(acc, coaInfo);
+        debugText += `  "${acc}" -> Type: ${type}, Is Bank: ${isBank}, In COA: ${coaInfo ? 'Yes' : 'No'}\n`;
+      });
+      
+      debugText += "\n--- Bank Account Transactions ---\n";
+      allTx.forEach(tx => {
+        const acc = tx.ACCOUNT_HEADER || "Uncategorized";
+        const coaInfo = coaMap[acc] || coaMap[acc.toLowerCase()] || null;
+        if (isBankAccount(acc, coaInfo)) {
+          debugText += `  "${acc}" | Income: ${tx.INCOME || 0} | Expense: ${tx.EXPENSE || 0} | Reconciled: ${isReconciled(tx)}\n`;
+        }
+      });
+      
+      // Compute balances
+      const today = new Date();
+      const endOfYear = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999);
+      const allUpToNow = await fetchAllTransactionsUpTo(endOfYear);
+      const bs = computeBalanceSheet(allUpToNow, coaMap);
+      
+      debugText += "\n--- Current Balance Sheet (All time) ---\n";
+      debugText += "Banks:\n";
+      Object.entries(bs.banks).forEach(([name, bal]) => {
+        debugText += `  "${name}": ${formatINR(bal)}\n`;
+      });
+      debugText += "Other Assets:\n";
+      Object.entries(bs.otherAssets).forEach(([name, bal]) => {
+        debugText += `  "${name}": ${formatINR(bal)}\n`;
+      });
+      
+      console.log(debugText);
+      
+      await Swal.fire({
+        title: 'Debug Information',
+        html: `<pre style="text-align: left; max-height: 400px; overflow-y: auto; font-size: 12px;">${debugText}</pre>`,
+        icon: 'info',
+        width: '800px',
+        confirmButtonText: 'Close'
+      });
+      
+    } catch(e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Debug Error',
+        text: e.message
+      });
+    } finally {
+      loading.style.display = "none";
+    }
   }
 
   async function loadAllPeriods() {
@@ -1079,7 +1196,7 @@
     
     coaMap = await loadCOA();
     
-    // Current period
+    // Current period - use ALL transactions up to end date for balance sheet
     const allCurrent = await fetchAllTransactionsUpTo(end);
     const periodCurrent = await fetchTransactionsInPeriod(start, end);
     data.current.bs = computeBalanceSheet(allCurrent, coaMap);
@@ -1244,19 +1361,31 @@
       '<i class="fas fa-exclamation-triangle"></i> Balance Sheet is Out of Balance — Check Your Entries';
     validationDiv.className = `balance-validation ${balanced ? 'balance-valid' : 'balance-invalid'}`;
     
+    // Assets Table
     let assetsHtml = getTableHeaders();
-    assetsHtml += renderTableRow('Bank Accounts (Reconciled)', totalBanks, prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) : null, { badge: 'Reconciled Only' });
     
+    // Bank Accounts Section
     const sortedBanks = Object.entries(curr.banks).sort((a,b) => a[0].localeCompare(b[0]));
-    for (let [name, val] of sortedBanks) {
-      assetsHtml += renderTableRow(name, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0, { indent: true });
+    if (sortedBanks.length > 0) {
+      assetsHtml += renderTableRow('BANK & CASH ACCOUNTS', totalBanks, prev1 ? Object.values(prev1.banks).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.banks).reduce((a,b)=>a+b,0) : null, { isSection: true });
+      
+      for (let [name, val] of sortedBanks) {
+        assetsHtml += renderTableRow(name, val, prev1?.banks?.[name] || 0, prev2?.banks?.[name] || 0, { indent: true });
+      }
     }
     
-    assetsHtml += renderTableRow('Other Assets', totalOther, prev1 ? Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.otherAssets).reduce((a,b)=>a+b,0) : null);
-    
+    // Other Assets Section
     const sortedOther = Object.entries(curr.otherAssets).sort((a,b) => a[0].localeCompare(b[0]));
-    for (let [name, val] of sortedOther) {
-      assetsHtml += renderTableRow(name, val, prev1?.otherAssets?.[name] || 0, prev2?.otherAssets?.[name] || 0, { indent: true });
+    if (sortedOther.length > 0) {
+      assetsHtml += renderTableRow('OTHER ASSETS', totalOther, prev1 ? Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0) : null, prev2 && showThree ? Object.values(prev2.otherAssets).reduce((a,b)=>a+b,0) : null, { isSection: true });
+      
+      for (let [name, val] of sortedOther) {
+        assetsHtml += renderTableRow(name, val, prev1?.otherAssets?.[name] || 0, prev2?.otherAssets?.[name] || 0, { indent: true });
+      }
+    }
+    
+    if (sortedBanks.length === 0 && sortedOther.length === 0) {
+      assetsHtml += `<tr><td colspan="${1 + (periods.prev1 ? 1 : 0) + (periods.prev2 && showThree ? 1 : 0)}" class="no-data-message">No assets recorded. Add transactions to see your assets.</td></tr>`;
     }
     
     const prev1TotalAssets = prev1 ? (Object.values(prev1.banks).reduce((a,b)=>a+b,0) + Object.values(prev1.otherAssets).reduce((a,b)=>a+b,0)) : null;
@@ -1264,25 +1393,33 @@
     assetsHtml += renderTableRow('TOTAL ASSETS', totalAssets, prev1TotalAssets, prev2TotalAssets, { isTotal: true });
     document.getElementById('assetsTable').innerHTML = assetsHtml;
     
+    // Liabilities Table
     let liabHtml = getTableHeaders();
     const sortedLiab = Object.entries(curr.liabilities).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedLiab) {
       liabHtml += renderTableRow(name, val, prev1?.liabilities?.[name] || 0, prev2?.liabilities?.[name] || 0);
     }
+    if (sortedLiab.length === 0) {
+      liabHtml += `<tr><td colspan="${1 + (periods.prev1 ? 1 : 0) + (periods.prev2 && showThree ? 1 : 0)}" class="no-data-message">No liabilities recorded.</td></tr>`;
+    }
     const prev1TotalLiab = prev1 ? Object.values(prev1.liabilities).reduce((a,b)=>a+b,0) : null;
     const prev2TotalLiab = prev2 && showThree ? Object.values(prev2.liabilities).reduce((a,b)=>a+b,0) : null;
     liabHtml += renderTableRow('TOTAL LIABILITIES', totalLiab, prev1TotalLiab, prev2TotalLiab, { isTotal: true });
-    document.getElementById('liabilitiesTable').innerHTML = liabHtml || `<tr><td colspan="4" class="no-data-message">No liabilities recorded.</td></tr>`;
+    document.getElementById('liabilitiesTable').innerHTML = liabHtml;
     
+    // Equity Table
     let eqHtml = getTableHeaders();
     const sortedEq = Object.entries(curr.equityAccounts).sort((a,b) => a[0].localeCompare(b[0]));
     for (let [name, val] of sortedEq) {
       eqHtml += renderTableRow(name, val, prev1?.equityAccounts?.[name] || 0, prev2?.equityAccounts?.[name] || 0);
     }
+    if (sortedEq.length === 0) {
+      eqHtml += `<tr><td colspan="${1 + (periods.prev1 ? 1 : 0) + (periods.prev2 && showThree ? 1 : 0)}" class="no-data-message">No equity accounts recorded.</td></tr>`;
+    }
     const prev1TotalEq = prev1 ? Object.values(prev1.equityAccounts).reduce((a,b)=>a+b,0) : null;
     const prev2TotalEq = prev2 && showThree ? Object.values(prev2.equityAccounts).reduce((a,b)=>a+b,0) : null;
     eqHtml += renderTableRow('TOTAL EQUITY', totalEq, prev1TotalEq, prev2TotalEq, { isTotal: true });
-    document.getElementById('equityTable').innerHTML = eqHtml || `<tr><td colspan="4" class="no-data-message">No equity accounts recorded.</td></tr>`;
+    document.getElementById('equityTable').innerHTML = eqHtml;
   }
 
   function getTrendHTML(current, prev1, prev2) {
@@ -1446,11 +1583,6 @@
       const ws1 = XLSX.utils.aoa_to_sheet(bankData);
       XLSX.utils.book_append_sheet(wb, ws1, 'Bank Balance');
       
-      // Assets
-      const assetData = [['Account', 'Current', 'Previous', 'Prior Previous']];
-      const ws2 = XLSX.utils.aoa_to_sheet(assetData);
-      XLSX.utils.book_append_sheet(wb, ws2, 'Assets');
-      
       XLSX.writeFile(wb, `FinLedger_BankBalance_${formatDateShort(new Date())}.xlsx`);
       Swal.fire("Success", "Excel file exported successfully", "success");
     } catch(e) {
@@ -1516,6 +1648,7 @@
   document.getElementById("chartType").addEventListener("change", renderCharts);
   document.getElementById("refreshBankBalance").addEventListener("click", refreshBankBalance);
   document.getElementById("reconcileAllBtn").addEventListener("click", reconcileAllTransactions);
+  document.getElementById("debugBtn").addEventListener("click", showDebugInfo);
   
   document.getElementById("homeBtn").addEventListener("click", () => { window.location.href = "home.html"; });
   
