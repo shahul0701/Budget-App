@@ -583,7 +583,8 @@
       position: relative;
     }
     
-    .beautiful-form .form-group-icon .form-control {
+    .beautiful-form .form-group-icon .form-control,
+    .beautiful-form .form-group-icon .form-select {
       padding-left: 42px;
     }
     
@@ -595,6 +596,7 @@
       color: var(--purple-1);
       opacity: 0.6;
       font-size: 16px;
+      z-index: 5;
     }
     
     .beautiful-form .form-group-icon textarea ~ .input-icon {
@@ -602,6 +604,32 @@
       transform: none;
     }
     
+    /* Auto-detect feedback */
+    .auto-detect-badge {
+      display: inline-block;
+      padding: 3px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 8px;
+      animation: fadeIn 0.3s ease;
+    }
+    
+    .auto-detect-badge.income {
+      background: rgba(25, 135, 84, 0.15);
+      color: var(--success);
+    }
+    
+    .auto-detect-badge.expense {
+      background: rgba(220, 53, 69, 0.15);
+      color: var(--danger);
+    }
+    
+    .auto-detect-badge.transfer {
+      background: rgba(13, 202, 240, 0.15);
+      color: var(--info);
+    }
+
     /* Quick add highlight */
     .quick-add-highlight {
       background: linear-gradient(135deg, var(--purple-1), var(--accent));
@@ -2573,6 +2601,7 @@
                     <option value="">Select Account Header</option>
                   </select>
                 </div>
+                <div id="autoDetectContainer" style="margin-top: 6px;"></div>
               </div>
               <div class="col-md-4">
                 <label class="form-label"><i class="fa fa-university"></i> Bank Name</label>
@@ -2603,7 +2632,7 @@
             </div>
             <div class="row g-3 mb-3">
               <div class="col-md-4">
-                <label class="form-label"><i class="fa fa-list"></i> Transaction Type</label>
+                <label class="form-label"><i class="fa fa-list"></i> Transaction Type <span id="typeBadge"></span></label>
                 <div class="form-group-icon">
                   <i class="fa fa-tag input-icon"></i>
                   <select id="formTYPE" class="form-select" required>
@@ -4292,30 +4321,87 @@
       });
     }
 
-    // Auto-detect type from account header
+    // Auto-detect type from account header with visual feedback
     function setupAccountAutoDetect() {
       formACCOUNTHEADER.addEventListener('change', function() {
         const selectedAccount = this.value;
+        const container = document.getElementById('autoDetectContainer');
+        
         if (selectedAccount && accountTypes[selectedAccount]) {
           const detectedType = accountTypes[selectedAccount];
+          
+          // Update the type dropdown
           formTYPE.value = detectedType;
           formTYPE.dispatchEvent(new Event('change'));
           
-          // Show feedback
-          const feedback = document.createElement('div');
-          feedback.className = 'small text-success mt-1';
-          feedback.id = 'autoDetectFeedback';
-          feedback.innerHTML = `<i class="fa fa-magic me-1"></i> Auto-detected: <strong>${detectedType}</strong>`;
+          // Show visual feedback
+          let badgeClass = '';
+          if (detectedType === 'Income') badgeClass = 'income';
+          else if (detectedType === 'Expense') badgeClass = 'expense';
+          else if (detectedType === 'Transfer') badgeClass = 'transfer';
           
-          const existing = document.getElementById('autoDetectFeedback');
-          if (existing) existing.remove();
+          container.innerHTML = `
+            <span class="auto-detect-badge ${badgeClass}">
+              <i class="fa fa-magic me-1"></i> Auto-detected: ${detectedType}
+            </span>
+          `;
           
-          const parent = formACCOUNTHEADER.closest('.form-group-icon');
-          parent.appendChild(feedback);
+          // Auto-fill voucher type
+          if (detectedType === 'Income') {
+            formVOUCHERTYPE.value = 'Receipt';
+          } else if (detectedType === 'Expense') {
+            formVOUCHERTYPE.value = 'Payment';
+          } else if (detectedType === 'Transfer') {
+            formVOUCHERTYPE.value = 'Transfer';
+          }
           
+          // Update voucher number
+          if (!txIdInput.value) {
+            getNextVoucherNumber(formVOUCHERTYPE.value).then(num => {
+              formSINO.value = num;
+            });
+          }
+          
+          // Auto-focus on description
           setTimeout(() => {
-            const fb = document.getElementById('autoDetectFeedback');
-            if (fb) fb.remove();
+            formDESCRIPTION.focus();
+          }, 300);
+          
+        } else {
+          container.innerHTML = '';
+        }
+      });
+      
+      // Also trigger when type changes manually
+      formTYPE.addEventListener('change', function() {
+        const type = this.value;
+        const container = document.getElementById('autoDetectContainer');
+        
+        // Update voucher type based on selected type
+        if (type === 'Income') {
+          formVOUCHERTYPE.value = 'Receipt';
+        } else if (type === 'Expense') {
+          formVOUCHERTYPE.value = 'Payment';
+        } else if (type === 'Transfer') {
+          formVOUCHERTYPE.value = 'Transfer';
+        }
+        
+        // Update voucher number
+        if (!txIdInput.value) {
+          getNextVoucherNumber(formVOUCHERTYPE.value).then(num => {
+            formSINO.value = num;
+          });
+        }
+        
+        // If user manually changes type, clear auto-detect badge
+        if (container.innerHTML) {
+          container.innerHTML = `
+            <span class="auto-detect-badge" style="background:rgba(108,117,125,0.15); color:var(--muted);">
+              <i class="fa fa-edit me-1"></i> Manually set: ${type}
+            </span>
+          `;
+          setTimeout(() => {
+            container.innerHTML = '';
           }, 3000);
         }
       });
@@ -5062,7 +5148,7 @@
       statExpense.className = "stat-value expense-color";
     }
 
-    // Auto-update voucher type based on transaction type
+    // Auto-update voucher type and income/expense fields based on transaction type
     function setupTypeVoucherAutoUpdate() {
       formTYPE.addEventListener('change', () => {
         const type = formTYPE.value;
@@ -5092,6 +5178,13 @@
           formEXPENSE.classList.add('transfer-field');
           formINCOME.classList.remove('income-field');
           formEXPENSE.classList.remove('expense-field');
+        }
+        
+        // Update voucher number if new transaction
+        if (!txIdInput.value) {
+          getNextVoucherNumber(formVOUCHERTYPE.value).then(num => {
+            formSINO.value = num;
+          });
         }
       });
     }
@@ -5123,15 +5216,13 @@
         attachmentInfo.textContent = "";
         uploadProgress.style.display = "none";
         
+        // Clear auto-detect container
+        document.getElementById('autoDetectContainer').innerHTML = '';
+        
+        // Setup auto-update for type/voucher
         setupTypeVoucherAutoUpdate();
         setupAccountAutoDetect();
         formTYPE.dispatchEvent(new Event('change'));
-        
-        formVOUCHERTYPE.addEventListener('change', async function() {
-          if (!txIdInput.value) {
-            formSINO.value = await getNextVoucherNumber(this.value);
-          }
-        });
         
         document.getElementById("transactionModalLabel").textContent = "Add Transaction";
         
