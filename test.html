@@ -16,6 +16,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
+        /* ... (same CSS as before) ... */
         * {
             margin: 0;
             padding: 0;
@@ -2324,7 +2325,7 @@
                             </tr>
                         </thead>
                         <tbody id="transactionsTableBody">
-                            <tr><td colspan="18" style="text-align:center;padding:40px;color:var(--text-light);">No transactions found. Add your first transaction!</td></tr>
+                            <tr><td colspan="18" style="text-align:center;padding:40px;color:var(--text-light);">Loading transactions...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3953,18 +3954,27 @@
             }
         }
 
+        // FIXED: loadTransactions - Properly handles empty collections and ordering
         async function loadTransactions() {
             showLoading("Loading transactions...");
             try {
-                let q;
-                try {
-                    q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("createdAt", "desc"));
-                } catch (e) {
-                    q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("DATE", "desc"));
-                }
+                // First, try to get all transactions without ordering to avoid index issues
+                const q = query(collection(db, "users", currentUser.uid, "transactions"));
                 const snap = await getDocs(q);
-                let transactions = snap.docs.map(d => ({ id: d.id, ...d.data(), SINO: d.data().SINO || (snap.docs.indexOf(d) +
-                        1).toString() }));
+
+                let transactions = snap.docs.map(d => ({
+                    id: d.id,
+                    ...d.data(),
+                    SINO: d.data().SINO || (snap.docs.indexOf(d) + 1).toString()
+                }));
+
+                // Sort by DATE descending (newest first) as fallback
+                transactions.sort((a, b) => {
+                    const dateA = a.DATE ? new Date(a.DATE + ' ' + (a.TIME || '00:00')) : new Date(0);
+                    const dateB = b.DATE ? new Date(b.DATE + ' ' + (b.TIME || '00:00')) : new Date(0);
+                    return dateB - dateA;
+                });
+
                 const selectedAccount = new URLSearchParams(window.location.search).get("account");
                 if (selectedAccount) {
                     transactions = transactions.filter(tx => tx.ACCOUNT_HEADER === selectedAccount);
@@ -3972,17 +3982,27 @@
                 } else {
                     document.getElementById("accountTitle").textContent = "All Transactions";
                 }
+
                 allTransactions = calculateRunningBalance(transactions);
                 populateFiltersOptions(allTransactions);
                 updateStats();
                 applyFilters();
                 updateBankBalances();
-            } catch (err) {
-                console.error(err);
-                if (!handleFirestoreError(err, "load transactions")) {
-                    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to load transactions.' });
+
+                if (allTransactions.length === 0) {
+                    tableBody.innerHTML =
+                        `<tr><td colspan="18" style="text-align:center;padding:40px;color:var(--text-light);">No transactions found. Click the <strong>+</strong> button to add your first transaction!</td></tr>`;
                 }
-            } finally { hideLoading(); }
+            } catch (err) {
+                console.error("Error loading transactions:", err);
+                if (!handleFirestoreError(err, "load transactions")) {
+                    Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to load transactions. Please refresh the page.' });
+                    tableBody.innerHTML =
+                        `<tr><td colspan="18" style="text-align:center;padding:40px;color:var(--danger);">Error loading transactions. Please refresh.</td></tr>`;
+                }
+            } finally {
+                hideLoading();
+            }
         }
 
         function updateStats() {
@@ -4026,8 +4046,7 @@
                 bankBalances[key] = bal;
             });
             lastBalances = bankBalances;
-            return transactions.sort((a, b) => new Date(b.DATE + ' ' + (b.TIME || '00:00')) - new Date(a.DATE + ' ' + (a
-                .TIME || '00:00')));
+            return transactions;
         }
 
         function populateFiltersOptions(data) {
@@ -4200,7 +4219,7 @@
             tableBody.innerHTML = "";
             if (pageItems.length === 0) {
                 tableBody.innerHTML =
-                    `<tr><td colspan="18" style="text-align:center;padding:40px;color:var(--text-light);">No transactions found.</td></tr>`;
+                    `<tr><td colspan="18" style="text-align:center;padding:40px;color:var(--text-light);">No transactions found. Click the <strong>+</strong> button to add your first transaction!</td></tr>`;
                 updatePagination();
                 return;
             }
