@@ -4,671 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Advanced Trial Balance Dashboard</title>
-  
-  <!-- Chart.js for visualizations -->
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
-  <!-- Material Icons -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-    // Firebase configuration
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
-      authDomain: "budget-app-1365f.firebaseapp.com",
-      projectId: "budget-app-1365f",
-      storageBucket: "budget-app-1365f.appspot.com",
-      messagingSenderId: "1036194450411",
-      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
-      measurementId: "G-YFFJL2H54X"
-    };
-
-    // Initialize Firebase
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    // DOM elements
-    const logoutBtn = document.getElementById("logoutBtn");
-    const userDisplay = document.getElementById("userDisplay");
-    const loadingStatus = document.getElementById("loadingStatus");
-    const summaryBody = document.getElementById("trialBalanceBody");
-
-    // Chart instances
-    let balanceChart = null;
-    let compositionChart = null;
-    let trendChart = null;
-
-    logoutBtn.addEventListener("click", async () => {
-      await signOut(auth);
-      window.location.href = "login.html";
-    });
-
-    // Modal controls
-    function openDetailModal(account) {
-      const modal = document.getElementById("detailModal");
-      const iframe = document.getElementById("detailIframe");
-      const url = `exp.html?account=${encodeURIComponent(account)}`;
-      iframe.src = url;
-      modal.style.display = "flex";
-    }
-
-    document.getElementById("closeModalBtn").addEventListener("click", () => {
-      const modal = document.getElementById("detailModal");
-      const iframe = document.getElementById("detailIframe");
-      iframe.src = "";
-      modal.style.display = "none";
-    });
-
-    // Close modal when clicking outside
-    document.getElementById("detailModal").addEventListener("click", function(e) {
-      if (e.target === this) {
-        const iframe = document.getElementById("detailIframe");
-        iframe.src = "";
-        this.style.display = "none";
-      }
-    });
-
-    // Toggle between table and card view
-    document.getElementById("toggleViewBtn").addEventListener("click", () => {
-      const tableView = document.getElementById("tableView");
-      const cardView = document.getElementById("cardView");
-      const toggleBtn = document.getElementById("toggleViewBtn");
-      
-      if (tableView.style.display === "none") {
-        tableView.style.display = "block";
-        cardView.style.display = "none";
-        toggleBtn.innerHTML = '<i class="material-icons">dashboard</i> Card View';
-      } else {
-        tableView.style.display = "none";
-        cardView.style.display = "flex";
-        toggleBtn.innerHTML = '<i class="material-icons">table_chart</i> Table View';
-      }
-    });
-
-    // Toggle chart visibility
-    document.getElementById("toggleChartsBtn").addEventListener("click", () => {
-      const chartsContainer = document.getElementById("chartsContainer");
-      const toggleBtn = document.getElementById("toggleChartsBtn");
-      
-      if (chartsContainer.style.display === "none" || chartsContainer.style.display === "") {
-        chartsContainer.style.display = "flex";
-        toggleBtn.innerHTML = '<i class="material-icons">visibility_off</i> Hide Charts';
-        // Redraw charts if needed
-        if (currentSummary) createCharts(currentSummary, allTransactions);
-      } else {
-        chartsContainer.style.display = "none";
-        toggleBtn.innerHTML = '<i class="material-icons">insert_chart</i> Show Charts';
-      }
-    });
-
-    // Filter elements
-    const dateFilter = document.getElementById("dateFilter");
-    const startDate = document.getElementById("startDate");
-    const endDate = document.getElementById("endDate");
-    const customDateInputs = document.getElementById("customDateInputs");
-    const applyFilterBtn = document.getElementById("applyFilterBtn");
-
-    // Set default date range for custom filter
-    const today = new Date();
-    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    startDate.valueAsDate = firstDayOfMonth;
-    endDate.valueAsDate = today;
-
-    dateFilter.addEventListener("change", () => {
-      if (dateFilter.value === "custom") {
-        customDateInputs.style.display = "flex";
-      } else {
-        customDateInputs.style.display = "none";
-      }
-    });
-
-    let allTransactions = [];
-    let currentSummary = null;
-
-    applyFilterBtn.addEventListener("click", () => {
-      const filtered = filterTransactions(allTransactions);
-      renderDashboard(filtered);
-    });
-
-    function filterTransactions(transactions) {
-      const filter = dateFilter.value;
-      const now = new Date();
-
-      const isInRange = (dateStr, start, end) => {
-        if (!dateStr) return false;
-        let d;
-        if (typeof dateStr === 'string') {
-          d = new Date(dateStr);
-        } else if (dateStr.toDate) {
-          d = dateStr.toDate();
-        } else {
-          d = new Date(dateStr);
-        }
-        return d >= start && d <= end;
-      };
-
-      switch (filter) {
-        case "year":
-          return transactions.filter(tx => {
-            let d = typeof tx.DATE === 'string' ? new Date(tx.DATE) : (tx.DATE?.toDate ? tx.DATE.toDate() : new Date(tx.DATE));
-            return d.getFullYear() === now.getFullYear();
-          });
-        case "month":
-          return transactions.filter(tx => {
-            let d = typeof tx.DATE === 'string' ? new Date(tx.DATE) : (tx.DATE?.toDate ? tx.DATE.toDate() : new Date(tx.DATE));
-            return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-          });
-        case "custom": {
-          const s = new Date(startDate.value);
-          const e = new Date(endDate.value);
-          if (isNaN(s.getTime()) || isNaN(e.getTime())) return transactions;
-          e.setHours(23, 59, 59, 999);
-          return transactions.filter(tx => isInRange(tx.DATE, s, e));
-        }
-        default:
-          return transactions;
-      }
-    }
-
-    // Load and render complete dashboard
-    onAuthStateChanged(auth, async user => {
-      if (!user) {
-        window.location.href = "login.html";
-        return;
-      }
-      userDisplay.textContent = user.displayName || user.email || "User";
-      loadingStatus.textContent = "Loading Trial Balance...";
-
-      try {
-        // Load all transactions for user
-        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
-        allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        console.log("Loaded transactions:", allTransactions.length);
-        
-        // Also load COA to know which are bank accounts
-        let coaAccounts = {};
-        try {
-          const coaSnap = await getDocs(collection(db, "users", user.uid, "chartOfAccounts"));
-          coaSnap.forEach(doc => {
-            const data = doc.data();
-            coaAccounts[data.name] = { type: data.type, category: data.category };
-          });
-        } catch(e) {
-          console.warn("Could not load COA:", e);
-        }
-
-        renderDashboard(allTransactions, coaAccounts);
-      } catch (error) {
-        loadingStatus.textContent = `Error loading data: ${error.message}`;
-        summaryBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:red;">Error: ${error.message}</td></tr>`;
-      }
-    });
-
-    function renderDashboard(transactions, coaAccounts = {}) {
-      // Calculate summary data
-      const summary = calculateSummary(transactions, coaAccounts);
-      currentSummary = summary;
-      
-      // Update stats cards
-      updateStatsCards(summary);
-      
-      // Render table view
-      renderTableView(summary);
-      
-      // Render card view
-      renderCardView(summary);
-      
-      // Create visualizations
-      createCharts(summary, transactions);
-      
-      loadingStatus.textContent = `Showing ${Object.keys(summary.accounts).length} accounts, ${transactions.length} transactions`;
-    }
-
-    // FIXED: Calculate summary correctly based on transaction TYPE
-    function calculateSummary(transactions, coaAccounts = {}) {
-      const summary = {};
-      
-      for (const tx of transactions) {
-        const account = tx.ACCOUNT_HEADER || "Uncategorized";
-        const type = tx.TYPE || ""; // Income, Expense, Transfer
-        const bankName = tx.BANK_NAME || tx.MODE || "";
-        
-        // Get amounts
-        const incomeAmount = Number(tx.INCOME || 0);
-        const expenseAmount = Number(tx.EXPENSE || 0);
-        
-        if (!summary[account]) {
-          summary[account] = { 
-            debit: 0, 
-            credit: 0, 
-            count: 0,
-            lastTransaction: tx.DATE || "",
-            type: getAccountType(account, coaAccounts)
-          };
-        }
-        
-        // FIXED: Correct debit/credit logic based on TYPE
-        if (type === "Income") {
-          // Income: Credit to income account, Debit to bank
-          summary[account].credit += incomeAmount;
-          
-          // Also track bank account if different from account header
-          if (bankName && bankName !== account) {
-            if (!summary[bankName]) {
-              summary[bankName] = { debit: 0, credit: 0, count: 0, lastTransaction: tx.DATE || "", type: "Bank" };
-            }
-            summary[bankName].debit += incomeAmount;
-            summary[bankName].count += 1;
-          }
-        } else if (type === "Expense") {
-          // Expense: Debit to expense account, Credit from bank
-          summary[account].debit += expenseAmount;
-          
-          // Also track bank account
-          if (bankName && bankName !== account) {
-            if (!summary[bankName]) {
-              summary[bankName] = { debit: 0, credit: 0, count: 0, lastTransaction: tx.DATE || "", type: "Bank" };
-            }
-            summary[bankName].credit += expenseAmount;
-            summary[bankName].count += 1;
-          }
-        } else if (type === "Transfer") {
-          // Transfer: Credit from one account, Debit to another
-          // For simplicity, track net effect
-          summary[account].debit += expenseAmount;
-          summary[account].credit += incomeAmount;
-        } else {
-          // Fallback: use INCOME as credit, EXPENSE as debit
-          summary[account].credit += incomeAmount;
-          summary[account].debit += expenseAmount;
-        }
-        
-        summary[account].count += 1;
-        
-        // Update last transaction date
-        if (tx.DATE && (!summary[account].lastTransaction || tx.DATE > summary[account].lastTransaction)) {
-          summary[account].lastTransaction = tx.DATE;
-        }
-      }
-      
-      // Calculate totals and percentages
-      let totalDebit = 0;
-      let totalCredit = 0;
-      
-      for (const [account, data] of Object.entries(summary)) {
-        totalDebit += data.debit;
-        totalCredit += data.credit;
-      }
-      
-      for (const [account, data] of Object.entries(summary)) {
-        data.balance = data.credit - data.debit;
-        data.debitPercent = totalDebit > 0 ? (data.debit / totalDebit * 100).toFixed(1) : 0;
-        data.creditPercent = totalCredit > 0 ? (data.credit / totalCredit * 100).toFixed(1) : 0;
-        data.balanceType = data.balance >= 0 ? 'positive' : 'negative';
-      }
-      
-      // Sort by absolute balance (largest first)
-      const sortedSummary = {};
-      Object.entries(summary)
-        .sort((a, b) => Math.abs(b[1].balance) - Math.abs(a[1].balance))
-        .forEach(([key, value]) => {
-          sortedSummary[key] = value;
-        });
-      
-      console.log("Trial Balance Summary:", { accounts: sortedSummary, totals: { debit: totalDebit, credit: totalCredit, net: totalCredit - totalDebit } });
-      
-      return {
-        accounts: sortedSummary,
-        totals: { debit: totalDebit, credit: totalCredit, net: totalCredit - totalDebit }
-      };
-    }
-    
-    function getAccountType(accountName, coaAccounts) {
-      if (coaAccounts[accountName]) {
-        return coaAccounts[accountName].type || "Unknown";
-      }
-      const lower = accountName.toLowerCase();
-      if (lower.includes('bank') || lower.includes('cash') || lower.includes('axis') || 
-          lower.includes('hdfc') || lower.includes('sbi') || lower.includes('bom')) {
-        return "Bank";
-      }
-      if (lower.includes('loan') || lower.includes('payable')) return "Liability";
-      if (lower.includes('equity') || lower.includes('capital')) return "Equity";
-      if (lower.includes('income') || lower.includes('revenue') || lower.includes('salary')) return "Income";
-      return "Expense";
-    }
-
-    function updateStatsCards(summary) {
-      document.getElementById('totalAccounts').textContent = Object.keys(summary.accounts).length;
-      document.getElementById('totalDebit').textContent = summary.totals.debit.toFixed(2);
-      document.getElementById('totalCredit').textContent = summary.totals.credit.toFixed(2);
-      
-      const netEl = document.getElementById('netBalance');
-      netEl.textContent = summary.totals.net.toFixed(2);
-      netEl.style.color = Math.abs(summary.totals.net) < 0.01 ? '#2c3e50' : (summary.totals.net >= 0 ? '#2ecc71' : '#e74c3c');
-    }
-
-    function renderTableView(summary) {
-      if (Object.keys(summary.accounts).length === 0) {
-        summaryBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px;">No data found. Add transactions to see trial balance.</td></tr>`;
-        return;
-      }
-
-      let rows = "";
-      for (const [account, data] of Object.entries(summary.accounts)) {
-        const balance = data.balance;
-        const balanceColor = Math.abs(balance) < 0.01 ? '#333' : (balance >= 0 ? '#27ae60' : '#e74c3c');
-        
-        rows += `
-          <tr>
-            <td>
-              <a href="#" class="accountLink" data-account="${escapeHtml(account)}">
-                ${escapeHtml(account)}
-              </a>
-              <small style="color:#999; margin-left:8px;">${data.type || ''}</small>
-            </td>
-            <td style="text-align:right; color:#e74c3c; font-weight:bold;">${data.debit.toFixed(2)}</td>
-            <td style="text-align:right; color:#2ecc71; font-weight:bold;">${data.credit.toFixed(2)}</td>
-            <td style="text-align:right; color:${balanceColor}; font-weight:bold;">${balance.toFixed(2)}</td>
-            <td style="text-align:center;">${data.count}</td>
-            <td style="text-align:right;">${data.debitPercent}%</td>
-            <td style="text-align:right;">${data.creditPercent}%</td>
-            <td style="text-align:right; font-size:12px; color:#999;">${formatDate(data.lastTransaction)}</td>
-          </tr>
-        `;
-      }
-      
-      // Add totals row
-      rows += `
-        <tr style="background:#f0f0f0; font-weight:bold; border-top:3px solid #333;">
-          <td>TOTALS</td>
-          <td style="text-align:right; color:#e74c3c;">${summary.totals.debit.toFixed(2)}</td>
-          <td style="text-align:right; color:#2ecc71;">${summary.totals.credit.toFixed(2)}</td>
-          <td style="text-align:right; color:${Math.abs(summary.totals.net) < 0.01 ? '#333' : (summary.totals.net >= 0 ? '#27ae60' : '#e74c3c')};">${summary.totals.net.toFixed(2)}</td>
-          <td style="text-align:center;">-</td>
-          <td style="text-align:right;">100%</td>
-          <td style="text-align:right;">100%</td>
-          <td></td>
-        </tr>
-      `;
-      
-      summaryBody.innerHTML = rows;
-
-      // Add click handlers for account links
-      document.querySelectorAll(".accountLink").forEach(link => {
-        link.addEventListener("click", e => {
-          e.preventDefault();
-          const account = e.target.getAttribute("data-account");
-          if (!account) return;
-          openDetailModal(account);
-        });
-      });
-    }
-
-    function renderCardView(summary) {
-      const cardContainer = document.getElementById("cardView");
-      
-      if (Object.keys(summary.accounts).length === 0) {
-        cardContainer.innerHTML = `<div class="no-data" style="width:100%;">No accounts found. Add transactions to see trial balance.</div>`;
-        return;
-      }
-
-      let cards = "";
-      for (const [account, data] of Object.entries(summary.accounts)) {
-        const balance = data.balance;
-        const balanceType = Math.abs(balance) < 0.01 ? 'neutral' : (balance >= 0 ? 'positive' : 'negative');
-        const balanceColor = Math.abs(balance) < 0.01 ? '#333' : (balance >= 0 ? '#27ae60' : '#e74c3c');
-        const borderColor = Math.abs(balance) < 0.01 ? '#95a5a6' : (balance >= 0 ? '#2ecc71' : '#e74c3c');
-        
-        cards += `
-          <div class="account-card ${balanceType}" style="border-top: 4px solid ${borderColor};">
-            <div class="card-header">
-              <h3>
-                <a href="#" class="accountLink" data-account="${escapeHtml(account)}" style="color:#2c3e50; text-decoration:none;">
-                  ${escapeHtml(account)}
-                </a>
-              </h3>
-              <span class="transaction-count">${data.count} txns | ${data.type || 'Unknown'}</span>
-            </div>
-            <div class="card-body">
-              <div class="amount-row">
-                <div class="amount debit">
-                  <div class="amount-label">Debit</div>
-                  <div class="amount-value">${data.debit.toFixed(2)}</div>
-                  <div class="amount-percent">${data.debitPercent}%</div>
-                </div>
-                <div class="amount credit">
-                  <div class="amount-label">Credit</div>
-                  <div class="amount-value">${data.credit.toFixed(2)}</div>
-                  <div class="amount-percent">${data.creditPercent}%</div>
-                </div>
-              </div>
-              <div class="balance-row">
-                <div class="balance-label">Balance</div>
-                <div class="balance-value" style="color:${balanceColor}">${balance.toFixed(2)}</div>
-              </div>
-            </div>
-            <div class="card-footer">
-              <button class="detail-btn" data-account="${escapeHtml(account)}">
-                <i class="material-icons">arrow_forward</i> View Details
-              </button>
-            </div>
-          </div>
-        `;
-      }
-      cardContainer.innerHTML = cards;
-
-      // Add click handlers for detail buttons and links
-      document.querySelectorAll("#cardView .detail-btn, #cardView .accountLink").forEach(el => {
-        el.addEventListener("click", e => {
-          e.preventDefault();
-          const account = el.getAttribute("data-account") || el.closest(".detail-btn")?.getAttribute("data-account");
-          if (!account) return;
-          openDetailModal(account);
-        });
-      });
-    }
-
-    function createCharts(summary, transactions) {
-      // Destroy existing charts
-      if (balanceChart) balanceChart.destroy();
-      if (compositionChart) compositionChart.destroy();
-      if (trendChart) trendChart.destroy();
-
-      const accounts = Object.keys(summary.accounts);
-      
-      // Limit to top 20 accounts for readability
-      const topAccounts = accounts.slice(0, 20);
-      const balances = topAccounts.map(acc => summary.accounts[acc].balance);
-      const debits = topAccounts.map(acc => summary.accounts[acc].debit);
-      const credits = topAccounts.map(acc => summary.accounts[acc].credit);
-      
-      const positiveColor = '#2ecc71';
-      const negativeColor = '#e74c3c';
-      const neutralColor = '#95a5a6';
-      const debitColor = '#e74c3c';
-      const creditColor = '#2ecc71';
-
-      // 1. Balance by Account (Bar Chart)
-      const balanceCtx = document.getElementById('balanceChart').getContext('2d');
-      balanceChart = new Chart(balanceCtx, {
-        type: 'bar',
-        data: {
-          labels: topAccounts.map(a => a.length > 20 ? a.substring(0, 18) + '...' : a),
-          datasets: [{
-            label: 'Account Balance',
-            data: balances,
-            backgroundColor: balances.map(b => Math.abs(b) < 0.01 ? neutralColor : (b >= 0 ? positiveColor : negativeColor)),
-            borderColor: 'transparent',
-            borderWidth: 1,
-            borderRadius: 4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            title: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `Balance: ${ctx.raw.toFixed(2)}`
-              }
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-              grid: { color: 'rgba(0,0,0,0.05)' },
-              ticks: {
-                callback: (val) => val.toFixed(0)
-              }
-            },
-            x: {
-              ticks: { 
-                maxRotation: 45,
-                font: { size: 9 }
-              }
-            }
-          }
-        }
-      });
-
-      // 2. Debit vs Credit Composition (Doughnut Chart)
-      const compositionCtx = document.getElementById('compositionChart').getContext('2d');
-      compositionChart = new Chart(compositionCtx, {
-        type: 'doughnut',
-        data: {
-          labels: ['Total Debit', 'Total Credit'],
-          datasets: [{
-            data: [summary.totals.debit, summary.totals.credit],
-            backgroundColor: [debitColor, creditColor],
-            borderWidth: 2,
-            borderColor: '#fff'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { 
-              position: 'bottom',
-              labels: { padding: 15, usePointStyle: true }
-            },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.label}: ${ctx.raw.toFixed(2)} (${((ctx.raw / (summary.totals.debit + summary.totals.credit)) * 100).toFixed(1)}%)`
-              }
-            }
-          }
-        }
-      });
-
-      // 3. Monthly Trend
-      if (transactions.length > 0) {
-        const monthlyData = {};
-        transactions.forEach(tx => {
-          if (tx.DATE) {
-            let d = typeof tx.DATE === 'string' ? new Date(tx.DATE) : (tx.DATE?.toDate ? tx.DATE.toDate() : new Date(tx.DATE));
-            if (isNaN(d.getTime())) return;
-            
-            const monthKey = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-            
-            if (!monthlyData[monthKey]) {
-              monthlyData[monthKey] = { debit: 0, credit: 0 };
-            }
-            
-            const type = tx.TYPE || "";
-            if (type === "Income") {
-              monthlyData[monthKey].credit += Number(tx.INCOME || 0);
-            } else if (type === "Expense") {
-              monthlyData[monthKey].debit += Number(tx.EXPENSE || 0);
-            } else {
-              monthlyData[monthKey].debit += Number(tx.EXPENSE || 0);
-              monthlyData[monthKey].credit += Number(tx.INCOME || 0);
-            }
-          }
-        });
-        
-        const sortedMonths = Object.keys(monthlyData).sort();
-        const monthlyDebits = sortedMonths.map(m => monthlyData[m].debit);
-        const monthlyCredits = sortedMonths.map(m => monthlyData[m].credit);
-        
-        const trendCtx = document.getElementById('trendChart').getContext('2d');
-        trendChart = new Chart(trendCtx, {
-          type: 'line',
-          data: {
-            labels: sortedMonths,
-            datasets: [
-              {
-                label: 'Monthly Debits',
-                data: monthlyDebits,
-                borderColor: debitColor,
-                backgroundColor: 'rgba(231, 76, 60, 0.1)',
-                tension: 0.3,
-                fill: true
-              },
-              {
-                label: 'Monthly Credits',
-                data: monthlyCredits,
-                borderColor: creditColor,
-                backgroundColor: 'rgba(46, 204, 113, 0.1)',
-                tension: 0.3,
-                fill: true
-              }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { 
-                position: 'bottom',
-                labels: { padding: 15, usePointStyle: true }
-              }
-            },
-            scales: {
-              y: {
-                beginAtZero: true,
-                grid: { color: 'rgba(0,0,0,0.05)' }
-              }
-            }
-          }
-        });
-      }
-    }
-
-    // Utility functions
-    function escapeHtml(text) {
-      if (!text) return "";
-      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    }
-
-    function formatDate(dateStr) {
-      if (!dateStr) return "-";
-      try {
-        let d = typeof dateStr === 'string' ? new Date(dateStr) : (dateStr?.toDate ? dateStr.toDate() : new Date(dateStr));
-        if (isNaN(d.getTime())) return "-";
-        return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-      } catch(e) {
-        return "-";
-      }
-    }
-
-  </script>
-
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -678,11 +19,12 @@
       color: #333;
     }
 
+    /* ===== TOP BAR ===== */
     .top-bar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 15px 30px;
+      padding: 12px 24px;
       background: linear-gradient(to right, #2c3e50, #34495e);
       color: white;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -690,20 +32,45 @@
       top: 0;
       z-index: 100;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 12px;
     }
 
-    .top-bar a {
-      color: white;
-      text-decoration: none;
+    .top-bar-left, .top-bar-right {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-weight: 500;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
-    .top-bar a:hover {
-      color: #3498db;
+    .top-bar a, .top-bar button.nav-btn {
+      color: white;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .top-bar a:hover, .top-bar button.nav-btn:hover {
+      background: rgba(255,255,255,0.2);
+      transform: translateY(-1px);
+    }
+
+    .top-bar button.home-btn {
+      background: linear-gradient(135deg, #2ec4b6, #1a9a8d);
+      border-color: transparent;
+    }
+    .top-bar button.home-btn:hover { background: linear-gradient(135deg, #1a9a8d, #147a6f); }
+
+    .top-bar button.back-btn {
+      background: rgba(255,255,255,0.12);
     }
 
     .user-info {
@@ -717,19 +84,16 @@
       color: white;
       border: none;
       padding: 8px 16px;
-      border-radius: 4px;
+      border-radius: 6px;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       gap: 6px;
       font-weight: 600;
+      font-size: 13px;
       transition: all 0.2s;
     }
-
-    .logout-btn:hover {
-      background: #c0392b;
-      transform: translateY(-2px);
-    }
+    .logout-btn:hover { background: #c0392b; transform: translateY(-2px); }
 
     .dashboard-container {
       max-width: 1400px;
@@ -758,21 +122,22 @@
     .action-buttons {
       display: flex;
       gap: 10px;
+      flex-wrap: wrap;
     }
 
     .action-btn {
       background: #3498db;
       color: white;
       border: none;
-      padding: 10px 18px;
+      padding: 10px 16px;
       border-radius: 6px;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-weight: 600;
       transition: all 0.2s;
-      font-size: 14px;
+      font-size: 13px;
     }
 
     .action-btn:hover {
@@ -781,13 +146,14 @@
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
 
-    .action-btn.secondary {
-      background: #7f8c8d;
-    }
-
-    .action-btn.secondary:hover {
-      background: #636e72;
-    }
+    .action-btn.secondary { background: #7f8c8d; }
+    .action-btn.secondary:hover { background: #636e72; }
+    .action-btn.success { background: #27ae60; }
+    .action-btn.success:hover { background: #219150; }
+    .action-btn.warning { background: #f39c12; }
+    .action-btn.warning:hover { background: #d68910; }
+    .action-btn.danger { background: #e74c3c; }
+    .action-btn.danger:hover { background: #c0392b; }
 
     .stats-container {
       display: grid;
@@ -803,11 +169,7 @@
       box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
       transition: transform 0.3s;
     }
-
-    .stat-card:hover {
-      transform: translateY(-5px);
-    }
-
+    .stat-card:hover { transform: translateY(-5px); }
     .stat-card h3 {
       font-size: 13px;
       color: #7f8c8d;
@@ -818,20 +180,13 @@
       align-items: center;
       gap: 8px;
     }
-
     .stat-value {
       font-size: 30px;
       font-weight: 700;
       color: #2c3e50;
     }
-
-    .stat-card.debit .stat-value {
-      color: #e74c3c;
-    }
-
-    .stat-card.credit .stat-value {
-      color: #2ecc71;
-    }
+    .stat-card.debit .stat-value { color: #e74c3c; }
+    .stat-card.credit .stat-value { color: #2ecc71; }
 
     .filter-container {
       background: white;
@@ -851,33 +206,35 @@
     .filter-group {
       display: flex;
       flex-direction: column;
+      min-width: 150px;
+      flex: 1 1 150px;
     }
 
     .filter-group label {
       font-weight: 600;
       margin-bottom: 5px;
       color: #2c3e50;
-      font-size: 13px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
 
-    select, input[type="date"] {
+    select, input[type="date"], input[type="text"] {
       padding: 10px 15px;
       border-radius: 6px;
       border: 1px solid #ddd;
       font-size: 14px;
       background: white;
+      font-family: inherit;
     }
 
-    select:focus, input[type="date"]:focus {
+    select:focus, input[type="date"]:focus, input[type="text"]:focus {
       outline: none;
       border-color: #3498db;
       box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
     }
 
-    #customDateInputs {
-      display: flex;
-      gap: 10px;
-    }
+    #customDateInputs { display: flex; gap: 10px; flex-wrap: wrap; }
 
     .charts-container {
       display: flex;
@@ -898,22 +255,19 @@
       flex-direction: column;
     }
 
-    .chart-card canvas {
-      flex: 1;
-      max-height: 280px;
-    }
+    .chart-card canvas { flex: 1; max-height: 280px; }
 
     .chart-title {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
       margin-bottom: 10px;
       color: #2c3e50;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
 
-    /* Table View */
+    /* ===== TABLE ===== */
     .table-container {
       background: white;
       border-radius: 10px;
@@ -922,14 +276,12 @@
       margin-bottom: 30px;
     }
 
-    .table-container .table-wrapper {
-      overflow-x: auto;
-    }
+    .table-wrapper { overflow-x: auto; }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 800px;
+      min-width: 900px;
     }
 
     thead {
@@ -941,10 +293,18 @@
       padding: 12px 15px;
       text-align: left;
       font-weight: 600;
-      font-size: 13px;
+      font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      user-select: none;
+      cursor: pointer;
+      position: relative;
+      white-space: nowrap;
     }
+
+    th[data-sortable]:hover { background: rgba(255,255,255,0.1); }
+    th.sort-asc::after { content: ' ▲'; font-size: 10px; }
+    th.sort-desc::after { content: ' ▼'; font-size: 10px; }
 
     td {
       padding: 12px 15px;
@@ -952,9 +312,7 @@
       font-size: 14px;
     }
 
-    tbody tr:hover {
-      background-color: #f8f9fa;
-    }
+    tbody tr:hover { background-color: #f8f9fa; }
 
     .accountLink {
       color: #3498db;
@@ -962,13 +320,27 @@
       font-weight: 600;
       transition: color 0.2s;
     }
+    .accountLink:hover { color: #1a5276; text-decoration: underline; }
 
-    .accountLink:hover {
-      color: #1a5276;
-      text-decoration: underline;
+    .account-type-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-left: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
+    .type-Asset { background: #d5f4e6; color: #1e8449; }
+    .type-Liability { background: #fadbd8; color: #a93226; }
+    .type-Equity { background: #ebdef0; color: #6c3483; }
+    .type-Income, .type-OtherIncome { background: #d1f2eb; color: #0e6251; }
+    .type-Expense, .type-COGS, .type-OtherExpense { background: #fdebd0; color: #a04000; }
+    .type-Bank { background: #d6eaf8; color: #1a5276; }
+    .type-Unknown { background: #eaecee; color: #566573; }
 
-    /* Card View */
+    /* ===== CARD VIEW ===== */
     .card-container {
       display: flex;
       flex-wrap: wrap;
@@ -984,22 +356,14 @@
       overflow: hidden;
       transition: transform 0.3s;
     }
-
-    .account-card:hover {
-      transform: translateY(-5px);
-    }
+    .account-card:hover { transform: translateY(-5px); }
 
     .card-header {
       padding: 18px;
       border-bottom: 1px solid #eee;
       background: #fafbfc;
     }
-
-    .card-header h3 {
-      font-size: 16px;
-      margin-bottom: 5px;
-      color: #2c3e50;
-    }
+    .card-header h3 { font-size: 15px; margin-bottom: 5px; color: #2c3e50; word-break: break-word; }
 
     .transaction-count {
       font-size: 11px;
@@ -1007,11 +371,10 @@
       background: #ecf0f1;
       padding: 2px 8px;
       border-radius: 10px;
+      display: inline-block;
     }
 
-    .card-body {
-      padding: 18px;
-    }
+    .card-body { padding: 18px; }
 
     .amount-row {
       display: flex;
@@ -1019,40 +382,13 @@
       margin-bottom: 15px;
     }
 
-    .amount {
-      flex: 1;
-      text-align: center;
-    }
-
-    .amount.debit {
-      border-right: 1px solid #eee;
-    }
-
-    .amount-label {
-      font-size: 11px;
-      color: #7f8c8d;
-      text-transform: uppercase;
-      margin-bottom: 5px;
-      font-weight: 600;
-    }
-
-    .amount-value {
-      font-size: 18px;
-      font-weight: 700;
-    }
-
-    .amount.debit .amount-value {
-      color: #e74c3c;
-    }
-
-    .amount.credit .amount-value {
-      color: #2ecc71;
-    }
-
-    .amount-percent {
-      font-size: 11px;
-      color: #95a5a6;
-    }
+    .amount { flex: 1; text-align: center; }
+    .amount.debit { border-right: 1px solid #eee; }
+    .amount-label { font-size: 11px; color: #7f8c8d; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; }
+    .amount-value { font-size: 18px; font-weight: 700; }
+    .amount.debit .amount-value { color: #e74c3c; }
+    .amount.credit .amount-value { color: #2ecc71; }
+    .amount-percent { font-size: 11px; color: #95a5a6; }
 
     .balance-row {
       display: flex;
@@ -1061,17 +397,8 @@
       padding-top: 12px;
       border-top: 1px solid #eee;
     }
-
-    .balance-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: #2c3e50;
-    }
-
-    .balance-value {
-      font-size: 22px;
-      font-weight: 700;
-    }
+    .balance-label { font-size: 13px; font-weight: 600; color: #2c3e50; }
+    .balance-value { font-size: 22px; font-weight: 700; }
 
     .card-footer {
       padding: 12px 18px;
@@ -1087,27 +414,21 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       justify-content: center;
       align-items: center;
       gap: 8px;
       font-weight: 600;
       transition: background 0.2s;
-      font-size: 14px;
+      font-size: 13px;
     }
+    .detail-btn:hover { background: #2980b9; }
 
-    .detail-btn:hover {
-      background: #2980b9;
-    }
-
-    /* Modal styles */
+    /* ===== MODAL ===== */
     #detailModal {
       display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
+      inset: 0;
       background: rgba(0,0,0,0.7);
       z-index: 9999;
       justify-content: center;
@@ -1117,8 +438,8 @@
 
     #detailModal > div {
       background: #fff;
-      width: 85vw;
-      height: 85vh;
+      width: 90vw;
+      height: 90vh;
       border-radius: 12px;
       position: relative;
       box-shadow: 0 20px 40px rgba(0,0,0,0.3);
@@ -1146,21 +467,15 @@
       z-index: 10;
       transition: background 0.2s;
     }
+    #closeModalBtn:hover { background: rgba(0,0,0,0.75); }
 
-    #closeModalBtn:hover {
-      background: rgba(0,0,0,0.7);
-    }
-
-    #detailIframe {
-      flex-grow: 1;
-      border: none;
-    }
+    #detailIframe { flex-grow: 1; border: none; }
 
     .no-data {
       text-align: center;
       padding: 40px;
       color: #7f8c8d;
-      font-size: 18px;
+      font-size: 16px;
       background: white;
       border-radius: 10px;
       margin: 20px 0;
@@ -1176,80 +491,89 @@
       border-radius: 8px;
     }
 
-    @media (max-width: 768px) {
-      .top-bar {
-        flex-direction: column;
-        gap: 10px;
-        padding: 15px;
-      }
-      
-      .dashboard-header {
-        flex-direction: column;
-        gap: 15px;
-        align-items: flex-start;
-      }
-      
-      .action-buttons {
-        width: 100%;
-      }
-      
-      .action-btn {
-        flex: 1;
-        justify-content: center;
-        padding: 10px 14px;
-        font-size: 13px;
-      }
-      
-      .filter-row {
-        flex-direction: column;
-        align-items: stretch;
-      }
-      
-      .filter-group {
-        width: 100%;
-      }
-      
-      .account-card {
-        width: 100%;
-      }
-      
-      .charts-container {
-        flex-direction: column;
-      }
-      
-      .chart-card {
-        min-width: 100%;
-        height: 300px;
-      }
-      
-      .dashboard-title {
-        font-size: 22px;
-      }
-      
-      .stat-value {
-        font-size: 24px;
-      }
-      
-      table {
-        font-size: 12px;
-      }
-      
-      th, td {
-        padding: 8px 10px;
-      }
+    /* Active filter pill */
+    .filter-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #eaf2ff;
+      color: #2c3e50;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .filter-pill button {
+      background: transparent;
+      border: none;
+      color: #2c3e50;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      padding: 0 2px;
     }
 
-    .material-icons {
-      vertical-align: middle;
-      font-size: 18px;
+    /* Skeleton */
+    .skeleton-row {
+      height: 14px;
+      background: linear-gradient(90deg, #eee 25%, #f5f5f5 50%, #eee 75%);
+      background-size: 200% 100%;
+      border-radius: 4px;
+      animation: skeleton 1.2s infinite;
+    }
+    @keyframes skeleton {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    @media (max-width: 768px) {
+      .top-bar { flex-direction: column; align-items: stretch; }
+      .top-bar-left, .top-bar-right { justify-content: center; }
+      .dashboard-header { flex-direction: column; gap: 15px; align-items: flex-start; }
+      .action-buttons { width: 100%; }
+      .action-btn { flex: 1; justify-content: center; }
+      .filter-row { flex-direction: column; align-items: stretch; }
+      .filter-group { width: 100%; }
+      .account-card { width: 100%; }
+      .charts-container { flex-direction: column; }
+      .chart-card { min-width: 100%; height: 300px; }
+      .dashboard-title { font-size: 22px; }
+      .stat-value { font-size: 24px; }
+      table { font-size: 12px; }
+      th, td { padding: 8px 10px; }
+    }
+
+    .material-icons { vertical-align: middle; font-size: 18px; }
+
+    /* Print styles */
+    @media print {
+      .top-bar, .action-buttons, .filter-container, .charts-container, .status-bar, #detailModal { display: none !important; }
+      .dashboard-container { padding: 0; }
+      .table-container { box-shadow: none; }
+      body { background: white; }
     }
   </style>
 </head>
 <body>
+
+  <!-- ===== TOP BAR ===== -->
   <div class="top-bar">
-    <a href="coa.html"><i class="material-icons">arrow_back</i> Back to Chart of Accounts</a>
-    <div id="loadingStatus" style="flex:1; text-align:center;">Loading...</div>
-    <div class="user-info">
+    <div class="top-bar-left">
+      <a href="coa.html" title="Chart of Accounts">
+        <i class="material-icons">arrow_back</i> Chart of Accounts
+      </a>
+      <button id="backBtn" class="nav-btn back-btn" title="Go back">
+        <i class="material-icons">navigate_before</i> Back
+      </button>
+      <button id="homeBtn" class="nav-btn home-btn" title="Go to Home">
+        <i class="material-icons">home</i> Home
+      </button>
+    </div>
+
+    <div id="loadingStatus" style="flex:1; text-align:center; font-size:13px; opacity:0.9;">Loading...</div>
+
+    <div class="top-bar-right user-info">
       <span id="userDisplay">User</span>
       <button id="logoutBtn" class="logout-btn">
         <i class="material-icons">logout</i> Logout
@@ -1263,6 +587,15 @@
         <i class="material-icons" style="font-size:32px;">account_balance</i> Trial Balance Dashboard
       </h1>
       <div class="action-buttons">
+        <button id="refreshBtn" class="action-btn success" title="Reload data">
+          <i class="material-icons">refresh</i> Refresh
+        </button>
+        <button id="exportCsvBtn" class="action-btn warning" title="Export as CSV">
+          <i class="material-icons">download</i> Export
+        </button>
+        <button id="printBtn" class="action-btn secondary" title="Print / Save PDF">
+          <i class="material-icons">print</i> Print
+        </button>
         <button id="toggleViewBtn" class="action-btn">
           <i class="material-icons">dashboard</i> Card View
         </button>
@@ -1296,30 +629,63 @@
     <div class="filter-container">
       <div class="filter-row">
         <div class="filter-group">
-          <label>Filter By:</label>
+          <label>Date Range</label>
           <select id="dateFilter">
             <option value="all">All Time</option>
-            <option value="year">This Year</option>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
             <option value="month">This Month</option>
+            <option value="year">This Year</option>
             <option value="custom">Custom Range</option>
           </select>
         </div>
-        
+
         <div id="customDateInputs" style="display:none;">
           <div class="filter-group">
-            <label>Start Date:</label>
+            <label>Start Date</label>
             <input type="date" id="startDate" />
           </div>
           <div class="filter-group">
-            <label>End Date:</label>
+            <label>End Date</label>
             <input type="date" id="endDate" />
           </div>
         </div>
-        
+
+        <div class="filter-group">
+          <label>Account Type</label>
+          <select id="typeFilter">
+            <option value="all">All Types</option>
+            <option value="Asset">Asset</option>
+            <option value="Liability">Liability</option>
+            <option value="Equity">Equity</option>
+            <option value="Income">Income</option>
+            <option value="Expense">Expense</option>
+            <option value="COGS">COGS</option>
+            <option value="Bank">Bank</option>
+            <option value="Unknown">Unknown</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>Search Account</label>
+          <input type="text" id="searchFilter" placeholder="e.g. Salary, Bank…" />
+        </div>
+
+        <div class="filter-group" style="flex:0 0 auto; min-width:auto;">
+          <label>&nbsp;</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; font-size:13px; text-transform:none; letter-spacing:0;">
+            <input type="checkbox" id="hideZeroToggle" style="width:16px; height:16px;" /> Hide 0 balance
+          </label>
+        </div>
+
         <button id="applyFilterBtn" class="action-btn">
-          <i class="material-icons">filter_list</i> Apply Filter
+          <i class="material-icons">filter_list</i> Apply
+        </button>
+        <button id="clearFilterBtn" class="action-btn secondary">
+          <i class="material-icons">clear</i> Clear
         </button>
       </div>
+      <div id="activeFiltersBar" style="margin-top:12px; display:none;"></div>
     </div>
 
     <!-- Charts Section -->
@@ -1350,14 +716,14 @@
         <table>
           <thead>
             <tr>
-              <th>Account Header</th>
-              <th style="text-align:right;">Total Debit</th>
-              <th style="text-align:right;">Total Credit</th>
-              <th style="text-align:right;">Balance</th>
-              <th style="text-align:center;">Txns</th>
-              <th style="text-align:right;">Debit %</th>
-              <th style="text-align:right;">Credit %</th>
-              <th style="text-align:right;">Last Activity</th>
+              <th data-sortable data-key="account" style="text-align:left;">Account Header</th>
+              <th data-sortable data-key="debit" style="text-align:right;">Total Debit</th>
+              <th data-sortable data-key="credit" style="text-align:right;">Total Credit</th>
+              <th data-sortable data-key="balance" style="text-align:right;">Balance</th>
+              <th data-sortable data-key="count" style="text-align:center;">Txns</th>
+              <th data-sortable data-key="debitPercent" style="text-align:right;">Debit %</th>
+              <th data-sortable data-key="creditPercent" style="text-align:right;">Credit %</th>
+              <th data-sortable data-key="lastTransaction" style="text-align:right;">Last Activity</th>
             </tr>
           </thead>
           <tbody id="trialBalanceBody">
@@ -1379,8 +745,814 @@
   <div id="detailModal">
     <div>
       <button id="closeModalBtn" title="Close details popup">✖</button>
-      <iframe id="detailIframe" src=""></iframe>
+      <iframe id="detailIframe" src="" title="Transaction details"></iframe>
     </div>
   </div>
+
+  <!-- ===== SCRIPT ===== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A",
+      authDomain: "budget-app-1365f.firebaseapp.com",
+      projectId: "budget-app-1365f",
+      storageBucket: "budget-app-1365f.appspot.com",
+      messagingSenderId: "1036194450411",
+      appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae",
+      measurementId: "G-YFFJL2H54X"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // ===== DOM =====
+    const $ = id => document.getElementById(id);
+    const logoutBtn = $("logoutBtn");
+    const backBtn = $("backBtn");
+    const homeBtn = $("homeBtn");
+    const refreshBtn = $("refreshBtn");
+    const exportCsvBtn = $("exportCsvBtn");
+    const printBtn = $("printBtn");
+    const userDisplay = $("userDisplay");
+    const loadingStatus = $("loadingStatus");
+    const summaryBody = $("trialBalanceBody");
+    const dataStatus = $("dataStatus");
+    const dateFilter = $("dateFilter");
+    const startDate = $("startDate");
+    const endDate = $("endDate");
+    const customDateInputs = $("customDateInputs");
+    const typeFilter = $("typeFilter");
+    const searchFilter = $("searchFilter");
+    const hideZeroToggle = $("hideZeroToggle");
+    const applyFilterBtn = $("applyFilterBtn");
+    const clearFilterBtn = $("clearFilterBtn");
+    const activeFiltersBar = $("activeFiltersBar");
+
+    // ===== STATE =====
+    let balanceChart = null, compositionChart = null, trendChart = null;
+    let allTransactions = [];
+    let currentSummary = null;
+    let coaAccounts = {};
+    let currentSortKey = 'balance';
+    let currentSortDir = 'desc';
+    let savedFilterState = loadFilterState();
+
+    // ===== NAV =====
+    backBtn.addEventListener('click', () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = 'home.html';
+    });
+    homeBtn.addEventListener('click', () => { window.location.href = 'home.html'; });
+
+    // ===== FILTER PERSISTENCE =====
+    function saveFilterState() {
+      try {
+        localStorage.setItem('tbFilterState', JSON.stringify({
+          dateFilter: dateFilter.value,
+          start: startDate.value,
+          end: endDate.value,
+          type: typeFilter.value,
+          search: searchFilter.value,
+          hideZero: hideZeroToggle.checked
+        }));
+      } catch (e) {}
+    }
+    function loadFilterState() {
+      try { return JSON.parse(localStorage.getItem('tbFilterState') || '{}'); }
+      catch { return {}; }
+    }
+    function restoreFilterState() {
+      if (!savedFilterState) return;
+      if (savedFilterState.dateFilter) dateFilter.value = savedFilterState.dateFilter;
+      if (savedFilterState.start) startDate.value = savedFilterState.start;
+      if (savedFilterState.end) endDate.value = savedFilterState.end;
+      if (savedFilterState.type) typeFilter.value = savedFilterState.type;
+      if (savedFilterState.search) searchFilter.value = savedFilterState.search;
+      if (typeof savedFilterState.hideZero === 'boolean') hideZeroToggle.checked = savedFilterState.hideZero;
+
+      if (dateFilter.value === 'custom') customDateInputs.style.display = 'flex';
+    }
+
+    // ===== LOGOUT =====
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+
+    // ===== REFRESH =====
+    refreshBtn.addEventListener("click", async () => {
+      if (!auth.currentUser) return;
+      loadingStatus.textContent = "Refreshing...";
+      showSkeleton();
+      await loadAllData(auth.currentUser);
+    });
+
+    // ===== EXPORT CSV =====
+    exportCsvBtn.addEventListener("click", () => {
+      if (!currentSummary) return;
+      const headers = ["Account Header","Type","Total Debit","Total Credit","Balance","Txns","Debit %","Credit %","Last Activity"];
+      const rows = [headers.join(",")];
+      for (const [account, data] of Object.entries(currentSummary.accounts)) {
+        const row = [
+          `"${String(account).replace(/"/g,'""')}"`,
+          data.type || "",
+          data.debit.toFixed(2),
+          data.credit.toFixed(2),
+          data.balance.toFixed(2),
+          data.count,
+          data.debitPercent + "%",
+          data.creditPercent + "%",
+          formatDate(data.lastTransaction)
+        ];
+        rows.push(row.join(","));
+      }
+      rows.push(`"TOTALS","",${currentSummary.totals.debit.toFixed(2)},${currentSummary.totals.credit.toFixed(2)},${currentSummary.totals.net.toFixed(2)},,,,`);
+      const csv = rows.join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `trial_balance_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+
+    // ===== PRINT =====
+    printBtn.addEventListener("click", () => window.print());
+
+    // ===== MODAL =====
+    function buildDetailUrl(account) {
+      const params = new URLSearchParams({ account });
+      // Pass current date range to exp.html
+      const now = new Date();
+      if (dateFilter.value === 'custom' && startDate.value && endDate.value) {
+        params.set('start', startDate.value);
+        params.set('end', endDate.value);
+      } else if (dateFilter.value === 'today') {
+        const d = now.toISOString().slice(0,10);
+        params.set('start', d);
+        params.set('end', d);
+      } else if (dateFilter.value === 'week') {
+        const s = new Date(now); s.setDate(now.getDate() - now.getDay());
+        params.set('start', s.toISOString().slice(0,10));
+        params.set('end', now.toISOString().slice(0,10));
+      } else if (dateFilter.value === 'month') {
+        params.set('start', new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10));
+        params.set('end', now.toISOString().slice(0,10));
+      } else if (dateFilter.value === 'year') {
+        params.set('start', `${now.getFullYear()}-01-01`);
+        params.set('end', now.toISOString().slice(0,10));
+      }
+      return `exp.html?${params.toString()}`;
+    }
+
+    function openDetailModal(account) {
+      const modal = $("detailModal");
+      const iframe = $("detailIframe");
+      iframe.src = buildDetailUrl(account);
+      modal.style.display = "flex";
+    }
+
+    $("closeModalBtn").addEventListener("click", () => {
+      const modal = $("detailModal");
+      const iframe = $("detailIframe");
+      iframe.src = "";
+      modal.style.display = "none";
+    });
+
+    $("detailModal").addEventListener("click", function(e) {
+      if (e.target === this) {
+        $("detailIframe").src = "";
+        this.style.display = "none";
+      }
+    });
+
+    // Listen for postMessage from iframe (exp.html back button)
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'closeDetail') {
+        $("detailIframe").src = "";
+        $("detailModal").style.display = "none";
+      }
+    });
+
+    // Esc closes modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const modal = $("detailModal");
+        if (modal.style.display === 'flex') {
+          $("detailIframe").src = "";
+          modal.style.display = "none";
+        }
+      }
+    });
+
+    // ===== VIEW TOGGLES =====
+    $("toggleViewBtn").addEventListener("click", () => {
+      const tableView = $("tableView");
+      const cardView = $("cardView");
+      const toggleBtn = $("toggleViewBtn");
+      if (tableView.style.display === "none") {
+        tableView.style.display = "block";
+        cardView.style.display = "none";
+        toggleBtn.innerHTML = '<i class="material-icons">dashboard</i> Card View';
+      } else {
+        tableView.style.display = "none";
+        cardView.style.display = "flex";
+        toggleBtn.innerHTML = '<i class="material-icons">table_chart</i> Table View';
+      }
+    });
+
+    $("toggleChartsBtn").addEventListener("click", () => {
+      const chartsContainer = $("chartsContainer");
+      const toggleBtn = $("toggleChartsBtn");
+      if (chartsContainer.style.display === "none" || chartsContainer.style.display === "") {
+        chartsContainer.style.display = "flex";
+        toggleBtn.innerHTML = '<i class="material-icons">visibility_off</i> Hide Charts';
+        if (currentSummary) createCharts(currentSummary, allTransactions);
+      } else {
+        chartsContainer.style.display = "none";
+        toggleBtn.innerHTML = '<i class="material-icons">insert_chart</i> Show Charts';
+      }
+    });
+
+    // ===== DATE FILTER TOGGLE =====
+    dateFilter.addEventListener("change", () => {
+      customDateInputs.style.display = dateFilter.value === "custom" ? "flex" : "none";
+      saveFilterState();
+    });
+
+    // ===== APPLY FILTERS =====
+    applyFilterBtn.addEventListener("click", () => {
+      saveFilterState();
+      const filtered = filterTransactions(allTransactions);
+      renderDashboard(filtered);
+    });
+
+    clearFilterBtn.addEventListener("click", () => {
+      dateFilter.value = "all";
+      startDate.value = "";
+      endDate.value = "";
+      typeFilter.value = "all";
+      searchFilter.value = "";
+      hideZeroToggle.checked = false;
+      customDateInputs.style.display = "none";
+      saveFilterState();
+      renderDashboard(allTransactions);
+    });
+
+    // ===== FILTERING =====
+    function filterTransactions(transactions) {
+      const filter = dateFilter.value;
+      const now = new Date();
+
+      const parseDate = (d) => {
+        if (!d) return null;
+        if (typeof d === 'string') return new Date(d);
+        if (d.toDate) return d.toDate();
+        return new Date(d);
+      };
+
+      const isInRange = (dateStr, start, end) => {
+        const d = parseDate(dateStr);
+        return d && d >= start && d <= end;
+      };
+
+      let result = transactions;
+
+      switch (filter) {
+        case "today": {
+          const s = new Date(now); s.setHours(0,0,0,0);
+          result = result.filter(tx => isInRange(tx.DATE, s, now));
+          break;
+        }
+        case "week": {
+          const s = new Date(now); s.setHours(0,0,0,0); s.setDate(now.getDate() - now.getDay());
+          result = result.filter(tx => isInRange(tx.DATE, s, now));
+          break;
+        }
+        case "month": {
+          const s = new Date(now.getFullYear(), now.getMonth(), 1);
+          result = result.filter(tx => {
+            const d = parseDate(tx.DATE);
+            return d && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+          });
+          break;
+        }
+        case "year": {
+          result = result.filter(tx => {
+            const d = parseDate(tx.DATE);
+            return d && d.getFullYear() === now.getFullYear();
+          });
+          break;
+        }
+        case "custom": {
+          const s = new Date(startDate.value);
+          const e = new Date(endDate.value);
+          if (isNaN(s.getTime()) || isNaN(e.getTime())) break;
+          e.setHours(23, 59, 59, 999);
+          result = result.filter(tx => isInRange(tx.DATE, s, e));
+          break;
+        }
+      }
+
+      // Search filter (by account header, description, bank)
+      const search = (searchFilter.value || '').trim().toLowerCase();
+      if (search) {
+        result = result.filter(tx =>
+          (tx.ACCOUNT_HEADER || '').toLowerCase().includes(search) ||
+          (tx.DESCRIPTION || '').toLowerCase().includes(search) ||
+          (tx.BANK_NAME || '').toLowerCase().includes(search)
+        );
+      }
+
+      return result;
+    }
+
+    // ===== LOAD DATA =====
+    async function loadAllData(user) {
+      showSkeleton();
+      try {
+        const txSnap = await getDocs(collection(db, "users", user.uid, "transactions"));
+        allTransactions = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log("Loaded transactions:", allTransactions.length);
+
+        coaAccounts = {};
+        try {
+          const coaSnap = await getDocs(collection(db, "users", user.uid, "chartOfAccounts"));
+          coaSnap.forEach(doc => {
+            const data = doc.data();
+            coaAccounts[data.name] = { type: data.type, category: data.category };
+          });
+        } catch (e) {
+          console.warn("Could not load COA:", e);
+        }
+
+        const filtered = filterTransactions(allTransactions);
+        renderDashboard(filtered);
+      } catch (error) {
+        console.error(error);
+        loadingStatus.textContent = `Error loading data: ${error.message}`;
+        summaryBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:red;">Error: ${error.message}</td></tr>`;
+      }
+    }
+
+    // ===== AUTH =====
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
+        window.location.href = "login.html";
+        return;
+      }
+      userDisplay.textContent = user.displayName || user.email || "User";
+      loadingStatus.textContent = "Loading Trial Balance...";
+
+      // Set default date
+      const today = new Date();
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      if (!startDate.value) startDate.valueAsDate = firstDay;
+      if (!endDate.value) endDate.valueAsDate = today;
+
+      // Restore saved filters
+      restoreFilterState();
+
+      await loadAllData(user);
+    });
+
+    // ===== RENDER =====
+    function renderDashboard(transactions, coa = coaAccounts) {
+      const summary = calculateSummary(transactions, coa);
+
+      // Apply account type + zero toggle
+      const typeSel = typeFilter.value;
+      const hideZero = hideZeroToggle.checked;
+      const filteredAccounts = {};
+      for (const [acct, data] of Object.entries(summary.accounts)) {
+        if (typeSel !== 'all' && (data.type || 'Unknown') !== typeSel) continue;
+        if (hideZero && Math.abs(data.balance) < 0.01) continue;
+        filteredAccounts[acct] = data;
+      }
+
+      // Recompute percentages for filtered view
+      let tDebit = 0, tCredit = 0;
+      for (const d of Object.values(filteredAccounts)) { tDebit += d.debit; tCredit += d.credit; }
+      for (const d of Object.values(filteredAccounts)) {
+        d.debitPercent = tDebit > 0 ? (d.debit / tDebit * 100).toFixed(1) : 0;
+        d.creditPercent = tCredit > 0 ? (d.credit / tCredit * 100).toFixed(1) : 0;
+      }
+
+      currentSummary = {
+        accounts: filteredAccounts,
+        totals: { debit: tDebit, credit: tCredit, net: tCredit - tDebit },
+        grandTotals: summary.totals
+      };
+
+      updateStatsCards(currentSummary);
+      renderTableView(currentSummary);
+      renderCardView(currentSummary);
+      createCharts(currentSummary, transactions);
+      renderActiveFilters();
+
+      loadingStatus.textContent = `Showing ${Object.keys(currentSummary.accounts).length} accounts, ${transactions.length} transactions`;
+      dataStatus.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    }
+
+    // ===== CALCULATE =====
+    function calculateSummary(transactions, coaAccounts = {}) {
+      const summary = {};
+      for (const tx of transactions) {
+        const account = tx.ACCOUNT_HEADER || "Uncategorized";
+        const type = tx.TYPE || "";
+        const bankName = tx.BANK_NAME || tx.MODE || "";
+        const incomeAmount = Number(tx.INCOME || 0);
+        const expenseAmount = Number(tx.EXPENSE || 0);
+
+        if (!summary[account]) {
+          summary[account] = {
+            debit: 0, credit: 0, count: 0,
+            lastTransaction: tx.DATE || "",
+            type: getAccountType(account, coaAccounts)
+          };
+        }
+
+        if (type === "Income") {
+          summary[account].credit += incomeAmount;
+          if (bankName && bankName !== account) {
+            if (!summary[bankName]) {
+              summary[bankName] = { debit: 0, credit: 0, count: 0, lastTransaction: tx.DATE || "", type: "Bank" };
+            }
+            summary[bankName].debit += incomeAmount;
+            summary[bankName].count += 1;
+          }
+        } else if (type === "Expense") {
+          summary[account].debit += expenseAmount;
+          if (bankName && bankName !== account) {
+            if (!summary[bankName]) {
+              summary[bankName] = { debit: 0, credit: 0, count: 0, lastTransaction: tx.DATE || "", type: "Bank" };
+            }
+            summary[bankName].credit += expenseAmount;
+            summary[bankName].count += 1;
+          }
+        } else if (type === "Transfer") {
+          summary[account].debit += expenseAmount;
+          summary[account].credit += incomeAmount;
+        } else {
+          summary[account].credit += incomeAmount;
+          summary[account].debit += expenseAmount;
+        }
+
+        summary[account].count += 1;
+        if (tx.DATE && (!summary[account].lastTransaction || tx.DATE > summary[account].lastTransaction)) {
+          summary[account].lastTransaction = tx.DATE;
+        }
+      }
+
+      let totalDebit = 0, totalCredit = 0;
+      for (const data of Object.values(summary)) {
+        totalDebit += data.debit;
+        totalCredit += data.credit;
+      }
+      for (const data of Object.values(summary)) {
+        data.balance = data.credit - data.debit;
+        data.debitPercent = totalDebit > 0 ? (data.debit / totalDebit * 100).toFixed(1) : 0;
+        data.creditPercent = totalCredit > 0 ? (data.credit / totalCredit * 100).toFixed(1) : 0;
+        data.balanceType = data.balance >= 0 ? 'positive' : 'negative';
+      }
+
+      const sortedSummary = {};
+      Object.entries(summary)
+        .sort((a, b) => Math.abs(b[1].balance) - Math.abs(a[1].balance))
+        .forEach(([k, v]) => sortedSummary[k] = v);
+
+      return {
+        accounts: sortedSummary,
+        totals: { debit: totalDebit, credit: totalCredit, net: totalCredit - totalDebit }
+      };
+    }
+
+    function getAccountType(accountName, coaAccounts) {
+      if (coaAccounts[accountName]) return coaAccounts[accountName].type || "Unknown";
+      const lower = accountName.toLowerCase();
+      if (lower.includes('bank') || lower.includes('cash') || lower.includes('axis') ||
+          lower.includes('hdfc') || lower.includes('sbi') || lower.includes('bom')) return "Bank";
+      if (lower.includes('loan') || lower.includes('payable')) return "Liability";
+      if (lower.includes('equity') || lower.includes('capital')) return "Equity";
+      if (lower.includes('income') || lower.includes('revenue') || lower.includes('salary')) return "Income";
+      return "Expense";
+    }
+
+    // ===== STATS =====
+    function updateStatsCards(summary) {
+      $('totalAccounts').textContent = Object.keys(summary.accounts).length;
+      $('totalDebit').textContent = summary.totals.debit.toFixed(2);
+      $('totalCredit').textContent = summary.totals.credit.toFixed(2);
+      const netEl = $('netBalance');
+      netEl.textContent = summary.totals.net.toFixed(2);
+      netEl.style.color = Math.abs(summary.totals.net) < 0.01 ? '#2c3e50' : (summary.totals.net >= 0 ? '#2ecc71' : '#e74c3c');
+    }
+
+    // ===== ACTIVE FILTER PILLS =====
+    function renderActiveFilters() {
+      const pills = [];
+      const push = (label, onClear) => pills.push({ label, onClear });
+
+      if (dateFilter.value !== 'all') {
+        if (dateFilter.value === 'custom') push(`Date: ${startDate.value} → ${endDate.value}`, () => { dateFilter.value = 'all'; customDateInputs.style.display = 'none'; startDate.value = ''; endDate.value = ''; });
+        else push(`Date: ${dateFilter.options[dateFilter.selectedIndex].text}`, () => { dateFilter.value = 'all'; });
+      }
+      if (typeFilter.value !== 'all') push(`Type: ${typeFilter.value}`, () => { typeFilter.value = 'all'; });
+      if (searchFilter.value.trim()) push(`Search: "${searchFilter.value}"`, () => { searchFilter.value = ''; });
+      if (hideZeroToggle.checked) push(`Hiding zero balances`, () => { hideZeroToggle.checked = false; });
+
+      if (pills.length === 0) {
+        activeFiltersBar.style.display = 'none';
+        activeFiltersBar.innerHTML = '';
+        return;
+      }
+
+      activeFiltersBar.style.display = 'block';
+      activeFiltersBar.innerHTML = pills.map((p, i) =>
+        `<span class="filter-pill">${escapeHtml(p.label)} <button data-idx="${i}">✕</button></span>`
+      ).join('');
+
+      activeFiltersBar.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.idx);
+          pills[idx].onClear();
+          saveFilterState();
+          renderDashboard(filterTransactions(allTransactions));
+        });
+      });
+    }
+
+    // ===== TABLE =====
+    function renderTableView(summary) {
+      if (Object.keys(summary.accounts).length === 0) {
+        summaryBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px;">No data found. Adjust filters or add transactions.</td></tr>`;
+        return;
+      }
+
+      // Sort
+      const accounts = Object.entries(summary.accounts).map(([name, data]) => ({ name, ...data }));
+      accounts.sort((a, b) => {
+        let av = a[currentSortKey], bv = b[currentSortKey];
+        if (currentSortKey === 'account') { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+        if (typeof av === 'string') av = av.toLowerCase();
+        if (typeof bv === 'string') bv = bv.toLowerCase();
+        if (av < bv) return currentSortDir === 'asc' ? -1 : 1;
+        if (av > bv) return currentSortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+
+      let rows = "";
+      for (const data of accounts) {
+        const balance = data.balance;
+        const balanceColor = Math.abs(balance) < 0.01 ? '#333' : (balance >= 0 ? '#27ae60' : '#e74c3c');
+        const typeBadge = `<span class="account-type-badge type-${data.type || 'Unknown'}">${data.type || 'Unknown'}</span>`;
+
+        rows += `
+          <tr>
+            <td>
+              <a href="#" class="accountLink" data-account="${escapeHtml(data.name)}">${escapeHtml(data.name)}</a>
+              ${typeBadge}
+            </td>
+            <td style="text-align:right; color:#e74c3c; font-weight:bold;">${data.debit.toFixed(2)}</td>
+            <td style="text-align:right; color:#2ecc71; font-weight:bold;">${data.credit.toFixed(2)}</td>
+            <td style="text-align:right; color:${balanceColor}; font-weight:bold;">${balance.toFixed(2)}</td>
+            <td style="text-align:center;">${data.count}</td>
+            <td style="text-align:right;">${data.debitPercent}%</td>
+            <td style="text-align:right;">${data.creditPercent}%</td>
+            <td style="text-align:right; font-size:12px; color:#999;">${formatDate(data.lastTransaction)}</td>
+          </tr>
+        `;
+      }
+
+      rows += `
+        <tr style="background:#f0f0f0; font-weight:bold; border-top:3px solid #333;">
+          <td>TOTALS</td>
+          <td style="text-align:right; color:#e74c3c;">${summary.totals.debit.toFixed(2)}</td>
+          <td style="text-align:right; color:#2ecc71;">${summary.totals.credit.toFixed(2)}</td>
+          <td style="text-align:right; color:${Math.abs(summary.totals.net) < 0.01 ? '#333' : (summary.totals.net >= 0 ? '#27ae60' : '#e74c3c')};">${summary.totals.net.toFixed(2)}</td>
+          <td style="text-align:center;">-</td>
+          <td style="text-align:right;">100%</td>
+          <td style="text-align:right;">100%</td>
+          <td></td>
+        </tr>
+      `;
+
+      summaryBody.innerHTML = rows;
+
+      document.querySelectorAll(".accountLink").forEach(link => {
+        link.addEventListener("click", e => {
+          e.preventDefault();
+          const account = e.target.getAttribute("data-account");
+          if (!account) return;
+          openDetailModal(account);
+        });
+      });
+    }
+
+    // Sort headers
+    document.querySelectorAll('th[data-sortable]').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (currentSortKey === key) currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        else { currentSortKey = key; currentSortDir = 'asc'; }
+        document.querySelectorAll('th[data-sortable]').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+        th.classList.add(currentSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+        if (currentSummary) renderTableView(currentSummary);
+      });
+    });
+
+    // ===== CARD VIEW =====
+    function renderCardView(summary) {
+      const cardContainer = $("cardView");
+      if (Object.keys(summary.accounts).length === 0) {
+        cardContainer.innerHTML = `<div class="no-data" style="width:100%;">No accounts match the current filters.</div>`;
+        return;
+      }
+
+      let cards = "";
+      for (const [account, data] of Object.entries(summary.accounts)) {
+        const balance = data.balance;
+        const balanceType = Math.abs(balance) < 0.01 ? 'neutral' : (balance >= 0 ? 'positive' : 'negative');
+        const balanceColor = Math.abs(balance) < 0.01 ? '#333' : (balance >= 0 ? '#27ae60' : '#e74c3c');
+        const borderColor = Math.abs(balance) < 0.01 ? '#95a5a6' : (balance >= 0 ? '#2ecc71' : '#e74c3c');
+        const typeBadge = `<span class="account-type-badge type-${data.type || 'Unknown'}">${data.type || 'Unknown'}</span>`;
+
+        cards += `
+          <div class="account-card ${balanceType}" style="border-top: 4px solid ${borderColor};">
+            <div class="card-header">
+              <h3>
+                <a href="#" class="accountLink" data-account="${escapeHtml(account)}" style="color:#2c3e50; text-decoration:none;">${escapeHtml(account)}</a>
+                ${typeBadge}
+              </h3>
+              <span class="transaction-count">${data.count} txns</span>
+            </div>
+            <div class="card-body">
+              <div class="amount-row">
+                <div class="amount debit">
+                  <div class="amount-label">Debit</div>
+                  <div class="amount-value">${data.debit.toFixed(2)}</div>
+                  <div class="amount-percent">${data.debitPercent}%</div>
+                </div>
+                <div class="amount credit">
+                  <div class="amount-label">Credit</div>
+                  <div class="amount-value">${data.credit.toFixed(2)}</div>
+                  <div class="amount-percent">${data.creditPercent}%</div>
+                </div>
+              </div>
+              <div class="balance-row">
+                <div class="balance-label">Balance</div>
+                <div class="balance-value" style="color:${balanceColor}">${balance.toFixed(2)}</div>
+              </div>
+            </div>
+            <div class="card-footer">
+              <button class="detail-btn" data-account="${escapeHtml(account)}">
+                <i class="material-icons">arrow_forward</i> View Details
+              </button>
+            </div>
+          </div>
+        `;
+      }
+      cardContainer.innerHTML = cards;
+
+      document.querySelectorAll("#cardView .detail-btn, #cardView .accountLink").forEach(el => {
+        el.addEventListener("click", e => {
+          e.preventDefault();
+          const account = el.getAttribute("data-account") || el.closest(".detail-btn")?.getAttribute("data-account");
+          if (!account) return;
+          openDetailModal(account);
+        });
+      });
+    }
+
+    // ===== CHARTS =====
+    function createCharts(summary, transactions) {
+      if (balanceChart) balanceChart.destroy();
+      if (compositionChart) compositionChart.destroy();
+      if (trendChart) trendChart.destroy();
+
+      const accounts = Object.keys(summary.accounts);
+      const topAccounts = accounts.slice(0, 20);
+      const balances = topAccounts.map(a => summary.accounts[a].balance);
+
+      const positiveColor = '#2ecc71', negativeColor = '#e74c3c', neutralColor = '#95a5a6';
+      const debitColor = '#e74c3c', creditColor = '#2ecc71';
+
+      const balanceCtx = $('balanceChart').getContext('2d');
+      balanceChart = new Chart(balanceCtx, {
+        type: 'bar',
+        data: {
+          labels: topAccounts.map(a => a.length > 20 ? a.substring(0, 18) + '...' : a),
+          datasets: [{
+            label: 'Account Balance',
+            data: balances,
+            backgroundColor: balances.map(b => Math.abs(b) < 0.01 ? neutralColor : (b >= 0 ? positiveColor : negativeColor)),
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => `Balance: ${ctx.raw.toFixed(2)}` } }
+          },
+          scales: {
+            y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { callback: v => v.toFixed(0) } },
+            x: { ticks: { maxRotation: 45, font: { size: 9 } } }
+          }
+        }
+      });
+
+      const compositionCtx = $('compositionChart').getContext('2d');
+      compositionChart = new Chart(compositionCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Total Debit', 'Total Credit'],
+          datasets: [{
+            data: [summary.totals.debit, summary.totals.credit],
+            backgroundColor: [debitColor, creditColor],
+            borderWidth: 2, borderColor: '#fff'
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { padding: 15, usePointStyle: true } },
+            tooltip: {
+              callbacks: {
+                label: ctx => `${ctx.label}: ${ctx.raw.toFixed(2)} (${((ctx.raw / (summary.totals.debit + summary.totals.credit || 1)) * 100).toFixed(1)}%)`
+              }
+            }
+          }
+        }
+      });
+
+      if (transactions.length > 0) {
+        const monthlyData = {};
+        transactions.forEach(tx => {
+          if (!tx.DATE) return;
+          let d = typeof tx.DATE === 'string' ? new Date(tx.DATE) : (tx.DATE?.toDate ? tx.DATE.toDate() : new Date(tx.DATE));
+          if (isNaN(d.getTime())) return;
+          const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+          if (!monthlyData[key]) monthlyData[key] = { debit: 0, credit: 0 };
+          const type = tx.TYPE || "";
+          if (type === "Income") monthlyData[key].credit += Number(tx.INCOME || 0);
+          else if (type === "Expense") monthlyData[key].debit += Number(tx.EXPENSE || 0);
+          else {
+            monthlyData[key].debit += Number(tx.EXPENSE || 0);
+            monthlyData[key].credit += Number(tx.INCOME || 0);
+          }
+        });
+
+        const months = Object.keys(monthlyData).sort();
+        const debits = months.map(m => monthlyData[m].debit);
+        const credits = months.map(m => monthlyData[m].credit);
+
+        const trendCtx = $('trendChart').getContext('2d');
+        trendChart = new Chart(trendCtx, {
+          type: 'line',
+          data: {
+            labels: months,
+            datasets: [
+              { label: 'Monthly Debits', data: debits, borderColor: debitColor, backgroundColor: 'rgba(231, 76, 60, 0.1)', tension: 0.3, fill: true },
+              { label: 'Monthly Credits', data: credits, borderColor: creditColor, backgroundColor: 'rgba(46, 204, 113, 0.1)', tension: 0.3, fill: true }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { padding: 15, usePointStyle: true } } },
+            scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } } }
+          }
+        });
+      }
+    }
+
+    // ===== UTIL =====
+    function escapeHtml(text) {
+      if (text == null) return "";
+      return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return "-";
+      try {
+        let d = typeof dateStr === 'string' ? new Date(dateStr) : (dateStr?.toDate ? dateStr.toDate() : new Date(dateStr));
+        if (isNaN(d.getTime())) return "-";
+        return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      } catch { return "-"; }
+    }
+
+    function showSkeleton() {
+      summaryBody.innerHTML = Array(6).fill(0).map(() => `
+        <tr>
+          ${Array(8).fill(0).map(() => `<td><div class="skeleton-row"></div></td>`).join('')}
+        </tr>
+      `).join('');
+    }
+  </script>
 </body>
 </html>
