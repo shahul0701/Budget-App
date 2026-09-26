@@ -69,10 +69,28 @@
             box-shadow: var(--shadow); position: sticky; top: 0; z-index: 1000;
             flex-wrap: wrap; gap: 10px; border-bottom: 1px solid var(--border-color);
         }
-        .header-left a {
+        .header-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .header-left a.brand {
             text-decoration: none; color: var(--accent-primary);
             font-weight: 700; font-size: 20px; display: flex; align-items: center; gap: 10px;
         }
+        .nav-btn {
+            background: var(--bg-primary);
+            border: 1.5px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px; border-radius: 8px;
+            cursor: pointer; font-weight: 600; font-size: 13px;
+            display: inline-flex; align-items: center; gap: 6px;
+            transition: var(--transition); text-decoration: none;
+        }
+        .nav-btn:hover {
+            background: var(--accent-primary); color: white;
+            border-color: var(--accent-primary); transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(67, 97, 238, 0.3);
+        }
+        .nav-btn.home-btn { background: linear-gradient(135deg, #2ec4b6, #1a9a8d); color: white; border-color: transparent; }
+        .nav-btn.home-btn:hover { background: linear-gradient(135deg, #1a9a8d, #147a6f); color: white; }
+
         .header-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         #userInitials {
             background: var(--accent-primary); color: white; border-radius: 50%;
@@ -101,6 +119,23 @@
             border-radius: 50%; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         [data-theme="dark"] .theme-toggle::before { transform: translateX(32px); }
+
+        /* Preset filter banner */
+        .preset-filter-banner {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white; padding: 12px 22px; border-radius: 12px;
+            margin-bottom: 16px; display: flex; justify-content: space-between;
+            align-items: center; font-weight: 600; gap: 12px;
+            box-shadow: 0 6px 20px rgba(67,97,238,0.35);
+            animation: slideDown 0.3s ease; flex-wrap: wrap;
+        }
+        .preset-filter-banner button {
+            background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35);
+            color: white; padding: 8px 16px; border-radius: 8px;
+            cursor: pointer; font-weight: 600; font-size: 13px;
+            transition: var(--transition);
+        }
+        .preset-filter-banner button:hover { background: rgba(255,255,255,0.35); transform: translateY(-1px); }
 
         .container {
             max-width: 1440px; margin: 20px auto; background: var(--card-bg);
@@ -540,7 +575,7 @@
             .pagination-container { flex-direction: column; align-items: stretch; }
             .pagination-controls { justify-content: center; }
             .header { flex-direction: column; align-items: stretch; text-align: center; }
-            .header-right { justify-content: center; }
+            .header-left, .header-right { justify-content: center; }
             .reconciliation-stats { grid-template-columns: repeat(2, 1fr); }
             .batch-actions-bar { flex-direction: column; align-items: stretch; }
             .batch-actions-buttons { justify-content: center; }
@@ -560,7 +595,13 @@
 <!-- Header -->
 <div class="header">
     <div class="header-left">
-        <a href="#"><i class="fas fa-arrow-trend-up"></i> Expense Tracker Pro</a>
+        <a href="home.html" class="brand"><i class="fas fa-arrow-trend-up"></i> Expense Tracker Pro</a>
+        <button id="backBtn" class="nav-btn" title="Go back">
+            <i class="fas fa-arrow-left"></i> Back
+        </button>
+        <a href="home.html" class="nav-btn home-btn" title="Go to Home">
+            <i class="fas fa-home"></i> Home
+        </a>
     </div>
     <div class="header-right">
         <div class="theme-toggle" id="themeToggle">
@@ -574,7 +615,7 @@
 </div>
 
 <!-- Main Container -->
-<div class="container">
+<div class="container" id="mainContainer">
     <h2><i class="fas fa-wallet"></i> Expense Tracker Pro</h2>
 
     <div class="stats-grid" id="statsGrid">
@@ -634,7 +675,7 @@
                 </select>
             </label>
             <label>Search:
-                <input type="text" id="descFilter" placeholder="Search description…"/>
+                <input type="text" id="descFilter" placeholder="Search description, account…"/>
             </label>
             <label>Mode:
                 <select id="modeFilter"><option value="all">All</option></select>
@@ -1252,11 +1293,21 @@
     const db = getFirestore(app);
     const auth = getAuth(app);
 
+    // ===== URL PRESET PARAMETERS =====
+    const urlParams = new URLSearchParams(window.location.search);
+    const presetAccount = urlParams.get('account');
+    const presetBank    = urlParams.get('bank');
+    const presetMode    = urlParams.get('mode');
+    const presetStart   = urlParams.get('start');
+    const presetEnd     = urlParams.get('end');
+    window.__presetAccount = presetAccount ? presetAccount.trim() : null;
+
     // ===== DOM REFS =====
     const $ = (id) => document.getElementById(id);
     const usernameElem = $("username");
     const initialsElem = $("userInitials");
     const logoutBtn = $("logoutBtn");
+    const backBtn = $("backBtn");
     const themeToggle = $("themeToggle");
     const addTransactionBtn = $("addTransactionBtn");
     const csvUploadBtn = $("csvUploadBtn");
@@ -1447,6 +1498,23 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
     }
 
+    // ===== NAVIGATION =====
+    backBtn.addEventListener('click', () => {
+        // If in an iframe, try to tell parent to close. Otherwise go home.
+        try {
+            if (window.parent && window.parent !== window) {
+                // Post message to parent (trial balance iframe handler)
+                window.parent.postMessage({ type: 'closeDetail' }, '*');
+            } else if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.location.href = 'home.html';
+            }
+        } catch (e) {
+            window.location.href = 'home.html';
+        }
+    });
+
     // ===== HELPERS =====
     function normalizeTags(tags) {
         if (!tags) return [];
@@ -1463,7 +1531,6 @@
         return text.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
     }
 
-    // ===== LOADING =====
     function showLoading(message = "Processing, please wait...") {
         loadingMessage.textContent = message;
         loadingOverlay.style.display = "flex";
@@ -1506,20 +1573,17 @@
             }
         } else {
             if (txUnsubscribe) { txUnsubscribe(); txUnsubscribe = null; }
-            console.warn("No user session. Redirecting to login.");
-            // Avoid alert loop when redirecting right away
-            try { await signOut(auth); } catch (e) {}
-            window.location.href = "index.html";
+            window.location.href = "login.html";
         }
     });
 
     logoutBtn.addEventListener("click", async () => {
         if (txUnsubscribe) { txUnsubscribe(); txUnsubscribe = null; }
         await signOut(auth);
-        window.location.href = "index.html";
+        window.location.href = "login.html";
     });
 
-    // ===== INITIALIZE ALL DATA (called once after login) =====
+    // ===== INITIALIZE =====
     async function initializeAllData() {
         showLoading("Loading your data...");
         try {
@@ -1531,6 +1595,7 @@
             await loadCOAAccounts();
             subscribeTransactions();
             setupHeaderSorting();
+            applyUrlPresetFilters(); // ← Apply URL filters
             console.log("✅ All data initialized for user:", currentUser.uid);
         } catch (err) {
             console.error("Init error:", err);
@@ -1540,12 +1605,79 @@
         }
     }
 
+    // ===== APPLY URL PRESET FILTERS =====
+    function applyUrlPresetFilters() {
+        let anyApplied = false;
+
+        if (presetBank) {
+            // Wait a tick for options to be populated
+            const opt = Array.from(bankFilter.options).find(o => o.value === presetBank);
+            if (opt) { bankFilter.value = presetBank; anyApplied = true; }
+        }
+        if (presetMode) {
+            const opt = Array.from(modeFilter.options).find(o => o.value === presetMode);
+            if (opt) { modeFilter.value = presetMode; anyApplied = true; }
+        }
+        if (presetStart || presetEnd) {
+            dateFilter.value = 'custom';
+            customDateRange.style.display = 'flex';
+            if (presetStart) startDateInput.value = presetStart;
+            if (presetEnd)   endDateInput.value = presetEnd;
+            anyApplied = true;
+        }
+        if (window.__presetAccount) {
+            anyApplied = true;
+        }
+
+        if (anyApplied) {
+            applyFilters();
+            showPresetFilterBanner();
+        }
+    }
+
+    function showPresetFilterBanner() {
+        // Remove any existing banner
+        const existing = document.querySelector('.preset-filter-banner');
+        if (existing) existing.remove();
+
+        const parts = [];
+        if (window.__presetAccount) parts.push(`Account: <b>${escapeHtml(window.__presetAccount)}</b>`);
+        if (presetBank) parts.push(`Bank: <b>${escapeHtml(presetBank)}</b>`);
+        if (presetMode) parts.push(`Mode: <b>${escapeHtml(presetMode)}</b>`);
+        if (presetStart) parts.push(`From: <b>${escapeHtml(presetStart)}</b>`);
+        if (presetEnd)   parts.push(`To: <b>${escapeHtml(presetEnd)}</b>`);
+
+        if (!parts.length) return;
+
+        const banner = document.createElement('div');
+        banner.className = 'preset-filter-banner';
+        banner.innerHTML = `
+            <span><i class="fas fa-filter"></i> Filtered by → ${parts.join(' • ')}</span>
+            <button id="clearPresetFilterBtn">✕ Clear filter</button>
+        `;
+
+        const container = document.getElementById('mainContainer');
+        if (container) container.insertBefore(banner, container.firstChild);
+
+        document.getElementById('clearPresetFilterBtn').addEventListener('click', () => {
+            window.__presetAccount = null;
+            descFilter.value = '';
+            bankFilter.value = 'all';
+            modeFilter.value = 'all';
+            dateFilter.value = 'all';
+            startDateInput.value = '';
+            endDateInput.value = '';
+            customDateRange.style.display = 'none';
+            banner.remove();
+            applyFilters();
+        });
+    }
+
     // ===== REAL-TIME TRANSACTIONS =====
     function subscribeTransactions() {
         if (!currentUser) return;
         if (txUnsubscribe) txUnsubscribe();
 
-        // No orderBy → doesn't exclude docs missing fields, no index needed.
         const q = query(collection(db, "users", currentUser.uid, "transactions"));
 
         txUnsubscribe = onSnapshot(q, (snap) => {
@@ -1556,10 +1688,8 @@
                 applyFilters();
                 updateBankBalances();
                 updateStats();
-                console.log(`📊 Loaded ${allTransactions.length} transactions`);
             } catch (err) {
                 console.error("Error processing snapshot:", err);
-                Swal.fire({ icon: 'error', title: 'Data Error', text: err.message });
             }
         }, (err) => {
             console.error("Snapshot listener error:", err);
@@ -1885,11 +2015,10 @@
                 batch.update(txRef, { RECONCILED: reconciled, reconciledAt: reconciled ? serverTimestamp() : null });
             });
             await batch.commit();
-            Swal.fire({ icon: 'success', title: 'Success', text: `Updated ${selectedTransactionIds.size} transaction(s)`, timer: 1500, showConfirmButton: false });
+            Swal.fire({ icon: 'success', title: 'Success', timer: 1500, showConfirmButton: false });
             clearSelection();
-        } catch (error) {
-            Swal.fire({ icon: 'error', title: 'Error', text: error.message });
-        } finally { hideLoading(); }
+        } catch (error) { Swal.fire({ icon: 'error', title: 'Error', text: error.message }); }
+        finally { hideLoading(); }
     }
 
     applyBulkModeBtn.addEventListener('click', async () => {
@@ -2045,6 +2174,9 @@
         descFilter.value = ''; modeFilter.value = 'all'; bankFilter.value = 'all';
         reconciledFilter.value = 'all'; startDateInput.value = ''; endDateInput.value = '';
         customDateRange.style.display = 'none';
+        window.__presetAccount = null;
+        const banner = document.querySelector('.preset-filter-banner');
+        if (banner) banner.remove();
         applyFilters();
     });
 
@@ -2056,6 +2188,7 @@
         if (modeFilter.value !== 'all') activeFilters.push(`Mode: ${modeFilter.value}`);
         if (bankFilter.value !== 'all') activeFilters.push(`Bank: ${bankFilter.value}`);
         if (reconciledFilter.value !== 'all') activeFilters.push(`Status: ${reconciledFilter.value}`);
+        if (window.__presetAccount) activeFilters.push(`Account: ${window.__presetAccount}`);
         if (activeFilters.length > 0) {
             filterStats.textContent = `Filters: ${activeFilters.join(' • ')} • Found ${filteredTransactions.length} transactions`;
             searchStats.style.display = 'flex';
@@ -2853,12 +2986,29 @@
         }
         if (incomeExpenseFilter.value === "income") filteredTransactions = filteredTransactions.filter(t => (t.INCOME || 0) > 0);
         else if (incomeExpenseFilter.value === "expense") filteredTransactions = filteredTransactions.filter(t => (t.EXPENSE || 0) > 0);
+
+        // ✅ Search matches description, account header, notes, bank
         if (descFilter.value.trim()) {
             const s = descFilter.value.trim().toLowerCase();
-            filteredTransactions = filteredTransactions.filter(t => (t.DESCRIPTION || "").toLowerCase().includes(s));
+            filteredTransactions = filteredTransactions.filter(t =>
+                (t.DESCRIPTION || '').toLowerCase().includes(s) ||
+                (t.ACCOUNT_HEADER || '').toLowerCase().includes(s) ||
+                (t.NOTES || '').toLowerCase().includes(s) ||
+                (t.BANK_NAME || '').toLowerCase().includes(s)
+            );
         }
+
         if (modeFilter.value !== "all") filteredTransactions = filteredTransactions.filter(t => t.MODE === modeFilter.value);
         if (bankFilter.value !== "all") filteredTransactions = filteredTransactions.filter(t => t.BANK_NAME === bankFilter.value);
+
+        // ✅ Apply preset account filter (from URL)
+        if (window.__presetAccount) {
+            const acc = window.__presetAccount.toLowerCase();
+            filteredTransactions = filteredTransactions.filter(t =>
+                (t.ACCOUNT_HEADER || '').toLowerCase() === acc
+            );
+        }
+
         if (reconciledFilter.value === "reconciled") filteredTransactions = filteredTransactions.filter(t => t.RECONCILED === true);
         else if (reconciledFilter.value === "unreconciled") filteredTransactions = filteredTransactions.filter(t => t.RECONCILED !== true);
         sortTransactions();
@@ -3332,7 +3482,15 @@
         finally { hideLoading(); }
     });
 
-    console.log("✅ Expense Tracker Pro script loaded. Waiting for auth...");
+    // ===== MESSAGE HANDLER (for parent iframe) =====
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'closeDetail') {
+            // Parent asked to close - navigate away or hide
+            // Nothing to do here in the iframe itself
+        }
+    });
+
+    console.log("✅ Expense Tracker Pro loaded. URL params:", { presetAccount, presetBank, presetMode, presetStart, presetEnd });
 </script>
 </body>
 </html>
