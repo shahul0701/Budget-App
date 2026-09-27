@@ -2437,7 +2437,7 @@
       </div>
 
       <!-- Budget Summary Section -->
-      <div class="budget-summary" id="budgetSummary">
+      <div class="budget-summary" id="budgetSummary" style="display: none;">
         <!-- Will be populated dynamically -->
       </div>
 
@@ -2491,7 +2491,7 @@
       </div>
       
       <!-- Quick actions chips -->
-      <div class="d-flex flex-wrap gap-2 mb-3">
+      <div class="d-flex flex-wrap gap-2 mb-3 px-3">
         <span class="action-chip" onclick="document.getElementById('newTxBtn').click()">
           <i class="fa fa-plus"></i> New
         </span>
@@ -2513,12 +2513,12 @@
       </div>
       
       <!-- Quick stats -->
-      <div class="quick-stats" id="quickStats">
+      <div class="quick-stats px-3" id="quickStats">
         <!-- Will be populated dynamically -->
       </div>
       
       <!-- Chart Controls -->
-      <div class="chart-controls">
+      <div class="chart-controls px-3">
         <span style="font-weight:600; color:var(--purple-1);"><i class="fa fa-chart-bar me-1"></i> Chart:</span>
         <button class="chart-type-btn active" data-type="bar"><i class="fa fa-chart-bar me-1"></i> Bar</button>
         <button class="chart-type-btn" data-type="line"><i class="fa fa-chart-line me-1"></i> Line</button>
@@ -2532,7 +2532,7 @@
       </div>
       
       <!-- Chart container -->
-      <div class="chart-container" id="chartContainer">
+      <div class="chart-container px-3" id="chartContainer">
         <canvas id="transactionsChart"></canvas>
       </div>
       
@@ -3823,7 +3823,10 @@
       showToast("Please check your internet connection.", "Offline", "warning");
     });
 
-    // Budget Warning Functions
+    // ============================================
+    // BUDGET WARNING FUNCTIONS - FIXED
+    // ============================================
+    
     function checkBudgetLimits(transaction) {
       if (!transaction || transaction.TYPE !== 'Expense') return [];
       
@@ -3831,32 +3834,70 @@
       const transactionDate = new Date(transaction.DATE);
       const month = transactionDate.toISOString().slice(0, 7);
       
+      // Get all expense budgets for this month
       const categoryBudgets = allBudgets.filter(b => 
         b.account === transaction.ACCOUNT_HEADER && 
         b.period === month &&
         b.type === 'Expense'
       );
       
-      categoryBudgets.forEach(budget => {
-        const limit = budgetLimits[budget.account] || budget.amount * 1.2;
-        const currentSpent = calculateActualForBudget(budget);
-        const newTotal = currentSpent + (parseFloat(transaction.EXPENSE) || 0);
-        
-        if (newTotal > limit) {
-          warnings.push({
-            category: budget.account,
-            budget: budget.amount,
-            limit: limit,
-            current: currentSpent,
-            newAmount: parseFloat(transaction.EXPENSE),
-            newTotal: newTotal,
-            overshoot: newTotal - limit,
-            percentage: (newTotal / limit * 100).toFixed(1)
-          });
+      // If no specific budget exists for this category, check if there's a default limit
+      if (categoryBudgets.length === 0) {
+        // Check if there's a budget limit set for this category
+        const limit = budgetLimits[transaction.ACCOUNT_HEADER];
+        if (limit) {
+          const currentSpent = calculateCurrentSpending(transaction.ACCOUNT_HEADER, month);
+          const newTotal = currentSpent + (parseFloat(transaction.EXPENSE) || 0);
+          
+          if (newTotal > limit) {
+            warnings.push({
+              category: transaction.ACCOUNT_HEADER,
+              budget: limit,
+              limit: limit,
+              current: currentSpent,
+              newAmount: parseFloat(transaction.EXPENSE),
+              newTotal: newTotal,
+              overshoot: newTotal - limit,
+              percentage: (newTotal / limit * 100).toFixed(1)
+            });
+          }
         }
-      });
+      } else {
+        // Check against each budget
+        categoryBudgets.forEach(budget => {
+          const limit = budgetLimits[budget.account] || budget.amount;
+          const currentSpent = calculateActualForBudget(budget);
+          const newTotal = currentSpent + (parseFloat(transaction.EXPENSE) || 0);
+          
+          if (newTotal > limit) {
+            warnings.push({
+              category: budget.account,
+              budget: budget.amount,
+              limit: limit,
+              current: currentSpent,
+              newAmount: parseFloat(transaction.EXPENSE),
+              newTotal: newTotal,
+              overshoot: newTotal - limit,
+              percentage: (newTotal / limit * 100).toFixed(1)
+            });
+          }
+        });
+      }
       
       return warnings;
+    }
+    
+    function calculateCurrentSpending(category, month) {
+      return allTransactions
+        .filter(tx => {
+          if (!tx.DATE) return false;
+          const txDate = new Date(tx.DATE);
+          const txMonth = txDate.toISOString().slice(0, 7);
+          return txMonth === month && 
+                 tx.ACCOUNT_HEADER === category && 
+                 tx.TYPE === 'Expense';
+        })
+        .reduce((sum, tx) => sum + (parseFloat(tx.EXPENSE) || 0), 0);
     }
 
     function showBudgetWarning(warnings) {
@@ -3888,6 +3929,7 @@
       budgetWarnings = [];
     }
 
+    // Fixed budget warning cancel button
     budgetWarningCancel.addEventListener('click', () => {
       budgetWarningModal.style.display = 'none';
       pendingTransaction = null;
@@ -3896,6 +3938,7 @@
       loadingModal.hide();
     });
 
+    // Fixed budget warning proceed button
     budgetWarningProceed.addEventListener('click', async () => {
       if (pendingTransaction) {
         budgetWarningModal.style.display = 'none';
@@ -3904,12 +3947,17 @@
           loadingMessage.textContent = "Saving transaction...";
           loadingModal.show();
           
+          // Execute the save callback
           await pendingTransaction.callback(pendingTransaction.data);
           
           loadingModal.hide();
           transactionModal.hide();
           resetSaveButton();
           showToast("Transaction saved successfully!", "Success", "success");
+          
+          // Reload data
+          await loadTransactionsWithRetry();
+          updateBudgetSummary();
           
         } catch (err) {
           loadingModal.hide();
@@ -3923,7 +3971,10 @@
       }
     });
 
-    // Auth handling with retry logic
+    // ============================================
+    // AUTH HANDLING
+    // ============================================
+
     onAuthStateChanged(auth, async user => {
       if (user) {
         currentUser = user;
@@ -3956,11 +4007,7 @@
           
           updateBudgetSummary();
           setupChartControls();
-          
-          // Setup tag preview
           setupTagPreview();
-          
-          // Setup view detail buttons
           setupViewDetailButtons();
           
           hideLoading();
@@ -4303,7 +4350,7 @@
       let html = '';
       expenseBudgets.slice(0, 6).forEach(budget => {
         const actual = calculateActualForBudget(budget);
-        const limit = budgetLimits[budget.account] || budget.amount * 1.2;
+        const limit = budgetLimits[budget.account] || budget.amount;
         const percentage = limit > 0 ? (actual / limit * 100).toFixed(1) : 0;
         const progressClass = percentage > 90 ? 'high' : percentage > 70 ? 'medium' : 'low';
         
@@ -4332,7 +4379,7 @@
             <div class="budget-limit-amount">${formatCurrency(actual)}</div>
             
             <div class="budget-limit-progress">
-              <div class="budget-limit-progress-bar ${progressClass}" style="width: ${percentage}%">
+              <div class="budget-limit-progress-bar ${progressClass}" style="width: ${Math.min(percentage, 100)}%">
                 ${percentage}%
               </div>
             </div>
@@ -4376,7 +4423,7 @@
       });
       
       const percentage = totalBudgeted > 0 ? (totalActual / totalBudgeted * 100).toFixed(1) : 0;
-      budgetProgressBar.style.width = `${percentage}%`;
+      budgetProgressBar.style.width = `${Math.min(percentage, 100)}%`;
       budgetProgressBar.textContent = `${percentage}%`;
       budgetProgressText.textContent = `${formatCurrency(totalActual)} of ${formatCurrency(totalBudgeted)}`;
       
@@ -4399,7 +4446,7 @@
       const warnings = [];
       expenseBudgets.forEach(budget => {
         const actual = calculateActualForBudget(budget);
-        const limit = budgetLimits[budget.account] || budget.amount * 1.2;
+        const limit = budgetLimits[budget.account] || budget.amount;
         const percentage = limit > 0 ? (actual / limit * 100).toFixed(1) : 0;
         
         if (actual > limit) {
@@ -4452,6 +4499,7 @@
     budgetManagerBtn.addEventListener("click", () => {
       renderBudgetTable();
       renderBudgetLimitCards();
+      populateBudgetCategoryDropdown();
       budgetManagerModal.show();
     });
 
@@ -4618,10 +4666,15 @@
       }
     });
 
+    // ============================================
+    // SAVE TRANSACTION WITH BUDGET WARNING - FIXED
+    // ============================================
+    
     async function saveTransactionWithWarning(transactionData) {
       const warnings = checkBudgetLimits(transactionData);
       
       if (warnings.length > 0) {
+        // Show warning modal and wait for user decision
         return new Promise((resolve) => {
           pendingTransaction = {
             data: transactionData,
@@ -4634,6 +4687,7 @@
           showBudgetWarning(warnings);
         });
       } else {
+        // No warnings, save directly
         await executeSaveTransaction(transactionData, true);
         return true;
       }
@@ -4717,14 +4771,21 @@
         
         await saveTransactionWithWarning(txData);
         
-        loadingModal.hide();
-        transactionModal.hide();
+        // Note: loadingModal.hide() and transactionModal.hide() are called 
+        // in the proceed button handler when there are warnings
+        // or directly if no warnings
+        
+        if (!budgetWarnings.length || !pendingTransaction) {
+          // No warnings were shown, close modals
+          loadingModal.hide();
+          transactionModal.hide();
+        }
+        
         resetSaveButton();
       } catch (err) {
         loadingModal.hide();
         console.error("saveTransaction", err);
         showToast("Failed to save transaction. Please try again.", "Error", "error");
-      } finally {
         resetSaveButton();
       }
     });
@@ -6083,6 +6144,7 @@
         
         let successCount = 0;
         let errorCount = 0;
+        let budgetWarningCount = 0;
         
         for (const text of transactions) {
           try {
@@ -6150,6 +6212,7 @@
               
               const warnings = checkBudgetLimits(txData);
               if (warnings.length > 0) {
+                budgetWarningCount++;
                 console.log("Budget warnings for quick add:", warnings);
               }
               
@@ -6165,7 +6228,11 @@
         loadingModal.hide();
         
         if (errorCount === 0) {
-          showToast(`Added ${successCount} transaction${successCount !== 1 ? 's' : ''} successfully`, "Success", "success");
+          let message = `Added ${successCount} transaction${successCount !== 1 ? 's' : ''} successfully`;
+          if (budgetWarningCount > 0) {
+            message += `. ${budgetWarningCount} transaction(s) exceeded budget limits.`;
+          }
+          showToast(message, "Success", budgetWarningCount > 0 ? "warning" : "success");
         } else {
           showToast(`Added ${successCount} transaction${successCount !== 1 ? 's' : ''}, ${errorCount} failed`, "Partial Success", "warning");
         }
@@ -7726,7 +7793,7 @@
       
       expenseBudgets.forEach(budget => {
         const spent = calculateActualForBudget(budget);
-        const limit = budgetLimits[budget.account] || budget.amount * 1.2;
+        const limit = budgetLimits[budget.account] || budget.amount;
         const percentage = limit > 0 ? (spent / limit * 100).toFixed(1) : 0;
         
         totalBudgeted += budget.amount;
