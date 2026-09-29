@@ -22,6 +22,7 @@
       --danger: #dc2626;
       --danger-light: #fef2f2;
       --warning: #d97706;
+      --warning-light: #fffbeb;
       --text: #0f172a;
       --text-muted: #64748b;
       --border: #e2e8f0;
@@ -187,6 +188,7 @@
     .kpi-card.income::before { background: linear-gradient(90deg, #10b981, #34d399); }
     .kpi-card.expense::before { background: linear-gradient(90deg, #ef4444, #f87171); }
     .kpi-card.profit::before { background: linear-gradient(90deg, var(--brand), #7c3aed); }
+    .kpi-card.opening::before { background: linear-gradient(90deg, #0891b2, #06b6d4); }
     .kpi-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
     .kpi-icon {
       width: 42px; height: 42px; border-radius: 12px;
@@ -196,6 +198,7 @@
     .kpi-card.income .kpi-icon { background: var(--success-light); color: var(--success); }
     .kpi-card.expense .kpi-icon { background: var(--danger-light); color: var(--danger); }
     .kpi-card.profit .kpi-icon { background: var(--brand-light); color: var(--brand); }
+    .kpi-card.opening .kpi-icon { background: #ecfeff; color: #0891b2; }
     .kpi-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px; }
     .kpi-value { font-size: 1.75rem; font-weight: 800; color: var(--text); letter-spacing: -0.03em; line-height: 1.2; }
     .kpi-trend { font-size: 0.7rem; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -248,6 +251,7 @@
     .pl-table .amount { font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace; text-align: right; font-size: 0.8rem; }
     .income-amount { color: var(--success); }
     .expense-amount { color: var(--danger); }
+    .opening-amount { color: #0891b2; }
     .type-badge {
       display: inline-block;
       font-size: 0.6rem;
@@ -260,7 +264,12 @@
     }
     .type-income { background: var(--success-light); color: var(--success); }
     .type-expense { background: var(--danger-light); color: var(--danger); }
+    .type-opening { background: #ecfeff; color: #0891b2; }
+    .type-equity { background: #f3e8ff; color: #9333ea; }
+    .type-other { background: #f1f5f9; color: #475569; }
     .total-row td { background: var(--brand-light); font-weight: 800; color: var(--text); border-top: 2px solid var(--brand); padding: 14px 16px; font-size: 0.85rem; }
+    .subtotal-row td { background: #f0fdf4; font-weight: 700; color: var(--text); border-top: 1px solid #86efac; padding: 12px 16px; font-size: 0.82rem; }
+    .subtotal-row.expense-sub td { background: #fff1f2; border-top: 1px solid #fecaca; }
     .variance-positive { color: var(--success); font-weight: 700; }
     .variance-negative { color: var(--danger); font-weight: 700; }
 
@@ -442,6 +451,14 @@
 
   <!-- KPI Grid -->
   <div class="kpi-grid">
+    <div class="kpi-card opening">
+      <div class="kpi-head">
+        <div class="kpi-icon"><i class="fas fa-door-open"></i></div>
+      </div>
+      <div class="kpi-label">Opening Balance</div>
+      <div class="kpi-value" id="totalOpening">₹0</div>
+      <div class="kpi-trend" id="openingTrend"></div>
+    </div>
     <div class="kpi-card income">
       <div class="kpi-head">
         <div class="kpi-icon"><i class="fas fa-arrow-trend-up"></i></div>
@@ -472,7 +489,7 @@
   <div class="card">
     <div class="card-header">
       <h3><i class="fas fa-file-invoice-dollar"></i> Profit & Loss Statement</h3>
-      <span class="coa-badge" id="coaBadge">COA Active</span>
+      <span class="coa-badge" id="coaBadge">COA Loading…</span>
     </div>
     <div class="table-wrap">
       <table class="pl-table" id="pnlTable">
@@ -515,7 +532,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const app = initializeApp({ apiKey: "AIzaSyBhjgu6vpBRhMVjMs5RgSL4aViJq6GYy1A", authDomain: "budget-app-1365f.firebaseapp.com", projectId: "budget-app-1365f", storageBucket: "budget-app-1365f.appspot.com", messagingSenderId: "1036194450411", appId: "1:1036194450411:web:78ca39a5a82ab9db6c67ae" });
@@ -524,7 +541,11 @@ const auth = getAuth(app);
 let currentUser = null, currentChart = null;
 let currentPeriod = { summary: null, periodText: "", start: null, end: null };
 let prev1Summary = null, prev2Summary = null, showThreePeriods = false;
-let coaMap = new Map(); // COA cache: account name -> type (Income/Expense/Asset/Liability/Equity)
+
+// COA cache: account name -> { type, category, id, openingBalance }
+let coaMap = new Map();
+// Map of account name -> opening balance amount (from openingBalance field or first transaction)
+let openingBalanceMap = new Map();
 
 /* ── Formatting ── */
 function formatINR(amt) {
@@ -612,46 +633,85 @@ function getSecondComparisonRange(mainStart, mainEnd, compType) {
   return null;
 }
 
-/* ── Fetch COA ── */
+/* ── Fetch COA from Firestore ── */
 async function fetchCOA() {
   if (!currentUser) return;
+  coaMap.clear();
+  openingBalanceMap.clear();
   try {
-    // Try multiple possible collection names for Chart of Accounts
-    const possibleCollections = ["chart_of_accounts", "coa", "accounts", "chartOfAccounts", "ChartOfAccounts"];
-    let found = false;
-    for (const collName of possibleCollections) {
-      try {
-        const snap = await getDocs(collection(db, "users", currentUser.uid, collName));
-        if (!snap.empty) {
-          snap.docs.forEach(d => {
-            const data = d.data();
-            const name = data.ACCOUNT_HEADER || data.accountName || data.name || d.id;
-            const type = (data.ACCOUNT_TYPE || data.accountType || data.type || "").trim();
-            coaMap.set(name, type);
-          });
-          found = true;
-          console.log(`Loaded COA from ${collName}: ${snap.size} accounts`);
-          break;
-        }
-      } catch(e) { /* try next */ }
-    }
-    if (!found) console.warn("No COA collection found — falling back to transaction-based detection");
-  } catch(e) { console.error("COA fetch error:", e); }
+    const snapshot = await getDocs(
+      query(
+        collection(db, "users", currentUser.uid, "chartOfAccounts"),
+        where("userId", "==", currentUser.uid)
+      )
+    );
+    snapshot.forEach(d => {
+      const data = d.data();
+      const name = data.name || d.id;
+      const type = (data.type || "").trim();
+      const category = data.category || "";
+      const openingBalance = parseFloat(data.openingBalance) || parseFloat(data.opening_balance) || parseFloat(data.balance) || 0;
+      
+      coaMap.set(name, { type, category, id: d.id });
+      if (openingBalance > 0) {
+        openingBalanceMap.set(name, openingBalance);
+      }
+    });
+    console.log(`Loaded ${coaMap.size} COA accounts. ${openingBalanceMap.size} have opening balances.`);
+  } catch(e) {
+    console.error("COA fetch error:", e);
+  }
+}
+
+/* ── Detect if account is Opening Balance / Capital type ── */
+function isOpeningBalanceAccount(accountName, type, category) {
+  const nameLower = (accountName || "").toLowerCase();
+  const typeLower = (type || "").toLowerCase();
+  const catLower = (category || "").toLowerCase();
+  
+  // Check by name patterns
+  if (nameLower.includes("opening") || nameLower.includes("opening balance") || nameLower.includes("opening bal")) return true;
+  if (nameLower.includes("capital") && !nameLower.includes("working capital")) return true;
+  if (nameLower.includes("owner's contribution") || nameLower.includes("owners contribution")) return true;
+  if (nameLower.includes("owner contribution") || nameLower.includes("owner's equity")) return true;
+  if (nameLower.includes("retained earnings")) return true;
+  if (nameLower.includes("share capital") || nameLower.includes("initial investment")) return true;
+  if (nameLower.includes("startup capital") || nameLower.includes("starting capital")) return true;
+  
+  // Check by category
+  if (catLower.includes("opening") || catLower.includes("capital")) return true;
+  
+  // Check by type
+  if (typeLower === "equity") return true;
+  
+  return false;
 }
 
 /* ── Determine account type with COA priority ── */
 function getAccountType(accountName, incomeAmt, expenseAmt) {
-  // Priority 1: COA mapping
+  // Priority 1: Opening Balance detection (from COA)
   if (coaMap.has(accountName)) {
-    const t = coaMap.get(accountName).toLowerCase();
+    const coaEntry = coaMap.get(accountName);
+    const t = coaEntry.type.toLowerCase();
+    const cat = (coaEntry.category || "").toLowerCase();
+    
+    // Check if this is an opening balance account
+    if (isOpeningBalanceAccount(accountName, coaEntry.type, coaEntry.category)) {
+      return 'Opening';
+    }
+    
     if (t.includes('income') || t.includes('revenue') || t.includes('sales')) return 'Income';
     if (t.includes('expense') || t.includes('cost') || t.includes('cogs')) return 'Expense';
     if (t.includes('asset')) return 'Asset';
     if (t.includes('liability')) return 'Liability';
-    if (t.includes('equity') || t.includes('capital')) return 'Equity';
-    return coaMap.get(accountName); // return raw type
+    if (t.includes('equity')) return 'Equity';
+    return coaEntry.type;
   }
-  // Priority 2: Check transaction amounts
+  
+  // Priority 2: Fallback by name patterns
+  if (isOpeningBalanceAccount(accountName, "", "")) return 'Opening';
+  
+  // Priority 3: Fallback by transaction amounts
   if (incomeAmt > 0 && expenseAmt === 0) return 'Income';
   if (expenseAmt > 0 && incomeAmt === 0) return 'Expense';
   if (incomeAmt > 0 && expenseAmt > 0) {
@@ -662,10 +722,14 @@ function getAccountType(accountName, incomeAmt, expenseAmt) {
 
 /* ── Check if account should appear in P&L ── */
 function isPLAccount(type) {
-  if (!type) return true; // include unknown for safety
+  if (!type) return true;
   const t = type.toLowerCase();
-  // Exclude balance sheet accounts
-  if (t.includes('asset') || t.includes('liability') || t.includes('equity') || t.includes('capital')) return false;
+  // Exclude pure balance sheet accounts (but keep Opening as it shows in P&L as capital contribution)
+  if (t === 'opening') return true;
+  if (t.includes('asset') || t.includes('liability') || t.includes('equity') || t.includes('capital')) {
+    // But allow Equity accounts that look like Opening/Capital
+    return false;
+  }
   return true;
 }
 
@@ -682,11 +746,13 @@ async function fetchTransactions(start, end) {
   } catch(e) { console.error(e); return []; }
 }
 
-/* ── Process Transactions with COA-aware logic ── */
+/* ── Process Transactions with COA + Opening Balance logic ── */
 function processTransactions(transactions) {
-  const accountMap = new Map(); // account -> { income, expense, type }
-  let totalIncome = 0, totalExpense = 0;
+  const accountMap = new Map(); // account -> { income, expense, openingBalance }
+  let totalIncome = 0, totalExpense = 0, totalOpening = 0;
+  const openingCategories = [];
 
+  // First pass: aggregate by account
   transactions.forEach(tx => {
     const inc = parseFloat(tx.INCOME) || 0;
     const exp = parseFloat(tx.EXPENSE) || 0;
@@ -700,38 +766,44 @@ function processTransactions(transactions) {
     entry.expense += exp;
   });
 
-  // Second pass: classify each account using COA + amount logic
+  // Second pass: classify each account
   const incomeCategories = [];
   const expenseCategories = [];
 
   accountMap.forEach((vals, account) => {
     const type = getAccountType(account, vals.income, vals.expense);
 
-    // Skip non-P&L accounts (Assets, Liabilities, Equity)
+    // Opening Balance accounts
+    if (type === 'Opening') {
+      // Opening balance: use income side as capital contribution
+      const openingAmt = vals.income > 0 ? vals.income : (vals.expense > 0 ? vals.expense : 0);
+      // Also check COA openingBalance field
+      const coaOpening = openingBalanceMap.get(account) || 0;
+      const finalOpening = openingAmt > 0 ? openingAmt : coaOpening;
+      
+      if (finalOpening > 0) {
+        openingCategories.push([account, finalOpening]);
+        totalOpening += finalOpening;
+      }
+      return;
+    }
+
+    // Skip non-P&L accounts (Assets, Liabilities)
     if (!isPLAccount(type)) return;
 
-    // Net movement
-    const netAmt = vals.income - vals.expense;
-
     if (type === 'Income') {
-      // Use the income amount as the income contribution
       const incomeValue = vals.income > 0 ? vals.income : 0;
       if (incomeValue > 0) {
         incomeCategories.push([account, incomeValue]);
         totalIncome += incomeValue;
       }
-      // If income account has expense (contra), show as negative income
       if (vals.expense > 0) {
-        // Include net effect as a deduction
         const netIncome = vals.income - vals.expense;
-        if (netIncome !== incomeValue) {
-          // Adjust: remove previous entry, add net
-          const idx = incomeCategories.findIndex(x => x[0] === account);
-          if (idx >= 0) {
-            totalIncome -= incomeCategories[idx][1];
-            incomeCategories[idx][1] = netIncome;
-            totalIncome += netIncome;
-          }
+        const idx = incomeCategories.findIndex(x => x[0] === account);
+        if (idx >= 0) {
+          totalIncome -= incomeCategories[idx][1];
+          incomeCategories[idx][1] = netIncome;
+          totalIncome += netIncome;
         }
       }
     } else if (type === 'Expense') {
@@ -771,10 +843,15 @@ function processTransactions(transactions) {
 
   incomeCategories.sort((a,b) => b[1] - a[1]);
   expenseCategories.sort((a,b) => b[1] - a[1]);
+  openingCategories.sort((a,b) => b[1] - a[1]);
+
+  // Net profit = (Opening Balance + Income) - Expenses
+  const totalRevenue = totalOpening + totalIncome;
+  const netProfit = totalRevenue - totalExpense;
 
   return {
-    totalIncome, totalExpense, netProfit: totalIncome - totalExpense,
-    incomeCategories, expenseCategories,
+    totalIncome, totalExpense, totalOpening, totalRevenue, netProfit,
+    incomeCategories, expenseCategories, openingCategories,
     allAccounts: Array.from(accountMap.entries()).map(([name, v]) => ({
       name,
       type: getAccountType(name, v.income, v.expense),
@@ -788,7 +865,6 @@ async function loadReport() {
   const loading = document.getElementById("loadingModal");
   loading.style.display = "flex";
   try {
-    // Refresh COA each time
     await fetchCOA();
 
     const period = document.getElementById("reportPeriod").value;
@@ -844,29 +920,35 @@ function renderDashboard() {
   const p1 = prev1Summary;
   const p2 = showThreePeriods ? prev2Summary : null;
 
+  document.getElementById("totalOpening").innerHTML = formatINR(curr.totalOpening);
   document.getElementById("totalIncome").innerHTML = formatINR(curr.totalIncome);
   document.getElementById("totalExpenses").innerHTML = formatINR(curr.totalExpense);
   const netElem = document.getElementById("netProfit");
   netElem.innerHTML = curr.netProfit >= 0 ? formatINR(curr.netProfit) : `-${formatINR(Math.abs(curr.netProfit))}`;
   netElem.style.color = curr.netProfit >= 0 ? "var(--brand)" : "var(--danger)";
 
+  const openingTrendDiv = document.getElementById("openingTrend");
   const incomeTrendDiv = document.getElementById("incomeTrend");
   const expenseTrendDiv = document.getElementById("expenseTrend");
   const profitTrendDiv = document.getElementById("profitTrend");
-  incomeTrendDiv.innerHTML = ""; expenseTrendDiv.innerHTML = ""; profitTrendDiv.innerHTML = "";
+  openingTrendDiv.innerHTML = ""; incomeTrendDiv.innerHTML = ""; expenseTrendDiv.innerHTML = ""; profitTrendDiv.innerHTML = "";
 
   if (p1) {
+    const openChange = p1.totalOpening === 0 ? (curr.totalOpening === 0 ? 0 : 100) : ((curr.totalOpening - p1.totalOpening)/Math.abs(p1.totalOpening)*100).toFixed(1);
     const incChange = ((curr.totalIncome - p1.totalIncome)/Math.abs(p1.totalIncome||1)*100).toFixed(1);
     const expChange = ((curr.totalExpense - p1.totalExpense)/Math.abs(p1.totalExpense||1)*100).toFixed(1);
     const netChange = ((curr.netProfit - p1.netProfit)/Math.abs(p1.netProfit||1)*100).toFixed(1);
+    openingTrendDiv.innerHTML += `<span class="${openChange>=0?'trend-up':'trend-down'}"><i class="fas ${openChange>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(openChange)}% vs prev</span>`;
     incomeTrendDiv.innerHTML += `<span class="${incChange>=0?'trend-up':'trend-down'}"><i class="fas ${incChange>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(incChange)}% vs prev</span>`;
     expenseTrendDiv.innerHTML += `<span class="${expChange<=0?'trend-up':'trend-down'}"><i class="fas ${expChange<=0?'fa-arrow-down':'fa-arrow-up'}"></i>${Math.abs(expChange)}% vs prev</span>`;
     profitTrendDiv.innerHTML += `<span class="${netChange>=0?'trend-up':'trend-down'}"><i class="fas ${netChange>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(netChange)}% vs prev</span>`;
   }
   if (p2) {
+    const openChange2 = p2.totalOpening === 0 ? (curr.totalOpening === 0 ? 0 : 100) : ((curr.totalOpening - p2.totalOpening)/Math.abs(p2.totalOpening)*100).toFixed(1);
     const incChange2 = ((curr.totalIncome - p2.totalIncome)/Math.abs(p2.totalIncome||1)*100).toFixed(1);
     const expChange2 = ((curr.totalExpense - p2.totalExpense)/Math.abs(p2.totalExpense||1)*100).toFixed(1);
     const netChange2 = ((curr.netProfit - p2.netProfit)/Math.abs(p2.netProfit||1)*100).toFixed(1);
+    openingTrendDiv.innerHTML += `<span class="${openChange2>=0?'trend-up':'trend-down'}"><i class="fas ${openChange2>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(openChange2)}% vs PP</span>`;
     incomeTrendDiv.innerHTML += `<span class="${incChange2>=0?'trend-up':'trend-down'}"><i class="fas ${incChange2>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(incChange2)}% vs PP</span>`;
     expenseTrendDiv.innerHTML += `<span class="${expChange2<=0?'trend-up':'trend-down'}"><i class="fas ${expChange2<=0?'fa-arrow-down':'fa-arrow-up'}"></i>${Math.abs(expChange2)}% vs PP</span>`;
     profitTrendDiv.innerHTML += `<span class="${netChange2>=0?'trend-up':'trend-down'}"><i class="fas ${netChange2>=0?'fa-arrow-up':'fa-arrow-down'}"></i>${Math.abs(netChange2)}% vs PP</span>`;
@@ -888,50 +970,59 @@ function renderPNLTable(curr, p1, p2) {
   headerHtml += `</tr>`;
   thead.innerHTML = headerHtml;
 
-  // Merge all accounts from current + previous
   const allAccountNames = new Set();
   curr.allAccounts.forEach(a => allAccountNames.add(a.name));
   if (p1) p1.allAccounts.forEach(a => allAccountNames.add(a.name));
   if (p2) p2.allAccounts.forEach(a => allAccountNames.add(a.name));
 
-  // Build lookup maps
   const currMap = new Map(curr.allAccounts.map(a => [a.name, a]));
   const p1Map = p1 ? new Map(p1.allAccounts.map(a => [a.name, a])) : new Map();
   const p2Map = p2 ? new Map(p2.allAccounts.map(a => [a.name, a])) : new Map();
 
-  let tbody = '';
+  // Sort: Opening first, then Income, then Expense, then others
+  const typeOrder = { 'Opening': 0, 'Income': 1, 'Expense': 2, 'Unknown': 3 };
   const sortedNames = Array.from(allAccountNames).sort((a, b) => {
     const aType = currMap.get(a)?.type || p1Map.get(a)?.type || p2Map.get(a)?.type || 'Unknown';
     const bType = currMap.get(b)?.type || p1Map.get(b)?.type || p2Map.get(b)?.type || 'Unknown';
-    // Income first, then Expense, then others
-    const order = { 'Income': 0, 'Expense': 1, 'Unknown': 2 };
-    const aOrder = order[aType] ?? 3;
-    const bOrder = order[bType] ?? 3;
-    if (aOrder !== bOrder) return aOrder - bOrder;
-    // Then by absolute current net descending
-    const aNet = Math.abs(currMap.get(a)?.net || 0);
-    const bNet = Math.abs(currMap.get(b)?.net || 0);
-    return bNet - aNet;
+    if ((typeOrder[aType]??4) !== (typeOrder[bType]??4)) return (typeOrder[aType]??4) - (typeOrder[bType]??4);
+    return Math.abs(currMap.get(b)?.net || 0) - Math.abs(currMap.get(a)?.net || 0);
   });
 
-  for (let name of sortedNames.slice(0, 50)) {
+  let tbody = '';
+  let openingSubtotalCurr = 0, openingSubtotalP1 = 0, openingSubtotalP2 = 0;
+  let incomeSubtotalCurr = 0, incomeSubtotalP1 = 0, incomeSubtotalP2 = 0;
+  let expenseSubtotalCurr = 0, expenseSubtotalP1 = 0, expenseSubtotalP2 = 0;
+
+  for (let name of sortedNames.slice(0, 60)) {
     const c = currMap.get(name) || { net: 0, type: 'Unknown' };
     const netCurr = c.net;
-    const typeLabel = c.type === 'Income' ? 'INCOME' : (c.type === 'Expense' ? 'EXPENSE' : 'OTHER');
-    const typeClass = c.type === 'Income' ? 'type-income' : (c.type === 'Expense' ? 'type-expense' : '');
-    const amtClass = netCurr >= 0 ? 'income-amount' : 'expense-amount';
+    const type = c.type;
+
+    // Determine badge
+    let typeLabel = 'OTHER', typeClass = 'type-other';
+    if (type === 'Opening') { typeLabel = 'OPENING'; typeClass = 'type-opening'; }
+    else if (type === 'Income') { typeLabel = 'INCOME'; typeClass = 'type-income'; }
+    else if (type === 'Expense') { typeLabel = 'EXPENSE'; typeClass = 'type-expense'; }
+    else if (type === 'Equity') { typeLabel = 'EQUITY'; typeClass = 'type-equity'; }
+
+    let amtClass = netCurr >= 0 ? 'income-amount' : 'expense-amount';
+    if (type === 'Opening') amtClass = 'opening-amount';
 
     tbody += `<tr>
       <td><span class="type-badge ${typeClass}">${typeLabel}</span>${name}</td>
       <td class="amount ${amtClass}">${formatINR(netCurr)}</td>`;
 
     if (p1) {
-      const p1Row = p1Map.get(name) || { net: 0 };
-      tbody += `<td class="amount ${p1Row.net>=0?'income-amount':'expense-amount'}">${formatINR(p1Row.net)}</td>`;
+      const p1Row = p1Map.get(name) || { net: 0, type: 'Unknown' };
+      let p1AmtClass = p1Row.net >= 0 ? 'income-amount' : 'expense-amount';
+      if (p1Row.type === 'Opening') p1AmtClass = 'opening-amount';
+      tbody += `<td class="amount ${p1AmtClass}">${formatINR(p1Row.net)}</td>`;
     }
     if (p2) {
-      const p2Row = p2Map.get(name) || { net: 0 };
-      tbody += `<td class="amount ${p2Row.net>=0?'income-amount':'expense-amount'}">${formatINR(p2Row.net)}</td>`;
+      const p2Row = p2Map.get(name) || { net: 0, type: 'Unknown' };
+      let p2AmtClass = p2Row.net >= 0 ? 'income-amount' : 'expense-amount';
+      if (p2Row.type === 'Opening') p2AmtClass = 'opening-amount';
+      tbody += `<td class="amount ${p2AmtClass}">${formatINR(p2Row.net)}</td>`;
     }
     if (p1) {
       const p1Net = (p1Map.get(name) || {net:0}).net;
@@ -944,14 +1035,60 @@ function renderPNLTable(curr, p1, p2) {
       tbody += `<td class="amount ${change2>=0?'variance-positive':'variance-negative'}">${change2.toFixed(1)}%</td>`;
     }
     tbody += `</tr>`;
+
+    // Accumulate subtotals
+    if (type === 'Opening') {
+      openingSubtotalCurr += netCurr;
+      if (p1) openingSubtotalP1 += (p1Map.get(name)||{net:0}).net;
+      if (p2) openingSubtotalP2 += (p2Map.get(name)||{net:0}).net;
+    } else if (type === 'Income') {
+      incomeSubtotalCurr += netCurr;
+      if (p1) incomeSubtotalP1 += (p1Map.get(name)||{net:0}).net;
+      if (p2) incomeSubtotalP2 += (p2Map.get(name)||{net:0}).net;
+    } else if (type === 'Expense') {
+      expenseSubtotalCurr += netCurr;
+      if (p1) expenseSubtotalP1 += (p1Map.get(name)||{net:0}).net;
+      if (p2) expenseSubtotalP2 += (p2Map.get(name)||{net:0}).net;
+    }
+  }
+
+  // Add subtotals for Opening
+  if (openingSubtotalCurr !== 0 || openingSubtotalP1 !== 0 || openingSubtotalP2 !== 0) {
+    tbody += `<tr class="subtotal-row"><td><strong>Opening Balance Subtotal</strong></td><td class="amount opening-amount"><strong>${formatINR(openingSubtotalCurr)}</strong></td>`;
+    if (p1) tbody += `<td class="amount opening-amount"><strong>${formatINR(openingSubtotalP1)}</strong></td>`;
+    if (p2) tbody += `<td class="amount opening-amount"><strong>${formatINR(openingSubtotalP2)}</strong></td>`;
+    if (p1) { const ch = openingSubtotalP1===0?0:((openingSubtotalCurr-openingSubtotalP1)/Math.abs(openingSubtotalP1)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    if (p2) { const ch = openingSubtotalP2===0?0:((openingSubtotalCurr-openingSubtotalP2)/Math.abs(openingSubtotalP2)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    tbody += `</tr>`;
+  }
+
+  // Add subtotals for Income
+  if (incomeSubtotalCurr !== 0 || incomeSubtotalP1 !== 0 || incomeSubtotalP2 !== 0) {
+    tbody += `<tr class="subtotal-row"><td><strong>Income Subtotal</strong></td><td class="amount income-amount"><strong>${formatINR(incomeSubtotalCurr)}</strong></td>`;
+    if (p1) tbody += `<td class="amount income-amount"><strong>${formatINR(incomeSubtotalP1)}</strong></td>`;
+    if (p2) tbody += `<td class="amount income-amount"><strong>${formatINR(incomeSubtotalP2)}</strong></td>`;
+    if (p1) { const ch = incomeSubtotalP1===0?0:((incomeSubtotalCurr-incomeSubtotalP1)/Math.abs(incomeSubtotalP1)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    if (p2) { const ch = incomeSubtotalP2===0?0:((incomeSubtotalCurr-incomeSubtotalP2)/Math.abs(incomeSubtotalP2)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    tbody += `</tr>`;
+  }
+
+  // Add subtotals for Expense
+  if (expenseSubtotalCurr !== 0 || expenseSubtotalP1 !== 0 || expenseSubtotalP2 !== 0) {
+    tbody += `<tr class="subtotal-row expense-sub"><td><strong>Expense Subtotal</strong></td><td class="amount expense-amount"><strong>${formatINR(expenseSubtotalCurr)}</strong></td>`;
+    if (p1) tbody += `<td class="amount expense-amount"><strong>${formatINR(expenseSubtotalP1)}</strong></td>`;
+    if (p2) tbody += `<td class="amount expense-amount"><strong>${formatINR(expenseSubtotalP2)}</strong></td>`;
+    if (p1) { const ch = expenseSubtotalP1===0?0:((expenseSubtotalCurr-expenseSubtotalP1)/Math.abs(expenseSubtotalP1)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    if (p2) { const ch = expenseSubtotalP2===0?0:((expenseSubtotalCurr-expenseSubtotalP2)/Math.abs(expenseSubtotalP2)*100); tbody += `<td class="amount">${ch.toFixed(1)}%</td>`; }
+    tbody += `</tr>`;
   }
 
   if (sortedNames.length === 0) {
     tbody = `<tr><td colspan="6" class="empty-state"><i class="fas fa-inbox"></i>No transactions found for this period</td></tr>`;
   }
 
-  // Total row
-  tbody += `<tr class="total-row"><td><strong>TOTAL NET</strong></td><td class="amount"><strong>${formatINR(curr.netProfit)}</strong></td>`;
+  // Grand total: (Opening + Income) - Expenses
+  const grandTotalCurr = curr.netProfit;
+  tbody += `<tr class="total-row"><td><strong>TOTAL NET (Opening + Income − Expenses)</strong></td><td class="amount"><strong>${formatINR(grandTotalCurr)}</strong></td>`;
   if (p1) tbody += `<td class="amount"><strong>${formatINR(p1.netProfit)}</strong></td>`;
   if (p2) tbody += `<td class="amount"><strong>${formatINR(p2.netProfit)}</strong></td>`;
   if (p1) { const change = p1.netProfit===0?0:((curr.netProfit-p1.netProfit)/Math.abs(p1.netProfit)*100); tbody += `<td class="amount">${change.toFixed(1)}%</td>`; }
@@ -968,68 +1105,84 @@ function renderTopLists(curr) {
 
 function renderInsights(curr, p1, p2) {
   let html = '';
-  if (curr.totalIncome === 0 && curr.totalExpense === 0) {
-    html += `<div class="insight-item">ℹ️ No transactions found for this period. Check your COA and transaction dates.</div>`;
+  if (curr.totalOpening > 0) {
+    html += `<div class="insight-item">🚪 <strong>Opening Balance:</strong> ${formatINR(curr.totalOpening)} from ${curr.openingCategories.length} account(s) — treated as capital contribution</div>`;
   }
-  if (curr.netProfit > 0 && curr.totalIncome > 0) html += `<div class="insight-item">✅ <strong>Profit Margin:</strong> ${((curr.netProfit/curr.totalIncome)*100).toFixed(1)}% — Net profit of ${formatINR(curr.netProfit)}</div>`;
-  else if (curr.netProfit < 0) html += `<div class="insight-item">⚠️ <strong>Loss Alert:</strong> Expenses exceed income by ${formatINR(Math.abs(curr.netProfit))}</div>`;
-  if (p1) { const growth = ((curr.totalIncome-p1.totalIncome)/Math.abs(p1.totalIncome||1)*100).toFixed(1); html += `<div class="insight-item">📈 <strong>Revenue vs Previous:</strong> ${growth>=0?'+':''}${growth}%</div>`; }
-  if (p2) { const growth2 = ((curr.totalIncome-p2.totalIncome)/Math.abs(p2.totalIncome||1)*100).toFixed(1); html += `<div class="insight-item">📊 <strong>Revenue vs Prior‑Previous:</strong> ${growth2>=0?'+':''}${growth2}%</div>`; }
+  if (curr.netProfit > 0 && curr.totalRevenue > 0) {
+    const margin = ((curr.netProfit/curr.totalRevenue)*100).toFixed(1);
+    html += `<div class="insight-item">✅ <strong>Profit Margin:</strong> ${margin}% — Net profit of ${formatINR(curr.netProfit)} on total revenue of ${formatINR(curr.totalRevenue)}</div>`;
+  } else if (curr.netProfit < 0) {
+    html += `<div class="insight-item">⚠️ <strong>Loss Alert:</strong> Expenses exceed total revenue (Opening + Income) by ${formatINR(Math.abs(curr.netProfit))}</div>`;
+  }
+  if (p1) { const growth = ((curr.totalRevenue-p1.totalRevenue)/Math.abs(p1.totalRevenue||1)*100).toFixed(1); html += `<div class="insight-item">📈 <strong>Total Revenue vs Previous:</strong> ${growth>=0?'+':''}${growth}%</div>`; }
+  if (p2) { const growth2 = ((curr.totalRevenue-p2.totalRevenue)/Math.abs(p2.totalRevenue||1)*100).toFixed(1); html += `<div class="insight-item">📊 <strong>Total Revenue vs Prior‑Previous:</strong> ${growth2>=0?'+':''}${growth2}%</div>`; }
   if (curr.incomeCategories.length > 0) html += `<div class="insight-item">🏆 <strong>Top Income:</strong> ${curr.incomeCategories[0][0]} (${formatINR(curr.incomeCategories[0][1])})</div>`;
   if (curr.expenseCategories.length > 0) html += `<div class="insight-item">🔻 <strong>Top Expense:</strong> ${curr.expenseCategories[0][0]} (${formatINR(curr.expenseCategories[0][1])})</div>`;
-  if (coaMap.size > 0) html += `<div class="insight-item">📋 <strong>COA Active:</strong> ${coaMap.size} accounts mapped — non-P&L accounts excluded</div>`;
+  if (coaMap.size > 0) html += `<div class="insight-item">📋 <strong>COA Active:</strong> ${coaMap.size} accounts mapped — Opening balances and Equity treated as capital</div>`;
   document.getElementById("insightsContent").innerHTML = html || '<div class="insight-item">No insights available</div>';
 }
 
 function updateChart(curr) {
   const ctx = document.getElementById("pnlChart").getContext("2d");
   if (currentChart) currentChart.destroy();
-  const labels = [...curr.incomeCategories.slice(0,4).map(i=>i[0]), ...curr.expenseCategories.slice(0,4).map(e=>e[0])];
-  const incomeData = curr.incomeCategories.slice(0,4).map(i=>i[1]);
-  const expenseData = curr.expenseCategories.slice(0,4).map(e=>e[1]);
   const chartType = document.getElementById("chartType").value;
 
-  const brandColors = ['#4f46e5','#7c3aed','#a78bfa','#c4b5fd'];
-  const dangerColors = ['#dc2626','#ef4444','#f87171','#fca5a5'];
+  // Include Opening + Income as "Revenue" side, Expenses as "Cost" side
+  const openingLabels = curr.openingCategories.slice(0,3).map(o=>'🚪 '+o[0]);
+  const openingData = curr.openingCategories.slice(0,3).map(o=>o[1]);
+  const incomeLabels = curr.incomeCategories.slice(0,5).map(i=>i[0]);
+  const incomeData = curr.incomeCategories.slice(0,5).map(i=>i[1]);
+  const expenseLabels = curr.expenseCategories.slice(0,5).map(e=>e[0]);
+  const expenseData = curr.expenseCategories.slice(0,5).map(e=>e[1]);
 
-  let datasets = [];
+  const brandColors = ['#4f46e5','#7c3aed','#a78bfa','#c4b5fd','#818cf8'];
+  const dangerColors = ['#dc2626','#ef4444','#f87171','#fca5a5','#fecaca'];
+  const openingColors = ['#0891b2','#06b6d4','#22d3ee','#67e8f9'];
+
   if (chartType === 'pie' || chartType === 'doughnut') {
-    const allLabels = [...curr.incomeCategories.slice(0,4).map(i=>'↑ '+i[0]), ...curr.expenseCategories.slice(0,4).map(e=>'↓ '+e[0])];
-    const allData = [...incomeData, ...expenseData];
-    const allColors = [...brandColors, ...dangerColors];
-    datasets = [{ data: allData, backgroundColor: allColors, borderColor: '#fff', borderWidth: 2 }];
+    const allLabels = [...openingLabels, ...incomeLabels.map(l=>'↑ '+l), ...expenseLabels.map(l=>'↓ '+l)];
+    const allData = [...openingData, ...incomeData, ...expenseData];
+    const allColors = [...openingColors.slice(0, openingData.length), ...brandColors.slice(0, incomeData.length), ...dangerColors.slice(0, expenseData.length)];
     currentChart = new Chart(ctx, {
       type: chartType,
-      data: { labels: allLabels, datasets },
+      data: { labels: allLabels, datasets: [{ data: allData, backgroundColor: allColors, borderColor: '#fff', borderWidth: 2 }] },
       options: { responsive: true, plugins: { legend: { position: 'right', labels: { font: { size: 11 }, padding: 12 } },
         tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${formatINR(ctx.raw)}` } } } }
     });
     return;
   }
 
-  datasets = [
-    { label: "Income", data: incomeData, backgroundColor: chartType==='line'?'rgba(79,70,229,0.1)':'#4f46e5', borderColor: '#4f46e5', borderWidth: 2, tension: 0.4, fill: chartType==='line', borderRadius: 6 },
-    { label: "Expenses", data: expenseData, backgroundColor: chartType==='line'?'rgba(220,38,38,0.1)':'#dc2626', borderColor: '#dc2626', borderWidth: 2, tension: 0.4, fill: chartType==='line', borderRadius: 6 }
-  ];
+  // Bar / Line: show Opening, Income, Expense side by side
+  const allLabels = [...openingLabels, ...incomeLabels, ...expenseLabels];
+  const openingSeries = [...openingData, ...new Array(incomeLabels.length + expenseLabels.length).fill(0)];
+  const incomeSeries = [...new Array(openingLabels.length).fill(0), ...incomeData, ...new Array(expenseLabels.length).fill(0)];
+  const expenseSeries = [...new Array(openingLabels.length + incomeLabels.length).fill(0), ...expenseData];
 
   currentChart = new Chart(ctx, {
     type: chartType,
-    data: { labels: curr.incomeCategories.slice(0,4).map(i=>i[0]).concat(curr.expenseCategories.slice(0,4).map(e=>e[0])), datasets },
+    data: {
+      labels: allLabels,
+      datasets: [
+        { label: "Opening Balance", data: openingSeries, backgroundColor: chartType==='line'?'rgba(8,145,178,0.1)':'#0891b2', borderColor: '#0891b2', borderWidth: 2, tension: 0.4, fill: chartType==='line', borderRadius: 6 },
+        { label: "Income", data: incomeSeries, backgroundColor: chartType==='line'?'rgba(79,70,229,0.1)':'#4f46e5', borderColor: '#4f46e5', borderWidth: 2, tension: 0.4, fill: chartType==='line', borderRadius: 6 },
+        { label: "Expenses", data: expenseSeries, backgroundColor: chartType==='line'?'rgba(220,38,38,0.1)':'#dc2626', borderColor: '#dc2626', borderWidth: 2, tension: 0.4, fill: chartType==='line', borderRadius: 6 }
+      ]
+    },
     options: {
       responsive: true,
       plugins: {
         legend: { labels: { color: '#64748b', font: { family: 'Inter', size: 11, weight: '600' }, padding: 16 } },
         tooltip: { backgroundColor: '#0f172a', padding: 10, callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${formatINR(ctx.raw)}` } }
       },
-      scales: chartType === 'line' || chartType === 'bar' ? {
+      scales: {
         x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#f1f5f9' } },
         y: { ticks: { color: '#64748b', font: { size: 10 }, callback: v => '₹'+v.toLocaleString('en-IN') }, grid: { color: '#f1f5f9' } }
-      } : {}
+      }
     }
   });
 }
 
-/* ── Export PDF (A4 Optimized, 3 Pages) ── */
+/* ── Export PDF (A4, 3 Pages) ── */
 async function exportToPDF() {
   if (!currentPeriod.summary) { Swal.fire("No Data", "Generate report first", "warning"); return; }
   const { jsPDF } = window.jspdf;
@@ -1042,7 +1195,6 @@ async function exportToPDF() {
   const userName = document.getElementById("username").innerText || "User";
 
   /* ========== PAGE 1 — Cover & Summary ========== */
-  // Header band
   doc.setFillColor(79, 70, 229); doc.rect(0, 0, pageW, 55, 'F');
   doc.setFillColor(124, 58, 237); doc.rect(0, 50, pageW, 5, 'F');
 
@@ -1055,53 +1207,64 @@ async function exportToPDF() {
   doc.setFontSize(12); doc.setFont('helvetica','bold');
   doc.text(currentPeriod.periodText, pageW/2, 46, { align: 'center' });
 
-  // Meta info
   doc.setTextColor(100,116,139); doc.setFontSize(9); doc.setFont('helvetica','normal');
   doc.text(`Prepared for: ${userName}`, 15, 68);
   doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`, pageW - 15, 68, { align: 'right' });
 
-  // KPI summary boxes
-  const boxY = 80, boxH = 35, boxW = 55, gap = 5;
-  const boxStartX = (pageW - (boxW*3 + gap*2)) / 2;
+  // KPI boxes (4 columns now)
+  const boxY = 80, boxH = 35, boxW = 42, gap = 3;
+  const boxStartX = (pageW - (boxW*4 + gap*3)) / 2;
+
+  // Opening box
+  doc.setFillColor(236, 254, 255); doc.roundedRect(boxStartX, boxY, boxW, boxH, 3, 3, 'F');
+  doc.setDrawColor(8, 145, 178); doc.setLineWidth(0.5); doc.roundedRect(boxStartX, boxY, boxW, boxH, 3, 3, 'S');
+  doc.setTextColor(8,145,178); doc.setFontSize(7); doc.setFont('helvetica','bold');
+  doc.text("OPENING", boxStartX + boxW/2, boxY + 12, { align: 'center' });
+  doc.setFontSize(11); doc.setTextColor(15,23,42);
+  doc.text(formatINRShort(curr.totalOpening), boxStartX + boxW/2, boxY + 26, { align: 'center' });
 
   // Income box
-  doc.setFillColor(236, 253, 245); doc.roundedRect(boxStartX, boxY, boxW, boxH, 3, 3, 'F');
-  doc.setDrawColor(5, 150, 105); doc.setLineWidth(0.5); doc.roundedRect(boxStartX, boxY, boxW, boxH, 3, 3, 'S');
-  doc.setTextColor(5,150,105); doc.setFontSize(8); doc.setFont('helvetica','bold');
-  doc.text("TOTAL INCOME", boxStartX + boxW/2, boxY + 12, { align: 'center' });
-  doc.setFontSize(13); doc.setTextColor(15,23,42);
-  doc.text(formatINRShort(curr.totalIncome), boxStartX + boxW/2, boxY + 26, { align: 'center' });
+  doc.setFillColor(236, 253, 245); doc.roundedRect(boxStartX + boxW + gap, boxY, boxW, boxH, 3, 3, 'F');
+  doc.setDrawColor(5, 150, 105); doc.roundedRect(boxStartX + boxW + gap, boxY, boxW, boxH, 3, 3, 'S');
+  doc.setTextColor(5,150,105); doc.setFontSize(7); doc.setFont('helvetica','bold');
+  doc.text("INCOME", boxStartX + boxW + gap + boxW/2, boxY + 12, { align: 'center' });
+  doc.setFontSize(11); doc.setTextColor(15,23,42);
+  doc.text(formatINRShort(curr.totalIncome), boxStartX + boxW + gap + boxW/2, boxY + 26, { align: 'center' });
 
   // Expense box
-  doc.setFillColor(254, 242, 242); doc.roundedRect(boxStartX + boxW + gap, boxY, boxW, boxH, 3, 3, 'F');
-  doc.setDrawColor(220, 38, 38); doc.roundedRect(boxStartX + boxW + gap, boxY, boxW, boxH, 3, 3, 'S');
-  doc.setTextColor(220,38,38); doc.setFontSize(8); doc.setFont('helvetica','bold');
-  doc.text("TOTAL EXPENSES", boxStartX + boxW + gap + boxW/2, boxY + 12, { align: 'center' });
-  doc.setFontSize(13); doc.setTextColor(15,23,42);
-  doc.text(formatINRShort(curr.totalExpense), boxStartX + boxW + gap + boxW/2, boxY + 26, { align: 'center' });
+  doc.setFillColor(254, 242, 242); doc.roundedRect(boxStartX + (boxW+gap)*2, boxY, boxW, boxH, 3, 3, 'F');
+  doc.setDrawColor(220, 38, 38); doc.roundedRect(boxStartX + (boxW+gap)*2, boxY, boxW, boxH, 3, 3, 'S');
+  doc.setTextColor(220,38,38); doc.setFontSize(7); doc.setFont('helvetica','bold');
+  doc.text("EXPENSES", boxStartX + (boxW+gap)*2 + boxW/2, boxY + 12, { align: 'center' });
+  doc.setFontSize(11); doc.setTextColor(15,23,42);
+  doc.text(formatINRShort(curr.totalExpense), boxStartX + (boxW+gap)*2 + boxW/2, boxY + 26, { align: 'center' });
 
   // Net box
   const netIsProfit = curr.netProfit >= 0;
   const netBg = netIsProfit ? [238, 242, 255] : [254, 242, 242];
   const netBorder = netIsProfit ? [79, 70, 229] : [220, 38, 38];
-  doc.setFillColor(...netBg); doc.roundedRect(boxStartX + (boxW + gap)*2, boxY, boxW, boxH, 3, 3, 'F');
-  doc.setDrawColor(...netBorder); doc.roundedRect(boxStartX + (boxW + gap)*2, boxY, boxW, boxH, 3, 3, 'S');
-  doc.setTextColor(...netBorder); doc.setFontSize(8); doc.setFont('helvetica','bold');
-  doc.text(netIsProfit ? "NET PROFIT" : "NET LOSS", boxStartX + (boxW + gap)*2 + boxW/2, boxY + 12, { align: 'center' });
-  doc.setFontSize(13); doc.setTextColor(15,23,42);
+  doc.setFillColor(...netBg); doc.roundedRect(boxStartX + (boxW+gap)*3, boxY, boxW, boxH, 3, 3, 'F');
+  doc.setDrawColor(...netBorder); doc.roundedRect(boxStartX + (boxW+gap)*3, boxY, boxW, boxH, 3, 3, 'S');
+  doc.setTextColor(...netBorder); doc.setFontSize(7); doc.setFont('helvetica','bold');
+  doc.text(netIsProfit ? "NET PROFIT" : "NET LOSS", boxStartX + (boxW+gap)*3 + boxW/2, boxY + 12, { align: 'center' });
+  doc.setFontSize(11); doc.setTextColor(15,23,42);
   const netText = netIsProfit ? formatINRShort(curr.netProfit) : `-${formatINRShort(Math.abs(curr.netProfit))}`;
-  doc.text(netText, boxStartX + (boxW + gap)*2 + boxW/2, boxY + 26, { align: 'center' });
+  doc.text(netText, boxStartX + (boxW+gap)*3 + boxW/2, boxY + 26, { align: 'center' });
+
+  // Formula note
+  doc.setFontSize(7); doc.setTextColor(100,116,139); doc.setFont('helvetica','italic');
+  doc.text("Net = (Opening Balance + Income) − Expenses", pageW/2, boxY + boxH + 6, { align: 'center' });
 
   // Comparison table
   const compY = boxY + boxH + 15;
   doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(15,23,42);
   doc.text("PERIOD COMPARISON", pageW/2, compY, { align: 'center' });
 
-  const compData = [];
   const compHeaders = ["Metric", "Current"];
   if (p1) compHeaders.push("Previous");
   if (p2) compHeaders.push("Prior-Prev");
-  compData.push(compHeaders);
+  const compData = [compHeaders];
+  compData.push(["Opening Balance", formatINRShort(curr.totalOpening), p1?formatINRShort(p1.totalOpening):null, p2?formatINRShort(p2.totalOpening):null].filter(v=>v!==null));
   compData.push(["Income", formatINRShort(curr.totalIncome), p1?formatINRShort(p1.totalIncome):null, p2?formatINRShort(p2.totalIncome):null].filter(v=>v!==null));
   compData.push(["Expenses", formatINRShort(curr.totalExpense), p1?formatINRShort(p1.totalExpense):null, p2?formatINRShort(p2.totalExpense):null].filter(v=>v!==null));
   compData.push(["Net P/L", formatINRShort(curr.netProfit), p1?formatINRShort(p1.netProfit):null, p2?formatINRShort(p2.netProfit):null].filter(v=>v!==null));
@@ -1118,50 +1281,57 @@ async function exportToPDF() {
     alternateRowStyles: { fillColor: [248,250,252] }
   });
 
-  // COA note
   let noteY = doc.lastAutoTable.finalY + 12;
-  doc.setFillColor(238, 242, 255); doc.roundedRect(15, noteY, pageW - 30, 18, 3, 3, 'F');
+  doc.setFillColor(238, 242, 255); doc.roundedRect(15, noteY, pageW - 30, 22, 3, 3, 'F');
   doc.setTextColor(79,70,229); doc.setFontSize(8); doc.setFont('helvetica','bold');
   doc.text("Chart of Accounts (COA) Status", 20, noteY + 7);
   doc.setFont('helvetica','normal'); doc.setTextColor(51,65,85); doc.setFontSize(7.5);
-  doc.text(coaMap.size > 0 ? `${coaMap.size} accounts mapped. Only Income & Expense accounts are included in this P&L.` : 'COA not found — using auto-detection from transaction types.', 20, noteY + 13);
+  doc.text(coaMap.size > 0 ? `${coaMap.size} accounts mapped. Opening Balance/Equity accounts are treated as capital contributions.` : 'COA not found — using auto-detection from transaction types.', 20, noteY + 13);
+  doc.text("Only Income & Expense accounts appear in the P&L. Assets & Liabilities are excluded.", 20, noteY + 18);
 
-  // Footer
   doc.setFontSize(8); doc.setTextColor(148,163,184);
   doc.text("FinLedger Pro — Executive P&L Report", pageW/2, pageH - 10, { align: 'center' });
   doc.text("Page 1 of 3", pageW - 15, pageH - 10, { align: 'right' });
 
   /* ========== PAGE 2 — Charts & Analysis ========== */
   doc.addPage('a4', 'portrait');
-
   doc.setFillColor(79, 70, 229); doc.rect(0, 0, pageW, 22, 'F');
   doc.setTextColor(255,255,255); doc.setFontSize(14); doc.setFont('helvetica','bold');
   doc.text("CHARTS & ANALYSIS", pageW/2, 14, { align: 'center' });
 
-  // Top Income & Expense bar chart (manual)
   doc.setTextColor(15,23,42); doc.setFontSize(11); doc.setFont('helvetica','bold');
-  doc.text("Top Income vs Top Expenses", 15, 35);
+  doc.text("Opening Balance, Income & Expenses", 15, 35);
 
   const chartY = 42, chartH = 55, chartW = 180;
   const maxVal = Math.max(
-    ...curr.incomeCategories.slice(0,5).map(i=>i[1]),
-    ...curr.expenseCategories.slice(0,5).map(e=>e[1]),
+    ...curr.incomeCategories.slice(0,4).map(i=>i[1]),
+    ...curr.expenseCategories.slice(0,4).map(e=>e[1]),
+    ...curr.openingCategories.slice(0,2).map(o=>o[1]),
     1
   );
 
-  const incItems = curr.incomeCategories.slice(0,5);
-  const expItems = curr.expenseCategories.slice(0,5);
+  const incItems = curr.incomeCategories.slice(0,4);
+  const expItems = curr.expenseCategories.slice(0,4);
+  const openItems = curr.openingCategories.slice(0,2);
 
-  // Draw grid lines
   doc.setDrawColor(226,232,240); doc.setLineWidth(0.2);
   for (let i = 0; i <= 4; i++) {
     const y = chartY + chartH - (i/4)*chartH;
     doc.line(15, y, 15 + chartW, y);
   }
 
-  // Income bars
   const barW = 8;
-  const incStartX = 20;
+  // Opening bars
+  openItems.forEach((item, i) => {
+    const h = (item[1] / maxVal) * chartH;
+    doc.setFillColor(8, 145, 178);
+    doc.rect(20 + i * (barW + 3), chartY + chartH - h, barW, h, 'F');
+    doc.setFontSize(6); doc.setTextColor(100,116,139);
+    doc.text(item[0].substring(0,6), 20 + i * (barW + 3) + barW/2, chartY + chartH + 4, { align: 'center', maxWidth: 12 });
+  });
+
+  // Income bars
+  const incStartX = 20 + openItems.length * (barW + 3) + 8;
   incItems.forEach((item, i) => {
     const h = (item[1] / maxVal) * chartH;
     doc.setFillColor(79, 70, 229);
@@ -1171,7 +1341,7 @@ async function exportToPDF() {
   });
 
   // Expense bars
-  const expStartX = 110;
+  const expStartX = incStartX + incItems.length * (barW + 3) + 8;
   expItems.forEach((item, i) => {
     const h = (item[1] / maxVal) * chartH;
     doc.setFillColor(220, 38, 38);
@@ -1181,13 +1351,15 @@ async function exportToPDF() {
   });
 
   // Legend
-  doc.setFillColor(79,70,229); doc.rect(15, chartY + chartH + 10, 5, 5, 'F');
+  doc.setFillColor(8,145,178); doc.rect(15, chartY + chartH + 10, 5, 5, 'F');
   doc.setFontSize(8); doc.setTextColor(15,23,42); doc.setFont('helvetica','normal');
-  doc.text("Income", 23, chartY + chartH + 14);
-  doc.setFillColor(220,38,38); doc.rect(60, chartY + chartH + 10, 5, 5, 'F');
-  doc.text("Expenses", 68, chartY + chartH + 14);
+  doc.text("Opening", 23, chartY + chartH + 14);
+  doc.setFillColor(79,70,229); doc.rect(60, chartY + chartH + 10, 5, 5, 'F');
+  doc.text("Income", 68, chartY + chartH + 14);
+  doc.setFillColor(220,38,38); doc.rect(105, chartY + chartH + 10, 5, 5, 'F');
+  doc.text("Expenses", 113, chartY + chartH + 14);
 
-  // Net Profit Trend line (if comparison)
+  // Net Profit Trend
   if (p1) {
     const trendY = 120, trendH = 50, trendW = 170;
     doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(15,23,42);
@@ -1197,26 +1369,22 @@ async function exportToPDF() {
     const values = p2 ? [p2.netProfit, p1.netProfit, curr.netProfit] : [p1.netProfit, curr.netProfit];
     const maxNet = Math.max(...values.map(Math.abs), 1);
 
-    // Zero line
     doc.setDrawColor(203,213,225); doc.setLineWidth(0.3);
     const zeroY = trendY + 8 + trendH / 2;
     doc.line(15, zeroY, 15 + trendW, zeroY);
     doc.setFontSize(6); doc.setTextColor(148,163,184);
     doc.text("₹0", 12, zeroY + 1, { align: 'right' });
 
-    // Plot points
     const points = values.map((v, i) => ({
       x: 20 + (i / (values.length - 1 || 1)) * (trendW - 10),
       y: zeroY - (v / maxNet) * (trendH / 2)
     }));
 
-    // Line
     doc.setDrawColor(79,70,229); doc.setLineWidth(1);
     for (let i = 0; i < points.length - 1; i++) {
       doc.line(points[i].x, points[i].y, points[i+1].x, points[i+1].y);
     }
 
-    // Dots + labels
     points.forEach((p, i) => {
       doc.setFillColor(79,70,229);
       doc.circle(p.x, p.y, 1.5, 'F');
@@ -1228,18 +1396,18 @@ async function exportToPDF() {
     });
   }
 
-  // Quick insights
+  // Insights
   const insightY = 190;
   doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(15,23,42);
   doc.text("Key Insights", 15, insightY);
 
   const insights = [];
-  if (curr.netProfit > 0 && curr.totalIncome > 0) insights.push(`Profit margin: ${((curr.netProfit/curr.totalIncome)*100).toFixed(1)}%`);
+  if (curr.totalOpening > 0) insights.push(`Opening Balance: ${formatINRShort(curr.totalOpening)} (capital contribution)`);
+  if (curr.netProfit > 0 && curr.totalRevenue > 0) insights.push(`Profit margin: ${((curr.netProfit/curr.totalRevenue)*100).toFixed(1)}% on ${formatINRShort(curr.totalRevenue)} revenue`);
   else if (curr.netProfit < 0) insights.push(`Net loss: ${formatINRShort(Math.abs(curr.netProfit))}`);
-  if (p1) insights.push(`Revenue vs Previous: ${((curr.totalIncome-p1.totalIncome)/Math.abs(p1.totalIncome||1)*100).toFixed(1)}%`);
+  if (p1) insights.push(`Total revenue vs Previous: ${((curr.totalRevenue-p1.totalRevenue)/Math.abs(p1.totalRevenue||1)*100).toFixed(1)}%`);
   if (curr.incomeCategories.length > 0) insights.push(`Top income: ${curr.incomeCategories[0][0]} (${formatINRShort(curr.incomeCategories[0][1])})`);
   if (curr.expenseCategories.length > 0) insights.push(`Top expense: ${curr.expenseCategories[0][0]} (${formatINRShort(curr.expenseCategories[0][1])})`);
-  insights.push(`Active P&L accounts: ${curr.incomeCategories.length + curr.expenseCategories.length}`);
 
   insights.forEach((text, i) => {
     doc.setFillColor(248,250,252); doc.roundedRect(15, insightY + 5 + i * 10, pageW - 30, 8, 2, 2, 'F');
@@ -1253,14 +1421,12 @@ async function exportToPDF() {
 
   /* ========== PAGE 3+ — Detailed P&L Table ========== */
   doc.addPage('a4', 'portrait');
-
   doc.setFillColor(79, 70, 229); doc.rect(0, 0, pageW, 22, 'F');
   doc.setTextColor(255,255,255); doc.setFontSize(14); doc.setFont('helvetica','bold');
   doc.text("DETAILED P&L STATEMENT", pageW/2, 14, { align: 'center' });
   doc.setFontSize(8); doc.setFont('helvetica','normal');
   doc.text(currentPeriod.periodText, pageW/2, 19, { align: 'center' });
 
-  // Build table data
   const allAccountNames = new Set();
   curr.allAccounts.forEach(a => allAccountNames.add(a.name));
   if (p1) p1.allAccounts.forEach(a => allAccountNames.add(a.name));
@@ -1270,18 +1436,19 @@ async function exportToPDF() {
   const p1Map = p1 ? new Map(p1.allAccounts.map(a => [a.name, a])) : new Map();
   const p2Map = p2 ? new Map(p2.allAccounts.map(a => [a.name, a])) : new Map();
 
+  const typeOrder = { 'Opening': 0, 'Income': 1, 'Expense': 2, 'Unknown': 3 };
   const sortedNames = Array.from(allAccountNames).sort((a, b) => {
     const aType = currMap.get(a)?.type || 'Unknown';
     const bType = currMap.get(b)?.type || 'Unknown';
-    const order = { 'Income': 0, 'Expense': 1, 'Unknown': 2 };
-    if ((order[aType]??3) !== (order[bType]??3)) return (order[aType]??3) - (order[bType]??3);
+    if ((typeOrder[aType]??4) !== (typeOrder[bType]??4)) return (typeOrder[aType]??4) - (typeOrder[bType]??4);
     return Math.abs(currMap.get(b)?.net||0) - Math.abs(currMap.get(a)?.net||0);
   });
 
   const tableBody = [];
   sortedNames.forEach(name => {
     const c = currMap.get(name) || { net: 0, type: 'Unknown' };
-    const row = [name, formatNumberForPDF(c.net)];
+    const typeLabel = c.type === 'Opening' ? 'OPEN' : (c.type === 'Income' ? 'INC' : (c.type === 'Expense' ? 'EXP' : ''));
+    const row = [`${typeLabel ? '['+typeLabel+'] ' : ''}${name}`, formatNumberForPDF(c.net)];
     if (p1) row.push(formatNumberForPDF((p1Map.get(name)||{net:0}).net));
     if (p2) row.push(formatNumberForPDF((p2Map.get(name)||{net:0}).net));
     if (p1) {
@@ -1297,8 +1464,30 @@ async function exportToPDF() {
     tableBody.push(row);
   });
 
-  // Total
-  const totalRow = ["TOTAL NET", formatNumberForPDF(curr.netProfit)];
+  // Subtotal + total rows
+  if (curr.totalOpening > 0) {
+    const r = ["Opening Balance Subtotal", formatNumberForPDF(curr.totalOpening)];
+    if (p1) r.push(formatNumberForPDF(p1.totalOpening));
+    if (p2) r.push(formatNumberForPDF(p2.totalOpening));
+    if (p1) r.push("—"); if (p2) r.push("—");
+    tableBody.push(r);
+  }
+  if (curr.totalIncome > 0) {
+    const r = ["Income Subtotal", formatNumberForPDF(curr.totalIncome)];
+    if (p1) r.push(formatNumberForPDF(p1.totalIncome));
+    if (p2) r.push(formatNumberForPDF(p2.totalIncome));
+    if (p1) r.push("—"); if (p2) r.push("—");
+    tableBody.push(r);
+  }
+  if (curr.totalExpense > 0) {
+    const r = ["Expense Subtotal", formatNumberForPDF(curr.totalExpense)];
+    if (p1) r.push(formatNumberForPDF(p1.totalExpense));
+    if (p2) r.push(formatNumberForPDF(p2.totalExpense));
+    if (p1) r.push("—"); if (p2) r.push("—");
+    tableBody.push(r);
+  }
+
+  const totalRow = ["NET PROFIT (Opening + Income − Expenses)", formatNumberForPDF(curr.netProfit)];
   if (p1) totalRow.push(formatNumberForPDF(p1.netProfit));
   if (p2) totalRow.push(formatNumberForPDF(p2.netProfit));
   if (p1) { const ch = p1.netProfit===0?0:((curr.netProfit-p1.netProfit)/Math.abs(p1.netProfit)*100); totalRow.push(ch.toFixed(1)+'%'); }
@@ -1320,19 +1509,23 @@ async function exportToPDF() {
     bodyStyles: { fontSize: 7.5, textColor: [51,65,85] },
     alternateRowStyles: { fillColor: [248,250,252] },
     columnStyles: {
-      0: { cellWidth: 60, halign: 'left' },
-      1: { cellWidth: 30, halign: 'right' },
-      2: { cellWidth: 30, halign: 'right' },
-      3: { cellWidth: 30, halign: 'right' },
-      4: { cellWidth: 25, halign: 'right' },
-      5: { cellWidth: 25, halign: 'right' }
+      0: { cellWidth: 65, halign: 'left' },
+      1: { cellWidth: 28, halign: 'right' },
+      2: { cellWidth: 28, halign: 'right' },
+      3: { cellWidth: 28, halign: 'right' },
+      4: { cellWidth: 22, halign: 'right' },
+      5: { cellWidth: 22, halign: 'right' }
     },
     didParseCell: function(data) {
       if (data.section === 'body') {
-        if (data.row.index === tableBody.length - 1) {
+        const lastIdx = tableBody.length - 1;
+        if (data.row.index === lastIdx) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fillColor = [238,242,255];
           data.cell.styles.textColor = [15,23,42];
+        } else if (data.cell.raw && typeof data.cell.raw === 'string' && data.cell.raw.includes('Subtotal')) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [241,245,249];
         }
         if (data.column.index >= 4 && typeof data.cell.raw === 'string' && data.cell.raw.includes('%')) {
           const num = parseFloat(data.cell.raw);
@@ -1392,12 +1585,30 @@ function exportToExcel() {
     data.push(row);
   });
 
-  const totalRow = ["TOTAL NET", "", curr.netProfit];
-  if (p1) totalRow.push(p1.netProfit);
-  if (p2) totalRow.push(p2.netProfit);
-  if (p1) { const ch = p1.netProfit===0?0:((curr.netProfit-p1.netProfit)/Math.abs(p1.netProfit)*100); totalRow.push(ch.toFixed(1)+'%'); }
-  if (p2) { const ch = p2.netProfit===0?0:((curr.netProfit-p2.netProfit)/Math.abs(p2.netProfit)*100); totalRow.push(ch.toFixed(1)+'%'); }
-  data.push(totalRow);
+  // Subtotals
+  data.push(["Opening Balance Subtotal", "Opening", curr.totalOpening]);
+  if (p1) data[data.length-1].push(p1.totalOpening);
+  if (p2) data[data.length-1].push(p2.totalOpening);
+  if (p1) data[data.length-1].push("—");
+  if (p2) data[data.length-1].push("—");
+
+  data.push(["Income Subtotal", "Income", curr.totalIncome]);
+  if (p1) data[data.length-1].push(p1.totalIncome);
+  if (p2) data[data.length-1].push(p2.totalIncome);
+  if (p1) data[data.length-1].push("—");
+  if (p2) data[data.length-1].push("—");
+
+  data.push(["Expense Subtotal", "Expense", curr.totalExpense]);
+  if (p1) data[data.length-1].push(p1.totalExpense);
+  if (p2) data[data.length-1].push(p2.totalExpense);
+  if (p1) data[data.length-1].push("—");
+  if (p2) data[data.length-1].push("—");
+
+  data.push(["NET PROFIT", "", curr.netProfit]);
+  if (p1) data[data.length-1].push(p1.netProfit);
+  if (p2) data[data.length-1].push(p2.netProfit);
+  if (p1) { const ch = p1.netProfit===0?0:((curr.netProfit-p1.netProfit)/Math.abs(p1.netProfit)*100); data[data.length-1].push(ch.toFixed(1)+'%'); }
+  if (p2) { const ch = p2.netProfit===0?0:((curr.netProfit-p2.netProfit)/Math.abs(p2.netProfit)*100); data[data.length-1].push(ch.toFixed(1)+'%'); }
 
   const ws = XLSX.utils.aoa_to_sheet(data);
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
