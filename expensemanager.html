@@ -876,6 +876,7 @@
             • "<em>Paid 50 for petrol using BOM 25-01-2025</em>"<br>
             • "<em>Transfer 1000 from SBI to HDFC today</em>"<br>
             • "<em>Fuel 200 AXIS 26/01/2025</em>"<br>
+            • "<em>Meals &amp; Entertainment 500 AXIS today</em>"<br>
             <strong>Date formats:</strong> today, yesterday, 25-01-2025, 25/01/2025, 2025-01-25
           </div>
           <div class="mb-3">
@@ -2992,7 +2993,7 @@
       }
     }
 
-    // ⭐ ENHANCED PARSER: extracts date in any format
+    // ⭐ ENHANCED PARSER: extracts date in any format, matches COA & banks
     function parseQuickAddInput(text) {
       const lower = text.toLowerCase();
       let amount = 0, type = "Expense", accountHeader = "", bankName = "", description = text, date = null;
@@ -3079,19 +3080,35 @@
         else bankName = "Cash";
       }
       
-      // 5. Account Header detection - ⭐ MATCHES USER'S CUSTOM ACCOUNT NAMES
-      // First try exact match with existing accounts
+      // ⭐ 5. ACCOUNT HEADER detection — IMPROVED: match any COA account (exact or partial)
+      // First try exact match with existing accounts (case-insensitive)
+      let foundAccount = null;
       for (const a of coaAccounts) {
         const aLower = a.toLowerCase();
+        // Check whole word match
         const regex = new RegExp(`\\b${aLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-        if (regex.test(text)) { accountHeader = a; break; }
+        if (regex.test(text)) { foundAccount = a; break; }
       }
       
-      // If not found, try keyword-based inference
-      if (!accountHeader) {
+      // If not found, try partial match (account name appears as substring)
+      if (!foundAccount) {
+        for (const a of coaAccounts) {
+          const aLower = a.toLowerCase();
+          if (text.toLowerCase().includes(aLower)) {
+            // Make sure it's not just a bank name already matched
+            if (!coaBanks.includes(a) || a.toLowerCase() !== bankName.toLowerCase()) {
+              foundAccount = a;
+              break;
+            }
+          }
+        }
+      }
+      
+      // If still not found, try keyword-based inference
+      if (!foundAccount) {
         const keywords = [
           { pattern: /\b(fuel|petrol|gas|diesel|petroleum)\b/i, account: "Fuel" },
-          { pattern: /\b(food|meal|restaurant|lunch|dinner|breakfast|snack|cafe)\b/i, account: "Meals & Entertainment" },
+          { pattern: /\b(meal|meals|food|restaurant|lunch|dinner|breakfast|snack|cafe|entertainment|entertain)\b/i, account: "Meals & Entertainment" },
           { pattern: /\b(rent|house|housing|apartment)\b/i, account: "Rent" },
           { pattern: /\b(grocer|supermarket|vegetables|milk|bread)\b/i, account: "Groceries" },
           { pattern: /\b(shopping|shop|clothes|shoes|amazon|flipkart)\b/i, account: "Shopping" },
@@ -3103,19 +3120,30 @@
         
         for (const kw of keywords) {
           if (kw.pattern.test(text)) {
-            // Only use if this account exists
-            if (coaAccounts.includes(kw.account)) { accountHeader = kw.account; break; }
+            // Only use if this account exists in COA
+            if (coaAccounts.includes(kw.account)) { foundAccount = kw.account; break; }
+            // If exact account name not present, try to find a similar one (e.g., "Meals" -> "Meals & Entertainment")
+            if (kw.account === "Meals & Entertainment") {
+              const match = coaAccounts.find(a => a.toLowerCase().includes('meal') || a.toLowerCase().includes('entertain'));
+              if (match) { foundAccount = match; break; }
+            }
+            if (kw.account === "Miscellaneous") {
+              const match = coaAccounts.find(a => a.toLowerCase().includes('misc'));
+              if (match) { foundAccount = match; break; }
+            }
           }
         }
       }
       
-      // Smart fallback: if bank name is also an account header (like AXIS), use it
-      if (!accountHeader) {
-        if (coaAccounts.includes(bankName)) accountHeader = bankName;
-        else if (type === "Income") accountHeader = coaAccounts.includes("Amount Tally") ? "Amount Tally" : "Miscellaneous";
-        else if (type === "Transfer") accountHeader = bankName;
-        else accountHeader = coaAccounts.includes("Miscellaneous") ? "Miscellaneous" : coaAccounts[0] || "Miscellaneous";
+      // Final fallback: if bank name is also an account header (like AXIS), use it
+      if (!foundAccount) {
+        if (coaAccounts.includes(bankName)) foundAccount = bankName;
+        else if (type === "Income") foundAccount = coaAccounts.includes("Amount Tally") ? "Amount Tally" : "Miscellaneous";
+        else if (type === "Transfer") foundAccount = bankName;
+        else foundAccount = coaAccounts.includes("Miscellaneous") ? "Miscellaneous" : coaAccounts[0] || "Miscellaneous";
       }
+      
+      accountHeader = foundAccount;
       
       // Tags (#hashtag)
       const tagMatch = text.match(/#(\w+)/g);
