@@ -3080,31 +3080,33 @@
         else bankName = "Cash";
       }
       
-      // ⭐ 5. ACCOUNT HEADER detection — IMPROVED: match any COA account (exact or partial)
-      // First try exact match with existing accounts (case-insensitive)
+      // ⭐ 5. ACCOUNT HEADER detection — CRITICAL FIX: match full COA name first
+      // We scan for any account name (case-insensitive, allowing partial word matches)
       let foundAccount = null;
-      for (const a of coaAccounts) {
-        const aLower = a.toLowerCase();
-        // Check whole word match
-        const regex = new RegExp(`\\b${aLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-        if (regex.test(text)) { foundAccount = a; break; }
-      }
+      // Sort accounts by length descending to match the most specific one first (e.g., "Meals & Entertainment" before "Meals")
+      const sortedAccounts = [...coaAccounts].sort((a, b) => b.length - a.length);
       
-      // If not found, try partial match (account name appears as substring)
-      if (!foundAccount) {
-        for (const a of coaAccounts) {
-          const aLower = a.toLowerCase();
-          if (text.toLowerCase().includes(aLower)) {
-            // Make sure it's not just a bank name already matched
-            if (!coaBanks.includes(a) || a.toLowerCase() !== bankName.toLowerCase()) {
-              foundAccount = a;
-              break;
-            }
-          }
+      for (const a of sortedAccounts) {
+        const aLower = a.toLowerCase();
+        // Escape regex special chars
+        const escaped = aLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match as a whole word or as part of the string (e.g., "meals" matches "Meals & Entertainment")
+        const regex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'i');
+        if (regex.test(text.toLowerCase())) {
+          foundAccount = a;
+          break;
+        }
+        // Also try simple substring for phrases like "meals and entertainment" or "meals & entertainment"
+        // Normalize: remove & and extra spaces for comparison
+        const normText = text.toLowerCase().replace(/[&]/g, 'and').replace(/\s+/g, ' ');
+        const normAccount = aLower.replace(/[&]/g, 'and').replace(/\s+/g, ' ');
+        if (normText.includes(normAccount)) {
+          foundAccount = a;
+          break;
         }
       }
       
-      // If still not found, try keyword-based inference
+      // If still not found, try keyword-based inference (but only if the keyword maps to an EXISTING account)
       if (!foundAccount) {
         const keywords = [
           { pattern: /\b(fuel|petrol|gas|diesel|petroleum)\b/i, account: "Fuel" },
