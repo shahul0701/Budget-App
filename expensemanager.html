@@ -2932,9 +2932,39 @@
         return;
       }
       
+      // ⭐ DUPLICATE CHECK: Prevent duplicate transactions
+      const uniqueTxs = [];
+      const duplicateCount = { value: 0 };
+      for (const parsed of newTxList) {
+        const dateToCheck = parsed.date || new Date().toISOString().split('T')[0];
+        const isDuplicate = allTransactions.some(tx => 
+          tx.DATE === dateToCheck &&
+          tx.ACCOUNT_HEADER === parsed.accountHeader &&
+          tx.BANK_NAME === parsed.bankName &&
+          (parseFloat(tx.INCOME) || 0) === (parsed.type === 'Income' ? parsed.amount : 0) &&
+          (parseFloat(tx.EXPENSE) || 0) === (parsed.type === 'Expense' ? parsed.amount : 0)
+        );
+        
+        if (!isDuplicate) {
+          uniqueTxs.push(parsed);
+        } else {
+          duplicateCount.value++;
+        }
+      }
+      
+      if (uniqueTxs.length === 0) {
+        loadingModal.hide();
+        showToast(`All ${newTxList.length} transactions already exist (duplicates).`, "Warning", "warning");
+        return;
+      }
+      
+      if (duplicateCount.value > 0) {
+        showToast(`${duplicateCount.value} duplicate(s) skipped, ${uniqueTxs.length} new transaction(s) added.`, "Info", "info");
+      }
+      
       // Step 2: Assign voucher numbers locally (fast)
       const localCounters = { ...voucherCache };
-      const txDocs = newTxList.map(parsed => {
+      const txDocs = uniqueTxs.map(parsed => {
         let voucherType, sino;
         if (parsed.type === "Transfer") {
           voucherType = "Transfer";
