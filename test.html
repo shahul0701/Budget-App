@@ -272,7 +272,7 @@
     .location-toggle.active .toggle-indicator{background:var(--success);}
     .location-toggle.active .toggle-indicator::after{left:20px;}
     #locationMapContainer{height:220px;width:100%;border-radius:12px;border:1px solid var(--border-color);margin-top:10px;display:none;position:relative;z-index:1;}
-    #locationMapContainer.active{display:block;}
+    #locationMapContainer.active{display:block !important;min-height:220px;height:220px;}
     .location-coords{font-size:12px;color:var(--muted);margin-top:6px;word-break:break-all;}
     .leaflet-control-attribution{font-size:9px!important;}
   </style>
@@ -1473,32 +1473,13 @@
     // ============ LOCATION FUNCTIONS ============
     function initMap() {
       if (map) return;
-      map = L.map('locationMapContainer').setView([20.5937, 78.9629], 5); // India center, zoom out
+
+      map = L.map('locationMapContainer').setView([20.5937, 78.9629], 5);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
       }).addTo(map);
-      // Try to get user location
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            currentLat = lat; currentLng = lng;
-            map.setView([lat, lng], 15);
-            if (marker) map.removeLayer(marker);
-            marker = L.marker([lat, lng]).addTo(map).bindPopup('You are here').openPopup();
-            locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
-            formLOCATION.value = JSON.stringify({ lat, lng });
-          },
-          (err) => {
-            console.warn('Geolocation error:', err);
-            locationCoords.textContent = 'Location access denied. Click map to set location manually.';
-          }
-        );
-      } else {
-        locationCoords.textContent = 'Geolocation not supported. Click map to set location.';
-      }
-      // Click handler to set marker
+
+      // Click handler
       map.on('click', function(e) {
         const lat = e.latlng.lat;
         const lng = e.latlng.lng;
@@ -1507,26 +1488,108 @@
         marker = L.marker([lat, lng]).addTo(map).bindPopup('Selected location').openPopup();
         locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
         formLOCATION.value = JSON.stringify({ lat, lng });
+        locationStatus.textContent = 'Manual pin set';
+        locationStatus.style.color = 'var(--success)';
       });
+
+      // ---- AUTO LOCATION ----
+      locationStatus.textContent = 'Locating...';
+      locationStatus.style.color = 'var(--warning)';
+      locationCoords.textContent = 'Requesting location permission...';
+
+      if (!navigator.geolocation) {
+        locationCoords.textContent = '❌ Geolocation not supported by this browser.';
+        locationStatus.textContent = 'Not supported';
+        locationStatus.style.color = 'var(--danger)';
+        return;
+      }
+
+      // Check secure context
+      if (!window.isSecureContext) {
+        locationCoords.textContent = '❌ Auto-location requires HTTPS or localhost. You are on an insecure context. Please click the map manually.';
+        locationStatus.textContent = 'Insecure context';
+        locationStatus.style.color = 'var(--danger)';
+        return;
+      }
+
+      // Check permission state if supported
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'geolocation' }).then(perm => {
+          if (perm.state === 'denied') {
+            locationCoords.textContent = '❌ Location permission is BLOCKED. Click the lock icon in the address bar → set Location to "Allow" → reload.';
+            locationStatus.textContent = 'Blocked';
+            locationStatus.style.color = 'var(--danger)';
+          }
+        }).catch(() => {});
+      }
+
+      // Request position with options
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const acc = pos.coords.accuracy;
+          currentLat = lat; currentLng = lng;
+          map.setView([lat, lng], 16);
+          if (marker) map.removeLayer(marker);
+          marker = L.marker([lat, lng]).addTo(map)
+            .bindPopup(`📍 You are here<br>Accuracy: ±${Math.round(acc)}m`).openPopup();
+          locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)} (±${Math.round(acc)}m)`;
+          formLOCATION.value = JSON.stringify({ lat, lng, accuracy: acc });
+          locationStatus.textContent = 'Located ✓';
+          locationStatus.style.color = 'var(--success)';
+          setTimeout(() => map.invalidateSize(), 200);
+        },
+        (err) => {
+          let msg = '';
+          switch (err.code) {
+            case err.PERMISSION_DENIED:
+              msg = '❌ Permission denied. Click the lock icon in the address bar and allow Location, then reload.';
+              break;
+            case err.POSITION_UNAVAILABLE:
+              msg = '❌ Position unavailable. Check that GPS / Location Services is ON for your device.';
+              break;
+            case err.TIMEOUT:
+              msg = '❌ Timeout. Try again or click the map to set location manually.';
+              break;
+            default:
+              msg = '❌ Unknown error: ' + err.message;
+          }
+          locationCoords.textContent = msg;
+          locationStatus.textContent = 'Failed';
+          locationStatus.style.color = 'var(--danger)';
+          console.warn('Geolocation error:', err);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        }
+      );
     }
 
     function toggleLocationCapture() {
       locationCaptureEnabled = !locationCaptureEnabled;
       locationToggle.classList.toggle('active', locationCaptureEnabled);
       locationStatus.textContent = locationCaptureEnabled ? 'On' : 'Off';
+      locationStatus.style.color = '';
+
       if (locationCaptureEnabled) {
         locationMapContainer.classList.add('active');
-        // Initialize map after container is visible
-        setTimeout(() => {
-          initMap();
-          if (map) map.invalidateSize();
-        }, 100);
+        // Wait for container to actually have size
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            initMap();
+            if (map) map.invalidateSize();
+          }, 250);
+        });
       } else {
         locationMapContainer.classList.remove('active');
         if (map) { map.remove(); map = null; marker = null; }
         locationCoords.textContent = '';
         formLOCATION.value = '';
         currentLat = null; currentLng = null;
+        locationStatus.style.color = '';
       }
     }
 
@@ -2687,7 +2750,6 @@
         }
         const tags = (tx.TAGS || []).map(tag => `<span class="badge bg-secondary me-1">${escapeHtml(tag)}</span>`).join('');
         const warningIcon = warnings.length > 0 ? `<i class="fa fa-exclamation-triangle" style="color:var(--warning);margin-left:6px;" title="${warnings.map(w => `${w.category}: ${w.percentage}%`).join(', ')}"></i>` : '';
-        // Location indicator in table
         const locationIndicator = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location captured"></i>` : '';
         html += `
           <tr class="${isSelected ? 'selected' : ''} ${warningClass}" ${isTemp ? 'style="opacity:0.7;"' : ''}>
@@ -2820,7 +2882,6 @@
         warnings.forEach(w => { warningHtml += `${escapeHtml(w.category)}: ${w.percentage}% (over by ${formatCurrency(w.overshoot, cur)})<br>`; });
         warningHtml += `</div>`;
       }
-      // Location in detail view
       let locationHtml = '';
       if (tx.LOCATION) {
         locationHtml = `<div class="detail-view-item"><span class="detail-view-label"><i class="fa fa-map-marker-alt me-2"></i>Location</span><span class="detail-view-value">Lat: ${tx.LOCATION.lat.toFixed(6)}, Lng: ${tx.LOCATION.lng.toFixed(6)}</span></div>`;
