@@ -275,6 +275,10 @@
     #locationMapContainer.active{display:block !important;min-height:220px;height:220px;}
     .location-coords{font-size:12px;color:var(--muted);margin-top:6px;word-break:break-all;}
     .leaflet-control-attribution{font-size:9px!important;}
+    .location-source-badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;}
+    .location-source-gps{background:rgba(25,135,84,.15);color:var(--success);}
+    .location-source-ip{background:rgba(13,202,240,.15);color:var(--info);}
+    .location-source-manual{background:rgba(255,193,7,.15);color:var(--warning);}
   </style>
 </head>
 <body>
@@ -800,6 +804,7 @@
                 <div class="toggle-indicator"></div>
               </div>
               <span class="small-muted" id="locationStatus">Off</span>
+              <span id="locationSourceBadge" class="location-source-badge" style="display:none;"></span>
             </div>
             <div id="locationMapContainer"></div>
             <div class="location-coords" id="locationCoords"></div>
@@ -1095,6 +1100,7 @@
     let marker = null;
     let currentLat = null;
     let currentLng = null;
+    let currentLocationSource = null; // 'gps', 'ip', 'manual'
 
     // ============ DOM ============
     const $ = id => document.getElementById(id);
@@ -1311,6 +1317,7 @@
     const locationMapContainer = $("locationMapContainer");
     const locationCoords = $("locationCoords");
     const formLOCATION = $("formLOCATION");
+    const locationSourceBadge = $("locationSourceBadge");
 
     // ============ HELPERS ============
     function escapeHtml(text) {
@@ -1471,6 +1478,62 @@
     }
 
     // ============ LOCATION FUNCTIONS ============
+    function updateLocationSourceBadge(source) {
+      currentLocationSource = source;
+      if (!locationSourceBadge) return;
+      locationSourceBadge.style.display = 'inline-block';
+      locationSourceBadge.className = 'location-source-badge';
+      if (source === 'gps') {
+        locationSourceBadge.classList.add('location-source-gps');
+        locationSourceBadge.textContent = '📡 GPS';
+      } else if (source === 'ip') {
+        locationSourceBadge.classList.add('location-source-ip');
+        locationSourceBadge.textContent = '🌐 IP-based';
+      } else if (source === 'manual') {
+        locationSourceBadge.classList.add('location-source-manual');
+        locationSourceBadge.textContent = '📌 Manual';
+      } else {
+        locationSourceBadge.style.display = 'none';
+      }
+    }
+
+    function setLocationMarker(lat, lng, popupText, source) {
+      currentLat = lat;
+      currentLng = lng;
+      if (marker) map.removeLayer(marker);
+      marker = L.marker([lat, lng]).addTo(map).bindPopup(popupText).openPopup();
+      map.setView([lat, lng], 15);
+      locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+      formLOCATION.value = JSON.stringify({ lat, lng, source });
+      if (source) updateLocationSourceBadge(source);
+    }
+
+    async function getIPBasedLocation() {
+      // Try multiple free APIs in order
+      const apis = [
+        { url: 'https://ipapi.co/json/', parse: d => ({ lat: d.latitude, lng: d.longitude, city: d.city, country: d.country_name }) },
+        { url: 'https://ipwhois.app/json/', parse: d => ({ lat: d.latitude, lng: d.longitude, city: d.city, country: d.country }) },
+        { url: 'https://ipinfo.io/json', parse: d => { const [lat, lng] = (d.loc || '').split(',').map(Number); return { lat, lng, city: d.city, country: d.country }; } }
+      ];
+      for (const api of apis) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch(api.url, { signal: controller.signal });
+          clearTimeout(timeout);
+          if (!res.ok) continue;
+          const data = await res.json();
+          const parsed = api.parse(data);
+          if (parsed.lat && parsed.lng && !isNaN(parsed.lat) && !isNaN(parsed.lng)) {
+            return { ...parsed, source: 'ip' };
+          }
+        } catch (e) {
+          console.warn('IP API failed:', api.url, e.message);
+        }
+      }
+      return null;
+    }
+
     function initMap() {
       if (map) return;
 
@@ -1479,93 +1542,91 @@
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
       }).addTo(map);
 
-      // Click handler
+      // Click handler for manual selection
       map.on('click', function(e) {
-        const lat = e.latlng.lat;
-        const lng = e.latlng.lng;
-        currentLat = lat; currentLng = lng;
-        if (marker) map.removeLayer(marker);
-        marker = L.marker([lat, lng]).addTo(map).bindPopup('Selected location').openPopup();
-        locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
-        formLOCATION.value = JSON.stringify({ lat, lng });
+        setLocationMarker(e.latlng.lat, e.latlng.lng, '📌 Selected location', 'manual');
         locationStatus.textContent = 'Manual pin set';
-        locationStatus.style.color = 'var(--success)';
+        locationStatus.style.color = 'var(--warning)';
       });
 
-      // ---- AUTO LOCATION ----
+      // ---- AUTO LOCATION: GPS first, then IP fallback ----
       locationStatus.textContent = 'Locating...';
       locationStatus.style.color = 'var(--warning)';
-      locationCoords.textContent = 'Requesting location permission...';
+      locationCoords.textContent = 'Trying GPS...';
 
-      if (!navigator.geolocation) {
-        locationCoords.textContent = '❌ Geolocation not supported by this browser.';
-        locationStatus.textContent = 'Not supported';
-        locationStatus.style.color = 'var(--danger)';
-        return;
-      }
-
-      // Check secure context
-      if (!window.isSecureContext) {
-        locationCoords.textContent = '❌ Auto-location requires HTTPS or localhost. You are on an insecure context. Please click the map manually.';
-        locationStatus.textContent = 'Insecure context';
-        locationStatus.style.color = 'var(--danger)';
-        return;
-      }
-
-      // Check permission state if supported
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: 'geolocation' }).then(perm => {
-          if (perm.state === 'denied') {
-            locationCoords.textContent = '❌ Location permission is BLOCKED. Click the lock icon in the address bar → set Location to "Allow" → reload.';
-            locationStatus.textContent = 'Blocked';
-            locationStatus.style.color = 'var(--danger)';
+      const tryGPS = () => {
+        return new Promise((resolve) => {
+          if (!navigator.geolocation) {
+            resolve(null);
+            return;
           }
-        }).catch(() => {});
-      }
+          if (!window.isSecureContext) {
+            resolve(null);
+            return;
+          }
+          // Check permission state
+          if (navigator.permissions && navigator.permissions.query) {
+            navigator.permissions.query({ name: 'geolocation' }).then(perm => {
+              if (perm.state === 'denied') {
+                resolve(null);
+                return;
+              }
+              requestGPS(resolve);
+            }).catch(() => requestGPS(resolve));
+          } else {
+            requestGPS(resolve);
+          }
+        });
+      };
 
-      // Request position with options
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          const acc = pos.coords.accuracy;
-          currentLat = lat; currentLng = lng;
-          map.setView([lat, lng], 16);
-          if (marker) map.removeLayer(marker);
-          marker = L.marker([lat, lng]).addTo(map)
-            .bindPopup(`📍 You are here<br>Accuracy: ±${Math.round(acc)}m`).openPopup();
-          locationCoords.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)} (±${Math.round(acc)}m)`;
-          formLOCATION.value = JSON.stringify({ lat, lng, accuracy: acc });
-          locationStatus.textContent = 'Located ✓';
+      const requestGPS = (resolve) => {
+        let resolved = false;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (resolved) return;
+            resolved = true;
+            resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, source: 'gps' });
+          },
+          (err) => {
+            if (resolved) return;
+            resolved = true;
+            console.warn('GPS failed:', err.code, err.message);
+            resolve(null);
+          },
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        );
+      };
+
+      tryGPS().then(async (gpsResult) => {
+        if (gpsResult) {
+          // GPS success
+          setLocationMarker(gpsResult.lat, gpsResult.lng, `📍 GPS location<br>Accuracy: ±${Math.round(gpsResult.accuracy)}m`, 'gps');
+          locationStatus.textContent = 'Located via GPS ✓';
           locationStatus.style.color = 'var(--success)';
+          locationCoords.textContent = `Lat: ${gpsResult.lat.toFixed(6)}, Lng: ${gpsResult.lng.toFixed(6)} (±${Math.round(gpsResult.accuracy)}m)`;
+          formLOCATION.value = JSON.stringify({ lat: gpsResult.lat, lng: gpsResult.lng, accuracy: gpsResult.accuracy, source: 'gps' });
           setTimeout(() => map.invalidateSize(), 200);
-        },
-        (err) => {
-          let msg = '';
-          switch (err.code) {
-            case err.PERMISSION_DENIED:
-              msg = '❌ Permission denied. Click the lock icon in the address bar and allow Location, then reload.';
-              break;
-            case err.POSITION_UNAVAILABLE:
-              msg = '❌ Position unavailable. Check that GPS / Location Services is ON for your device.';
-              break;
-            case err.TIMEOUT:
-              msg = '❌ Timeout. Try again or click the map to set location manually.';
-              break;
-            default:
-              msg = '❌ Unknown error: ' + err.message;
+        } else {
+          // GPS failed — try IP-based fallback
+          locationStatus.textContent = 'GPS unavailable, trying IP...';
+          locationStatus.style.color = 'var(--warning)';
+          locationCoords.textContent = '🌐 Fetching approximate location from IP...';
+          const ipResult = await getIPBasedLocation();
+          if (ipResult) {
+            setLocationMarker(ipResult.lat, ipResult.lng, `🌐 IP-based location<br>${ipResult.city || ''}, ${ipResult.country || ''}`, 'ip');
+            locationStatus.textContent = 'Located via IP ✓';
+            locationStatus.style.color = 'var(--success)';
+            locationCoords.textContent = `Lat: ${ipResult.lat.toFixed(6)}, Lng: ${ipResult.lng.toFixed(6)} (approx, via IP)`;
+            formLOCATION.value = JSON.stringify({ lat: ipResult.lat, lng: ipResult.lng, source: 'ip', city: ipResult.city, country: ipResult.country });
+            setTimeout(() => map.invalidateSize(), 200);
+          } else {
+            // Both failed
+            locationStatus.textContent = 'Auto-locate failed';
+            locationStatus.style.color = 'var(--danger)';
+            locationCoords.textContent = '❌ Could not auto-detect location (GPS blocked/unavailable, IP lookup failed). Please click the map to set location manually.';
           }
-          locationCoords.textContent = msg;
-          locationStatus.textContent = 'Failed';
-          locationStatus.style.color = 'var(--danger)';
-          console.warn('Geolocation error:', err);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0
         }
-      );
+      });
     }
 
     function toggleLocationCapture() {
@@ -1573,10 +1634,10 @@
       locationToggle.classList.toggle('active', locationCaptureEnabled);
       locationStatus.textContent = locationCaptureEnabled ? 'On' : 'Off';
       locationStatus.style.color = '';
+      if (locationSourceBadge) locationSourceBadge.style.display = 'none';
 
       if (locationCaptureEnabled) {
         locationMapContainer.classList.add('active');
-        // Wait for container to actually have size
         requestAnimationFrame(() => {
           setTimeout(() => {
             initMap();
@@ -1589,6 +1650,7 @@
         locationCoords.textContent = '';
         formLOCATION.value = '';
         currentLat = null; currentLng = null;
+        currentLocationSource = null;
         locationStatus.style.color = '';
       }
     }
@@ -2458,7 +2520,7 @@
       if (formRECURRING.value) txData.RECURRING = formRECURRING.value;
       // Add location if captured
       if (locationCaptureEnabled && currentLat !== null && currentLng !== null) {
-        txData.LOCATION = { lat: currentLat, lng: currentLng };
+        txData.LOCATION = { lat: currentLat, lng: currentLng, source: currentLocationSource };
       }
       try {
         await saveTransactionWithWarning(txData);
@@ -2750,7 +2812,7 @@
         }
         const tags = (tx.TAGS || []).map(tag => `<span class="badge bg-secondary me-1">${escapeHtml(tag)}</span>`).join('');
         const warningIcon = warnings.length > 0 ? `<i class="fa fa-exclamation-triangle" style="color:var(--warning);margin-left:6px;" title="${warnings.map(w => `${w.category}: ${w.percentage}%`).join(', ')}"></i>` : '';
-        const locationIndicator = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location captured"></i>` : '';
+        const locationIndicator = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location: ${tx.LOCATION.source || 'unknown'}"></i>` : '';
         html += `
           <tr class="${isSelected ? 'selected' : ''} ${warningClass}" ${isTemp ? 'style="opacity:0.7;"' : ''}>
             <td><input type="checkbox" class="transaction-checkbox row-checkbox" data-id="${tx.id}" ${isSelected ? 'checked' : ''}></td>
@@ -2851,6 +2913,8 @@
       locationCoords.textContent = '';
       formLOCATION.value = '';
       currentLat = null; currentLng = null;
+      currentLocationSource = null;
+      if (locationSourceBadge) locationSourceBadge.style.display = 'none';
       if (map) { map.remove(); map = null; marker = null; }
       document.getElementById("transactionModalLabel").textContent = "Add Transaction";
       transactionModal.show();
@@ -2884,7 +2948,9 @@
       }
       let locationHtml = '';
       if (tx.LOCATION) {
-        locationHtml = `<div class="detail-view-item"><span class="detail-view-label"><i class="fa fa-map-marker-alt me-2"></i>Location</span><span class="detail-view-value">Lat: ${tx.LOCATION.lat.toFixed(6)}, Lng: ${tx.LOCATION.lng.toFixed(6)}</span></div>`;
+        const src = tx.LOCATION.source || 'unknown';
+        const srcLabel = src === 'gps' ? '📡 GPS' : src === 'ip' ? '🌐 IP-based' : src === 'manual' ? '📌 Manual' : '';
+        locationHtml = `<div class="detail-view-item"><span class="detail-view-label"><i class="fa fa-map-marker-alt me-2"></i>Location ${srcLabel}</span><span class="detail-view-value">Lat: ${tx.LOCATION.lat.toFixed(6)}, Lng: ${tx.LOCATION.lng.toFixed(6)}</span></div>`;
       }
       viewDetailBody.innerHTML = `
         <div class="detail-view-amount ${amountColor}">${tx.TYPE === 'Income' ? '+' : '-'}${formatCurrency(amount, cur)}<div class="small text-muted">${cur}</div></div>
@@ -2945,15 +3011,24 @@
         locationMapContainer.classList.add('active');
         currentLat = tx.LOCATION.lat;
         currentLng = tx.LOCATION.lng;
+        currentLocationSource = tx.LOCATION.source || 'manual';
         formLOCATION.value = JSON.stringify(tx.LOCATION);
         locationCoords.textContent = `Lat: ${currentLat.toFixed(6)}, Lng: ${currentLng.toFixed(6)}`;
+        updateLocationSourceBadge(currentLocationSource);
         setTimeout(() => {
           if (map) { map.remove(); map = null; marker = null; }
-          initMap();
-          if (map) { 
-            map.setView([currentLat, currentLng], 15);
-            marker = L.marker([currentLat, currentLng]).addTo(map).bindPopup('Saved location').openPopup();
-          }
+          // Create map manually (without auto-locate)
+          map = L.map('locationMapContainer').setView([currentLat, currentLng], 15);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          }).addTo(map);
+          marker = L.marker([currentLat, currentLng]).addTo(map).bindPopup('Saved location').openPopup();
+          map.on('click', function(e) {
+            setLocationMarker(e.latlng.lat, e.latlng.lng, '📌 Selected location', 'manual');
+            locationStatus.textContent = 'Manual pin set';
+            locationStatus.style.color = 'var(--warning)';
+          });
+          setTimeout(() => map.invalidateSize(), 200);
         }, 200);
       } else {
         locationCaptureEnabled = false;
@@ -2963,6 +3038,8 @@
         locationCoords.textContent = '';
         formLOCATION.value = '';
         currentLat = null; currentLng = null;
+        currentLocationSource = null;
+        if (locationSourceBadge) locationSourceBadge.style.display = 'none';
         if (map) { map.remove(); map = null; marker = null; }
       }
       setupAccountAutoDetect();
@@ -3545,7 +3622,7 @@
         let badgeClass = tx.TYPE === 'Income' ? 'badge-income' : tx.TYPE === 'Expense' ? 'badge-expense' : 'badge-transfer';
         const warnings = checkBudgetLimits(tx);
         const warnClass = warnings.length > 0 ? (warnings.some(w => w.overshoot > 0) ? 'budget-over-limit' : 'budget-warning') : '';
-        const locIcon = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location captured"></i>` : '';
+        const locIcon = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location: ${tx.LOCATION.source || 'unknown'}"></i>` : '';
         html += `<div class="transaction-card ${warnClass}"><div class="transaction-card-header"><div style="font-weight:600;font-size:14px;color:var(--muted);">${escapeHtml(date)}</div><div><span class="badge ${badgeClass}">${escapeHtml(tx.TYPE)}</span>${locIcon}</div></div><div style="font-size:15px;font-weight:600;margin-bottom:8px;">${escapeHtml(tx.DESCRIPTION || tx.NOTES || "No description")}</div><div style="font-size:13px;color:var(--muted);">${escapeHtml(tx.ACCOUNT_HEADER || '-')} • ${escapeHtml(tx.BANK_NAME || tx.MODE || '-')}</div><div class="transaction-card-amount ${tx.TYPE === 'Income' ? 'income-color' : 'expense-color'}">${tx.TYPE === 'Income' ? '+' : '-'}${formatCurrency(amount, cur)}</div><div class="transaction-card-actions"><button class="btn btn-sm btn-outline-info view-tx-grid" data-id="${tx.id}"><i class="fa fa-eye"></i></button><button class="btn btn-sm btn-outline-warning edit-tx-grid" data-id="${tx.id}"><i class="fa fa-edit"></i></button><button class="btn btn-sm btn-outline-danger delete-tx-grid" data-id="${tx.id}"><i class="fa fa-trash"></i></button></div></div>`;
       });
       gridViewContainer.innerHTML = html;
@@ -3575,7 +3652,7 @@
         const amount = income > 0 ? income : expense;
         const cur = tx.CURRENCY || userDefaultCurrency;
         const color = tx.TYPE === 'Income' ? 'var(--success)' : tx.TYPE === 'Expense' ? 'var(--danger)' : 'var(--info)';
-        const locIcon = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location captured"></i>` : '';
+        const locIcon = tx.LOCATION ? `<i class="fa fa-map-marker-alt" style="color:var(--info);margin-left:6px;" title="Location: ${tx.LOCATION.source || 'unknown'}"></i>` : '';
         html += `<div class="timeline-item" style="border-left:4px solid ${color};"><div style="display:flex;justify-content:space-between;"><div><div style="font-weight:600;">${escapeHtml(tx.DESCRIPTION || tx.NOTES || "No description")} ${locIcon}</div><div class="small-muted">${date} • ${tx.TYPE} • ${escapeHtml(tx.BANK_NAME || tx.MODE || '-')}</div></div><div style="font-weight:700;color:${color};">${tx.TYPE === 'Income' ? '+' : '-'}${formatCurrency(amount, cur)}</div></div><div style="margin-top:8px;display:flex;gap:6px;"><button class="btn btn-sm btn-outline-primary view-tx-timeline" data-id="${tx.id}"><i class="fa fa-eye"></i></button><button class="btn btn-sm btn-outline-warning edit-tx-timeline" data-id="${tx.id}"><i class="fa fa-edit"></i></button><button class="btn btn-sm btn-outline-danger delete-tx-timeline" data-id="${tx.id}"><i class="fa fa-trash"></i></button></div></div>`;
       });
       timelineViewContainer.innerHTML = html;
@@ -3681,7 +3758,7 @@
       const headers = ['Date','Account','Description','Type','Voucher','Bank','Income','Expense','Balance','Currency','Tags','Location'];
       let csv = headers.join(',') + '\n';
       filteredTransactions.forEach(tx => {
-        const locStr = tx.LOCATION ? `${tx.LOCATION.lat.toFixed(6)},${tx.LOCATION.lng.toFixed(6)}` : '';
+        const locStr = tx.LOCATION ? `${tx.LOCATION.lat.toFixed(6)},${tx.LOCATION.lng.toFixed(6)},${tx.LOCATION.source || ''}` : '';
         csv += [formatDateDDMMYYYY(tx.DATE)||'', tx.ACCOUNT_HEADER||'', `"${(tx.DESCRIPTION||'').replace(/"/g,'""')}"`, tx.TYPE||'', tx.SINO||'', tx.BANK_NAME||tx.MODE||'', tx.INCOME||0, tx.EXPENSE||0, tx.BALANCE||0, tx.CURRENCY||userDefaultCurrency, `"${(tx.TAGS||[]).join(';')}"`, locStr].join(',') + '\n';
       });
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -3702,7 +3779,7 @@
       const headers = ['Date','Account','Description','Type','Voucher','Bank','Income','Expense','Currency','Location'];
       let csv = headers.join(',') + '\n';
       sel.forEach(tx => { 
-        const locStr = tx.LOCATION ? `${tx.LOCATION.lat.toFixed(6)},${tx.LOCATION.lng.toFixed(6)}` : '';
+        const locStr = tx.LOCATION ? `${tx.LOCATION.lat.toFixed(6)},${tx.LOCATION.lng.toFixed(6)},${tx.LOCATION.source || ''}` : '';
         csv += [formatDateDDMMYYYY(tx.DATE)||'', tx.ACCOUNT_HEADER||'', `"${(tx.DESCRIPTION||'').replace(/"/g,'""')}"`, tx.TYPE||'', tx.SINO||'', tx.BANK_NAME||'', tx.INCOME||0, tx.EXPENSE||0, tx.CURRENCY||userDefaultCurrency, locStr].join(',') + '\n'; 
       });
       const blob = new Blob([csv], { type: 'text/csv' });
