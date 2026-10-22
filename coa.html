@@ -814,7 +814,6 @@
   let csvParsedData = [];
   let tempBankCards = [];
   let pendingDelete = null;
-  let categoryManagerCallbacks = [];
 
   const starterAccounts = [
     { type: "Asset", category: "Bank", name: "Bank Account" },
@@ -1291,6 +1290,7 @@
     clearErrors();
   });
 
+  // ===== ADD NEW CATEGORY FROM FORM (ONLY CREATES CATEGORY, NO ACCOUNT) =====
   categorySelect.addEventListener("change", async () => {
     if (categorySelect.value === "add-new") {
       if (!accountTypeSelect.value) {
@@ -1301,6 +1301,13 @@
       const newCat = prompt(`New category for ${accountTypeSelect.value}:`);
       if (newCat && newCat.trim()) {
         const trimmed = newCat.trim();
+        // Check duplicate
+        const existing = [...new Set([...(defaultCategories[accountTypeSelect.value] || []), ...(categories[accountTypeSelect.value] || [])])];
+        if (existing.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+          showToast("Category already exists", "warning");
+          categorySelect.value = "";
+          return;
+        }
         try {
           showLoading();
           await addDoc(collection(db, "users", currentUser.uid, "categories"), {
@@ -1314,7 +1321,7 @@
           categorySelect.value = trimmed;
           showToast("Category added");
           if (categoryManagerModal.style.display === 'flex') {
-            renderCategoryManager(catManagerTypeSelect.value);
+            await renderCategoryManager(catManagerTypeSelect.value);
           }
         } catch (e) {
           showToast("Failed: " + e.message, "error");
@@ -1365,7 +1372,7 @@
     const name = accountNameInput.value.trim();
     let valid = true;
     if (!type) { typeError.textContent = "Type required"; typeError.style.display = 'block'; accountTypeSelect.classList.add('has-error'); valid = false; }
-    if (!category) { categoryError.textContent = "Category required"; categoryError.style.display = 'block'; categorySelect.classList.add('has-error'); valid = false; }
+    if (!category || category === 'add-new') { categoryError.textContent = "Category required"; categoryError.style.display = 'block'; categorySelect.classList.add('has-error'); valid = false; }
     if (!name) { nameError.textContent = "Name required"; nameError.style.display = 'block'; accountNameInput.classList.add('has-error'); valid = false; }
     if (!valid) return;
     const key = `${type.toLowerCase()}_${name.toLowerCase()}`;
@@ -1740,7 +1747,6 @@
 
           showLoading();
           try {
-            // If it's a user category, update it
             if (isUser) {
               const q = query(
                 collection(db, "users", currentUser.uid, "categories"),
@@ -1755,7 +1761,6 @@
                 });
               }
             } else {
-              // Default category: add as a new user category (override)
               await addDoc(collection(db, "users", currentUser.uid, "categories"), {
                 userId: currentUser.uid,
                 accountType: type,
@@ -1763,7 +1768,6 @@
                 createdAt: serverTimestamp()
               });
             }
-            // Also update any accounts that used the old category name
             const accQ = query(
               collection(db, "users", currentUser.uid, "chartOfAccounts"),
               where("userId", "==", currentUser.uid),
@@ -1776,7 +1780,6 @@
                 category: newName
               });
             }
-
             await loadCategories();
             await loadAccounts();
             await renderCategoryManager(type);
@@ -1792,24 +1795,17 @@
             hideLoading();
           }
         } else {
-          // START EDIT
           nameSpan.contentEditable = 'true';
           nameSpan.focus();
           nameSpan.style.borderColor = 'var(--accent)';
           editBtn.innerHTML = '<i class="fas fa-check"></i>';
-          // Select all text
           const range = document.createRange();
           range.selectNodeContents(nameSpan);
           const sel = window.getSelection();
           sel.removeAllRanges();
           sel.addRange(range);
-
-          // Enter to save, Escape to cancel
           const onKey = (e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              editBtn.click();
-            }
+            if (e.key === 'Enter') { e.preventDefault(); editBtn.click(); }
             if (e.key === 'Escape') {
               nameSpan.textContent = catName;
               nameSpan.contentEditable = 'false';
@@ -1828,7 +1824,6 @@
         if (!confirm(`Delete category "${catName}"?\n\nThis will also remove the category from any accounts using it.`)) return;
         showLoading();
         try {
-          // Remove from user's categories collection (if it exists there)
           const q = query(
             collection(db, "users", currentUser.uid, "categories"),
             where("userId", "==", currentUser.uid),
@@ -1839,8 +1834,6 @@
           for (const d of snap.docs) {
             await deleteDoc(doc(db, "users", currentUser.uid, "categories", d.id));
           }
-
-          // Remove from any accounts that use this category (set to empty / "Uncategorized")
           const accQ = query(
             collection(db, "users", currentUser.uid, "chartOfAccounts"),
             where("userId", "==", currentUser.uid),
@@ -1853,7 +1846,6 @@
               category: "Uncategorized"
             });
           }
-
           await loadCategories();
           await loadAccounts();
           await renderCategoryManager(type);
@@ -1882,7 +1874,6 @@
     const name = newCategoryName.value.trim();
     if (!name) { showToast("Enter a category name", "warning"); return; }
     const type = catManagerTypeSelect.value;
-    // Check duplicate
     const existing = getMergedCategories(type);
     if (existing.some(c => c.toLowerCase() === name.toLowerCase())) {
       showToast("Category already exists", "warning");
