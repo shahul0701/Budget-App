@@ -144,7 +144,7 @@
     .bank-card .bank-sub{font-size:11px;color:var(--text-muted);margin-top:2px;
       display:flex;justify-content:space-between;}
 
-    /* TABLE — NO BALANCE COLUMN */
+    /* TABLE — NO Balance column */
     .table-container{overflow-x:auto;margin-top:20px;border-radius:20px;
       background:var(--bg-card);box-shadow:var(--shadow-md);border:1px solid var(--border-light);}
     table{width:100%;min-width:600px;border-collapse:collapse;}
@@ -340,6 +340,20 @@
     ::-webkit-scrollbar{width:8px;height:8px;}
     ::-webkit-scrollbar-track{background:var(--border-light);border-radius:10px;}
     ::-webkit-scrollbar-thumb{background:var(--border-color);border-radius:10px;}
+
+    /* CATEGORY MANAGEMENT */
+    .category-manager-list{max-height:360px;overflow-y:auto;margin-bottom:8px;}
+    .category-row{display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border:1px solid var(--border-color);border-radius:12px;
+      margin-bottom:8px;background:var(--bg-bank);transition:all .2s;}
+    .category-row:hover{border-color:var(--accent);}
+    .category-row .cat-name{font-weight:600;font-size:14px;flex:1;cursor:pointer;
+      padding:4px 8px;border-radius:8px;border:1px solid transparent;outline:none;}
+    .category-row .cat-name:focus{border-color:var(--accent);background:var(--bg-input);}
+    .category-row .cat-actions{display:flex;gap:6px;}
+    .category-row .cat-actions button{padding:5px 10px;font-size:11px;border-radius:30px;}
+    .cat-edit-btn{background:linear-gradient(135deg,#3b82f6,#2563eb);}
+    .cat-delete-btn{background:linear-gradient(135deg,#ef4444,#dc2626);}
   </style>
 </head>
 <body>
@@ -461,6 +475,41 @@
   </div>
 </div>
 
+<!-- Category Manager Modal -->
+<div id="categoryManagerModal" class="modal">
+  <div class="modal-content wide">
+    <button class="close-btn" id="categoryManagerClose">&times;</button>
+    <div class="modal-header">🗂️ Category Manager</div>
+    <div class="modal-body">
+      <div class="form-group" style="flex-direction:column;align-items:stretch;gap:6px;margin-bottom:16px;">
+        <label style="font-weight:600;">Select Account Type</label>
+        <select id="catManagerTypeSelect">
+          <option value="Asset">Asset</option>
+          <option value="Liability">Liability</option>
+          <option value="Equity">Equity</option>
+          <option value="Income">Income</option>
+          <option value="Expense">Expense</option>
+          <option value="COGS">Cost of Goods Sold</option>
+          <option value="OtherIncome">Other Income</option>
+          <option value="OtherExpense">Other Expense</option>
+        </select>
+      </div>
+      <div id="categoryManagerList" class="category-manager-list"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <input type="text" id="newCategoryName" placeholder="New category name" style="flex:1;
+          padding:12px 16px;border:2px solid var(--border-color);border-radius:14px;
+          background:var(--bg-input);color:var(--text-primary);font-size:14px;">
+        <button id="addCategoryBtn" style="min-width:120px;">
+          <i class="fas fa-plus"></i> Add
+        </button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn modal-btn-secondary" id="categoryManagerDone">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Header -->
 <div class="header">
   <div class="header-left">
@@ -509,6 +558,9 @@
     </button>
     <button id="bankCardsBtn" style="background:linear-gradient(135deg,#ec4899,#db2777);">
       <i class="fas fa-university"></i> Bank & Cards
+    </button>
+    <button id="categoryManagerBtn" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">
+      <i class="fas fa-tags"></i> Manage Categories
     </button>
     <button id="importCsvBtn" style="background:linear-gradient(135deg,#f59e0b,#d97706);">
       <i class="fas fa-file-upload"></i> Import CSV
@@ -678,6 +730,7 @@
   const starterAccountsBtn = $("starterAccountsBtn");
   const setupWizardBtn = $("setupWizardBtn");
   const bankCardsBtn = $("bankCardsBtn");
+  const categoryManagerBtn = $("categoryManagerBtn");
   const importCsvBtn = $("importCsvBtn");
   const exportBtn = $("exportBtn");
   const refreshBtn = $("refreshBtn");
@@ -744,6 +797,15 @@
   const confirmDeleteBody = $("confirmDeleteBody");
   const confirmDeleteCancel = $("confirmDeleteCancel");
   const confirmDeleteConfirm = $("confirmDeleteConfirm");
+
+  // Category Manager
+  const categoryManagerModal = $("categoryManagerModal");
+  const categoryManagerClose = $("categoryManagerClose");
+  const categoryManagerDone = $("categoryManagerDone");
+  const catManagerTypeSelect = $("catManagerTypeSelect");
+  const categoryManagerList = $("categoryManagerList");
+  const newCategoryName = $("newCategoryName");
+  const addCategoryBtn = $("addCategoryBtn");
 
   // ===== STATE =====
   let currentUser = null;
@@ -880,8 +942,6 @@
   }
 
   // ===== LOAD TRANSACTIONS + PRE-COMPUTE BALANCES (SINGLE PASS) =====
-  // This runs ONCE at page load. All subsequent gear-icon clicks
-  // just look up the pre-computed value — instant, no Firestore call.
   async function loadTransactionsCache() {
     try {
       const q = query(
@@ -1116,7 +1176,7 @@
     }
   }
 
-  // Render table — NO Balance column, NO Loading for balance
+  // Render table — NO Balance column
   function renderTable(accounts) {
     accountsTable.innerHTML = "";
     if (accounts.length === 0) {
@@ -1318,6 +1378,10 @@
           updateCategoryOptions(accountTypeSelect.value);
           categorySelect.value = trimmed;
           showToast("Category added");
+          // Refresh category manager if open
+          if (categoryManagerModal.style.display === 'flex') {
+            renderCategoryManager(catManagerTypeSelect.value);
+          }
         } catch (e) {
           showToast("Failed: " + e.message, "error");
           categorySelect.value = "";
@@ -1703,6 +1767,197 @@
 
   bankCardsBtn.addEventListener('click', openBankCardsModal);
 
+  // ===== CATEGORY MANAGER =====
+  function renderCategoryManager(type) {
+    const userCats = categories[type] || [];
+    const defaults = defaultCategories[type] || [];
+    // Merge defaults and user categories (deduplicated)
+    const all = [...new Set([...defaults, ...userCats])];
+    if (all.length === 0) {
+      categoryManagerList.innerHTML = `<div class="empty-list" style="padding:16px;"><i class="fas fa-tags"></i>No categories for this type yet</div>`;
+      return;
+    }
+
+    categoryManagerList.innerHTML = all.map(cat => {
+      const isDefault = defaults.includes(cat) && !userCats.includes(cat);
+      return `
+        <div class="category-row" data-category="${escapeHtml(cat)}" data-default="${isDefault}">
+          <span class="cat-name" contenteditable="false">${escapeHtml(cat)}</span>
+          <div class="cat-actions">
+            <button class="cat-edit-btn" title="Rename"><i class="fas fa-edit"></i></button>
+            <button class="cat-delete-btn" title="Delete"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach listeners
+    categoryManagerList.querySelectorAll('.category-row').forEach(row => {
+      const cat = row.dataset.category;
+      const isDefault = row.dataset.default === 'true';
+      const nameSpan = row.querySelector('.cat-name');
+      const editBtn = row.querySelector('.cat-edit-btn');
+      const deleteBtn = row.querySelector('.cat-delete-btn');
+
+      // Edit
+      editBtn.addEventListener('click', () => {
+        if (nameSpan.contentEditable === 'true') {
+          // Already editing → save
+          saveCategoryEdit(row, cat, isDefault);
+        } else {
+          nameSpan.contentEditable = 'true';
+          nameSpan.focus();
+          nameSpan.style.borderColor = 'var(--accent)';
+          editBtn.innerHTML = '<i class="fas fa-check"></i>';
+          // Handle Enter / Escape
+          const onKey = (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); saveCategoryEdit(row, cat, isDefault); }
+            if (e.key === 'Escape') { nameSpan.textContent = cat; nameSpan.contentEditable = 'false'; nameSpan.style.borderColor = 'transparent'; editBtn.innerHTML = '<i class="fas fa-edit"></i>'; nameSpan.removeEventListener('keydown', onKey); }
+          };
+          nameSpan.addEventListener('keydown', onKey);
+          nameSpan._onKey = onKey;
+        }
+      });
+
+      // Delete
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete category "${cat}"?`)) return;
+        try {
+          showLoading();
+          // Delete from Firestore (user categories)
+          const q = query(
+            collection(db, "users", currentUser.uid, "categories"),
+            where("userId", "==", currentUser.uid),
+            where("accountType", "==", type),
+            where("categoryName", "==", cat)
+          );
+          const snap = await getDocs(q);
+          for (const d of snap.docs) {
+            await deleteDoc(doc(db, "users", currentUser.uid, "categories", d.id));
+          }
+          // If it's a default category, we can't delete it from Firestore, but we can hide it
+          // For simplicity, we just remove it from the local categories list
+          if (isDefault) {
+            // Remove from local categories object so it won't show up
+            if (categories[type]) {
+              categories[type] = categories[type].filter(c => c !== cat);
+            }
+          } else {
+            await loadCategories();
+          }
+          // Refresh UI
+          renderCategoryManager(type);
+          // Also refresh the account form dropdown
+          updateCategoryOptions(accountTypeSelect.value);
+          showToast("Category deleted");
+        } catch (e) {
+          showToast("Error: " + e.message, "error");
+        } finally {
+          hideLoading();
+        }
+      });
+    });
+  }
+
+  async function saveCategoryEdit(row, oldName, isDefault) {
+    const nameSpan = row.querySelector('.cat-name');
+    const newName = nameSpan.textContent.trim();
+    if (!newName) {
+      showToast("Category name cannot be empty", "warning");
+      nameSpan.textContent = oldName;
+      nameSpan.contentEditable = 'false';
+      nameSpan.style.borderColor = 'transparent';
+      row.querySelector('.cat-edit-btn').innerHTML = '<i class="fas fa-edit"></i>';
+      if (nameSpan._onKey) nameSpan.removeEventListener('keydown', nameSpan._onKey);
+      return;
+    }
+    if (newName === oldName) {
+      nameSpan.contentEditable = 'false';
+      nameSpan.style.borderColor = 'transparent';
+      row.querySelector('.cat-edit-btn').innerHTML = '<i class="fas fa-edit"></i>';
+      if (nameSpan._onKey) nameSpan.removeEventListener('keydown', nameSpan._onKey);
+      return;
+    }
+
+    const type = catManagerTypeSelect.value;
+    showLoading();
+    try {
+      if (isDefault) {
+        // Add as a user category (override)
+        await addDoc(collection(db, "users", currentUser.uid, "categories"), {
+          userId: currentUser.uid,
+          accountType: type,
+          categoryName: newName,
+          createdAt: serverTimestamp()
+        });
+      } else {
+        // Update existing user category
+        const q = query(
+          collection(db, "users", currentUser.uid, "categories"),
+          where("userId", "==", currentUser.uid),
+          where("accountType", "==", type),
+          where("categoryName", "==", oldName)
+        );
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          await updateDoc(doc(db, "users", currentUser.uid, "categories", d.id), {
+            categoryName: newName
+          });
+        }
+      }
+      await loadCategories();
+      renderCategoryManager(type);
+      updateCategoryOptions(accountTypeSelect.value);
+      showToast("Category renamed");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+      nameSpan.textContent = oldName;
+    } finally {
+      nameSpan.contentEditable = 'false';
+      nameSpan.style.borderColor = 'transparent';
+      row.querySelector('.cat-edit-btn').innerHTML = '<i class="fas fa-edit"></i>';
+      if (nameSpan._onKey) nameSpan.removeEventListener('keydown', nameSpan._onKey);
+      hideLoading();
+    }
+  }
+
+  categoryManagerBtn.addEventListener('click', () => {
+    catManagerTypeSelect.value = accountTypeSelect.value || 'Asset';
+    renderCategoryManager(catManagerTypeSelect.value);
+    categoryManagerModal.style.display = 'flex';
+  });
+
+  catManagerTypeSelect.addEventListener('change', () => {
+    renderCategoryManager(catManagerTypeSelect.value);
+  });
+
+  addCategoryBtn.addEventListener('click', async () => {
+    const name = newCategoryName.value.trim();
+    if (!name) { showToast("Enter a category name", "warning"); return; }
+    const type = catManagerTypeSelect.value;
+    showLoading();
+    try {
+      await addDoc(collection(db, "users", currentUser.uid, "categories"), {
+        userId: currentUser.uid,
+        accountType: type,
+        categoryName: name,
+        createdAt: serverTimestamp()
+      });
+      newCategoryName.value = '';
+      await loadCategories();
+      renderCategoryManager(type);
+      updateCategoryOptions(accountTypeSelect.value);
+      showToast("Category added");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    } finally {
+      hideLoading();
+    }
+  });
+
+  categoryManagerClose.addEventListener('click', () => categoryManagerModal.style.display = 'none');
+  categoryManagerDone.addEventListener('click', () => categoryManagerModal.style.display = 'none');
+
   // ===== CSV IMPORT =====
   importCsvBtn.addEventListener('click', () => {
     csvParsedData = [];
@@ -1854,6 +2109,7 @@ Equity,Owner's Equity,Owner Contribution`;
     try {
       await loadTransactionsCache();
       await loadBankCards();
+      await loadCategories();
       await loadAccounts();
       showToast("Refreshed");
     } catch (e) {
@@ -1941,7 +2197,7 @@ Equity,Owner's Equity,Owner Contribution`;
       }
     });
 
-    [csvImportModal, bankCardsModal, addEditBankModal, confirmDeleteModal].forEach(m => {
+    [csvImportModal, bankCardsModal, addEditBankModal, confirmDeleteModal, categoryManagerModal].forEach(m => {
       m.addEventListener('click', (e) => {
         if (e.target === m) m.style.display = 'none';
       });
