@@ -5087,3 +5087,1023 @@
   console.log('[Part 5] Projects + Accounts + Expenses modules loaded ✓');
 })();
 </script>
+
+<!-- ============================================================
+     PART 6 — REPORTS + CALENDAR + DOCUMENTS + SETTINGS
+     Insert AFTER the Part 5 script block (before </body>).
+     ============================================================ -->
+<script>
+(function () {
+  'use strict';
+
+  const App = window.App;
+  if (!App) { console.error('[Part 6] App not found — Part 1 must load first.'); return; }
+
+  const { db, state, escapeHtml, formatCurrency, formatDate, showToast, getInitials } = App;
+
+  function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  // ============================================================
+  // ===================== REPORTS ==============================
+  // ============================================================
+  async function renderReports(container) {
+    container.innerHTML = '<div class="loading-block"><div class="loading-spinner lg"></div><span>Analyzing business data…</span></div>';
+
+    try {
+      const [invSnap, salesSnap, custSnap, expSnap, txSnap] = await Promise.all([
+        App.companyCollection('inventory').get(),
+        App.companyCollection('sales').get(),
+        App.companyCollection('customers').get(),
+        App.companyCollection('expenses').get(),
+        App.companyCollection('transactions').get()
+      ]);
+
+      const inventory = invSnap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      const sales = salesSnap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      const expenses = expSnap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      const transactions = txSnap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+
+      const validSales = sales.filter(function (s) { return (s.status || '').toLowerCase() !== 'cancelled'; });
+      const totalSalesRevenue = validSales.reduce(function (s, x) { return s + (Number(x.total) || 0); }, 0);
+      const txIncome = transactions
+        .filter(function (t) { return (t.type || '').toLowerCase() === 'income'; })
+        .reduce(function (s, t) { return s + (Number(t.amount) || 0); }, 0);
+      const txExpense = transactions
+        .filter(function (t) { return (t.type || '').toLowerCase() === 'expense'; })
+        .reduce(function (s, t) { return s + (Number(t.amount) || 0); }, 0);
+      const approvedExpenses = expenses
+        .filter(function (e) { return ['approved', 'paid'].indexOf((e.status || '').toLowerCase()) !== -1; })
+        .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+
+      const totalExpenses = txExpense + approvedExpenses;
+      const totalRevenue = totalSalesRevenue + txIncome;
+      const netProfit = totalRevenue - totalExpenses;
+      const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100) : 0;
+      const inventoryValue = inventory.reduce(function (s, p) {
+        return s + ((Number(p.stock) || 0) * (Number(p.price) || 0));
+      }, 0);
+      const inventoryCostValue = inventory.reduce(function (s, p) {
+        return s + ((Number(p.stock) || 0) * (Number(p.cost) || Number(p.price) || 0));
+      }, 0);
+
+      // 6-month sales buckets
+      const monthBuckets = {};
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        monthBuckets[key] = { label: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }), value: 0 };
+      }
+      validSales.forEach(function (s) {
+        const d = s.createdAt ? (s.createdAt.toDate ? s.createdAt.toDate() : new Date(s.createdAt)) : null;
+        if (!d) return;
+        const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        if (monthBuckets[key]) monthBuckets[key].value += Number(s.total) || 0;
+      });
+      const monthArray = Object.keys(monthBuckets).map(function (k) { return monthBuckets[k]; });
+      const maxMonth = Math.max.apply(null, [1].concat(monthArray.map(function (m) { return m.value; })));
+
+      // Top customers
+      const customerTotals = {};
+      validSales.forEach(function (s) {
+        if (!s.customerId) return;
+        if (!customerTotals[s.customerId]) {
+          customerTotals[s.customerId] = { name: s.customerName || 'Unknown', total: 0, orders: 0 };
+        }
+        customerTotals[s.customerId].total += Number(s.total) || 0;
+        customerTotals[s.customerId].orders += 1;
+      });
+      const topCustomers = Object.values(customerTotals)
+        .sort(function (a, b) { return b.total - a.total; })
+        .slice(0, 5);
+
+      // Top products
+      const productTotals = {};
+      validSales.forEach(function (s) {
+        const items = Array.isArray(s.items) ? s.items : [];
+        items.forEach(function (it) {
+          const key = it.productId || it.name || 'unknown';
+          if (!productTotals[key]) productTotals[key] = { name: it.name || 'Unknown', qty: 0, revenue: 0 };
+          productTotals[key].qty += Number(it.qty) || 0;
+          productTotals[key].revenue += Number(it.lineTotal) || (Number(it.qty) || 0) * (Number(it.price) || 0);
+        });
+      });
+      const topProducts = Object.values(productTotals)
+        .sort(function (a, b) { return b.revenue - a.revenue; })
+        .slice(0, 5);
+
+      // Top expense categories
+      const expenseByCat = {};
+      transactions.filter(function (t) { return (t.type || '').toLowerCase() === 'expense'; }).forEach(function (t) {
+        const cat = t.category || 'General';
+        if (!expenseByCat[cat]) expenseByCat[cat] = 0;
+        expenseByCat[cat] += Number(t.amount) || 0;
+      });
+      expenses.filter(function (e) {
+        return ['approved', 'paid'].indexOf((e.status || '').toLowerCase()) !== -1;
+      }).forEach(function (e) {
+        const cat = e.category || 'General';
+        if (!expenseByCat[cat]) expenseByCat[cat] = 0;
+        expenseByCat[cat] += Number(e.amount) || 0;
+      });
+      const topExpenses = Object.keys(expenseByCat).map(function (cat) {
+        return { cat: cat, amt: expenseByCat[cat] };
+      }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 5);
+      const maxExpense = Math.max.apply(null, [1].concat(topExpenses.map(function (e) { return e.amt; })));
+
+      // Render
+      container.innerHTML = `
+        <div class="stats-grid fade-in" style="margin-bottom:1.5rem;">
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-rupee-sign"></i></div>
+            <div class="stat-value">${formatCurrency(totalRevenue)}</div>
+            <div class="stat-label">Total Revenue</div>
+            <div class="stat-change positive"><i class="fas fa-arrow-up"></i> Sales + transactions</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-arrow-down"></i></div>
+            <div class="stat-value">${formatCurrency(totalExpenses)}</div>
+            <div class="stat-label">Total Expenses</div>
+            <div class="stat-change negative"><i class="fas fa-arrow-down"></i> Approved + paid</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-wallet"></i></div>
+            <div class="stat-value" style="color:${netProfit >= 0 ? 'var(--success)' : 'var(--danger)'};">${formatCurrency(netProfit)}</div>
+            <div class="stat-label">Net Profit</div>
+            <div class="stat-change ${netProfit >= 0 ? 'positive' : 'negative'}"><i class="fas fa-percentage"></i> ${profitMargin.toFixed(1)}% margin</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-boxes"></i></div>
+            <div class="stat-value">${formatCurrency(inventoryValue)}</div>
+            <div class="stat-label">Inventory Value</div>
+            <div class="stat-change"><i class="fas fa-cube"></i> Cost: ${formatCurrency(inventoryCostValue)}</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid fade-in">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-chart-bar"></i> Sales — Last 6 Months</div>
+            </div>
+            <div style="display:flex;align-items:flex-end;gap:10px;height:200px;padding:10px 0;">
+              ${monthArray.map(function (m) {
+                const pct = (m.value / maxMonth) * 100;
+                return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">' +
+                  '<div style="font-size:0.65rem;color:var(--gray-600);margin-bottom:4px;font-weight:600;">' +
+                    (m.value > 0 ? formatCurrency(m.value) : '') +
+                  '</div>' +
+                  '<div style="width:100%;max-width:60px;height:' + Math.max(4, pct) + '%;background:var(--gradient-primary);border-radius:6px 6px 0 0;transition:height 0.4s ease;"></div>' +
+                  '<div style="font-size:0.7rem;color:var(--gray-500);margin-top:6px;font-weight:600;">' + m.label + '</div>' +
+                '</div>';
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-crown"></i> Top 5 Customers</div>
+            </div>
+            ${topCustomers.length === 0
+              ? '<div class="empty-state"><i class="fas fa-users"></i><p>No customer data yet</p></div>'
+              : topCustomers.map(function (c) {
+                  return '<div class="activity-item">' +
+                    '<div class="avatar avatar-sm">' + getInitials(c.name) + '</div>' +
+                    '<div class="activity-content">' +
+                      '<strong>' + escapeHtml(c.name) + '</strong>' +
+                      '<small>' + c.orders + ' order' + (c.orders !== 1 ? 's' : '') + '</small>' +
+                    '</div>' +
+                    '<strong style="color:var(--success);">' + formatCurrency(c.total) + '</strong>' +
+                  '</div>';
+                }).join('')}
+          </div>
+        </div>
+
+        <div class="dashboard-grid fade-in">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-fire"></i> Top 5 Products</div>
+            </div>
+            ${topProducts.length === 0
+              ? '<div class="empty-state"><i class="fas fa-box-open"></i><p>No product sales yet</p></div>'
+              : topProducts.map(function (p, i) {
+                  return '<div class="activity-item">' +
+                    '<div class="activity-icon blue"><strong>#' + (i + 1) + '</strong></div>' +
+                    '<div class="activity-content">' +
+                      '<strong>' + escapeHtml(p.name) + '</strong>' +
+                      '<small>' + p.qty + ' unit' + (p.qty !== 1 ? 's' : '') + ' sold</small>' +
+                    '</div>' +
+                    '<strong style="color:var(--primary);">' + formatCurrency(p.revenue) + '</strong>' +
+                  '</div>';
+                }).join('')}
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-receipt"></i> Top 5 Expense Categories</div>
+            </div>
+            ${topExpenses.length === 0
+              ? '<div class="empty-state"><i class="fas fa-coins"></i><p>No expense data yet</p></div>'
+              : topExpenses.map(function (e) {
+                  return '<div style="margin-bottom:14px;">' +
+                    '<div class="d-flex justify-between" style="margin-bottom:6px;">' +
+                      '<strong style="font-size:0.85rem;">' + escapeHtml(e.cat) + '</strong>' +
+                      '<span style="color:var(--danger);font-weight:700;font-size:0.85rem;">' + formatCurrency(e.amt) + '</span>' +
+                    '</div>' +
+                    '<div class="progress-bar"><div class="progress-fill danger" style="width:' + ((e.amt / maxExpense) * 100) + '%;"></div></div>' +
+                  '</div>';
+                }).join('')}
+          </div>
+        </div>
+
+        <div class="card fade-in">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-file-export"></i> Export Reports</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-success" onclick="ReportsModule.exportFullReport()">
+              <i class="fas fa-download"></i> Export Full Report (CSV)
+            </button>
+            <button class="btn btn-primary" onclick="window.print()">
+              <i class="fas fa-print"></i> Print / Save as PDF
+            </button>
+          </div>
+        </div>
+      `;
+
+      state._reportData = {
+        totalRevenue: totalRevenue,
+        totalExpenses: totalExpenses,
+        netProfit: netProfit,
+        profitMargin: profitMargin,
+        inventoryValue: inventoryValue,
+        inventoryCostValue: inventoryCostValue,
+        monthArray: monthArray,
+        topCustomers: topCustomers,
+        topProducts: topProducts,
+        topExpenses: topExpenses
+      };
+    } catch (err) {
+      console.error('[Reports] load error:', err);
+      container.innerHTML =
+        '<div class="card"><div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h4>Failed to load reports</h4><p>' +
+        escapeHtml(err.message || 'Unknown error') + '</p></div></div>';
+    }
+  }
+
+  window.ReportsModule = {
+    exportFullReport: function () {
+      const d = state._reportData;
+      if (!d) { showToast('Report data not ready', 'error'); return; }
+      const lines = [];
+      lines.push(['=== BUSINESS REPORT ===']);
+      lines.push(['Generated', new Date().toLocaleString('en-IN')]);
+      lines.push(['Company', state.company.name]);
+      lines.push([]);
+      lines.push(['=== SUMMARY ===']);
+      lines.push(['Total Revenue', d.totalRevenue]);
+      lines.push(['Total Expenses', d.totalExpenses]);
+      lines.push(['Net Profit', d.netProfit]);
+      lines.push(['Profit Margin %', d.profitMargin.toFixed(2)]);
+      lines.push(['Inventory Value (retail)', d.inventoryValue]);
+      lines.push(['Inventory Value (cost)', d.inventoryCostValue]);
+      lines.push([]);
+      lines.push(['=== MONTHLY SALES (LAST 6 MONTHS) ===']);
+      d.monthArray.forEach(function (m) { lines.push([m.label, m.value]); });
+      lines.push([]);
+      lines.push(['=== TOP CUSTOMERS ===']);
+      lines.push(['Customer', 'Orders', 'Total Spent']);
+      d.topCustomers.forEach(function (c) { lines.push([c.name, c.orders, c.total]); });
+      lines.push([]);
+      lines.push(['=== TOP PRODUCTS ===']);
+      lines.push(['Product', 'Units Sold', 'Revenue']);
+      d.topProducts.forEach(function (p) { lines.push([p.name, p.qty, p.revenue]); });
+      lines.push([]);
+      lines.push(['=== TOP EXPENSE CATEGORIES ===']);
+      lines.push(['Category', 'Amount']);
+      d.topExpenses.forEach(function (e) { lines.push([e.cat, e.amt]); });
+      App.downloadCSV(lines, 'business_report_' + new Date().toISOString().split('T')[0] + '.csv');
+      showToast('Full report exported', 'success');
+    }
+  };
+
+  // ============================================================
+  // ===================== CALENDAR =============================
+  // ============================================================
+  let calState = { year: new Date().getFullYear(), month: new Date().getMonth() };
+
+  async function renderCalendar(container) {
+    container.innerHTML = `
+      <div class="card fade-in">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-calendar"></i> Business Calendar</div>
+          <div class="d-flex gap-1 flex-wrap">
+            <button class="btn btn-sm btn-outline" onclick="CalendarModule.prevMonth()">
+              <i class="fas fa-chevron-left"></i>
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="CalendarModule.today()">Today</button>
+            <button class="btn btn-sm btn-outline" onclick="CalendarModule.nextMonth()">
+              <i class="fas fa-chevron-right"></i>
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+          <h2 id="calMonthLabel" style="font-size:1.4rem;font-weight:700;color:var(--gray-900);"></h2>
+          <div class="d-flex gap-2 flex-wrap" style="font-size:0.72rem;">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success);"></span> Sales</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning);"></span> Purchases</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--danger);"></span> Expenses</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--purple);"></span> Projects</span>
+          </div>
+        </div>
+        <div id="calendarGrid"></div>
+      </div>
+    `;
+
+    await loadCalendarEvents();
+  }
+
+  async function loadCalendarEvents() {
+    try {
+      const [salesSnap, purchSnap, expSnap, projSnap] = await Promise.all([
+        App.companyCollection('sales').get(),
+        App.companyCollection('purchases').get(),
+        App.companyCollection('expenses').get(),
+        App.companyCollection('projects').get()
+      ]);
+      const events = [];
+
+      salesSnap.forEach(function (doc) {
+        const s = doc.data();
+        const dt = s.createdAt ? (s.createdAt.toDate ? s.createdAt.toDate() : new Date(s.createdAt)) : null;
+        if (dt) events.push({
+          date: dt, type: 'sale', color: 'success',
+          title: 'Sale #' + (s.invoiceNo || doc.id.slice(-6).toUpperCase()),
+          detail: (s.customerName || 'Walk-in') + ' — ' + formatCurrency(s.total)
+        });
+      });
+
+      purchSnap.forEach(function (doc) {
+        const p = doc.data();
+        const dt = p.createdAt ? (p.createdAt.toDate ? p.createdAt.toDate() : new Date(p.createdAt)) : null;
+        if (dt) events.push({
+          date: dt, type: 'purchase', color: 'warning',
+          title: 'PO #' + (p.poNo || doc.id.slice(-6).toUpperCase()),
+          detail: (p.supplierName || '') + ' — ' + formatCurrency(p.total)
+        });
+      });
+
+      expSnap.forEach(function (doc) {
+        const e = doc.data();
+        if (!e.date) return;
+        const dt = new Date(e.date);
+        if (!isNaN(dt)) events.push({
+          date: dt, type: 'expense', color: 'danger',
+          title: 'Expense — ' + (e.category || 'General'),
+          detail: (e.description || '') + ' — ' + formatCurrency(e.amount)
+        });
+      });
+
+      projSnap.forEach(function (doc) {
+        const p = doc.data();
+        if (p.endDate) {
+          const dt = new Date(p.endDate);
+          if (!isNaN(dt)) events.push({
+            date: dt, type: 'project', color: 'purple',
+            title: 'Project due — ' + (p.name || 'Untitled'),
+            detail: 'Status: ' + (p.status || 'active') + ', ' + (p.progress || 0) + '% complete'
+          });
+        }
+      });
+
+      state._calendarEvents = events;
+      renderCalendarGrid();
+    } catch (err) {
+      console.error('[Calendar] load error:', err);
+      showToast('Failed to load calendar events: ' + (err.message || 'Unknown'), 'error');
+    }
+  }
+
+  function renderCalendarGrid() {
+    const grid = document.getElementById('calendarGrid');
+    const label = document.getElementById('calMonthLabel');
+    if (!grid || !label) return;
+
+    const year = calState.year;
+    const month = calState.month;
+    label.textContent = new Date(year, month, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    const firstDay = new Date(year, month, 1);
+    const startWeekday = firstDay.getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = new Date();
+
+    const eventsByDate = {};
+    (state._calendarEvents || []).forEach(function (ev) {
+      const key = ev.date.getFullYear() + '-' + (ev.date.getMonth() + 1) + '-' + ev.date.getDate();
+      if (!eventsByDate[key]) eventsByDate[key] = [];
+      eventsByDate[key].push(ev);
+    });
+
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">';
+    weekdays.forEach(function (w) {
+      html += '<div style="text-align:center;padding:8px;font-size:0.72rem;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;">' + w + '</div>';
+    });
+    for (let i = 0; i < startWeekday; i++) {
+      html += '<div style="min-height:80px;background:transparent;"></div>';
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = year + '-' + (month + 1) + '-' + day;
+      const events = eventsByDate[dateKey] || [];
+      const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+      const bgColor = isToday ? 'rgba(78,84,200,0.08)' : 'var(--gray-50)';
+      const borderColor = isToday ? 'var(--primary)' : 'var(--gray-200)';
+
+      html += '<div style="min-height:80px;background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:8px;padding:6px;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden;" ' +
+                'onmouseover="this.style.borderColor=\'var(--primary)\'" onmouseout="this.style.borderColor=\'' + borderColor + '\'" ' +
+                'onclick="CalendarModule.showDay(' + day + ')">' +
+        '<div style="font-weight:' + (isToday ? '800' : '600') + ';font-size:0.85rem;color:' + (isToday ? 'var(--primary)' : 'var(--gray-800)') + ';margin-bottom:4px;">' +
+          day +
+        '</div>' +
+        events.slice(0, 2).map(function (ev) {
+          return '<div style="font-size:0.65rem;background:var(--' + ev.color + ');color:white;padding:2px 5px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;">' +
+            escapeHtml(ev.title) +
+          '</div>';
+        }).join('') +
+        (events.length > 2
+          ? '<div style="font-size:0.65rem;color:var(--gray-500);font-weight:600;">+' + (events.length - 2) + ' more</div>'
+          : '') +
+      '</div>';
+    }
+    html += '</div>';
+    grid.innerHTML = html;
+  }
+
+  window.CalendarModule = {
+    prevMonth: function () {
+      calState.month--;
+      if (calState.month < 0) { calState.month = 11; calState.year--; }
+      renderCalendarGrid();
+    },
+    nextMonth: function () {
+      calState.month++;
+      if (calState.month > 11) { calState.month = 0; calState.year++; }
+      renderCalendarGrid();
+    },
+    today: function () {
+      const now = new Date();
+      calState.year = now.getFullYear();
+      calState.month = now.getMonth();
+      renderCalendarGrid();
+    },
+    showDay: function (day) {
+      const dateKey = calState.year + '-' + (calState.month + 1) + '-' + day;
+      const events = (state._calendarEvents || []).filter(function (ev) {
+        const k = ev.date.getFullYear() + '-' + (ev.date.getMonth() + 1) + '-' + ev.date.getDate();
+        return k === dateKey;
+      });
+      const dateStr = new Date(calState.year, calState.month, day).toLocaleDateString('en-IN', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+      });
+
+      const html =
+        '<div class="modal-header">' +
+          '<h3><i class="fas fa-calendar-day"></i> ' + dateStr + '</h3>' +
+          '<button class="modal-close" onclick="App.closeGlobalModal()">&times;</button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+          (events.length === 0
+            ? '<div class="empty-state"><i class="fas fa-calendar"></i><p>No events on this day</p></div>'
+            : events.map(function (ev) {
+                return '<div class="activity-item">' +
+                  '<div class="activity-icon" style="background:rgba(78,84,200,0.1);color:var(--' + ev.color + ');">' +
+                    '<i class="fas fa-' + (ev.type === 'sale' ? 'shopping-cart' : ev.type === 'purchase' ? 'truck' : ev.type === 'expense' ? 'receipt' : 'tasks') + '"></i>' +
+                  '</div>' +
+                  '<div class="activity-content">' +
+                    '<strong>' + escapeHtml(ev.title) + '</strong>' +
+                    '<small>' + escapeHtml(ev.detail) + '</small>' +
+                  '</div>' +
+                '</div>';
+              }).join('')) +
+          '<div class="form-actions">' +
+            '<button class="btn btn-outline btn-block" onclick="App.closeGlobalModal()">Close</button>' +
+          '</div>' +
+        '</div>';
+      App.openGlobalModal(html);
+    }
+  };
+
+  // ============================================================
+  // ===================== DOCUMENTS ============================
+  // ============================================================
+  const docFilters = { search: '' };
+
+  function renderDocuments(container) {
+    container.innerHTML = `
+      <div class="card fade-in">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><i class="fas fa-file-alt"></i> Document Repository</div>
+            <div class="card-subtitle">Store links to invoices, contracts, and business files</div>
+          </div>
+          <div class="d-flex gap-1 flex-wrap">
+            <button class="btn btn-primary" onclick="DocumentsModule.openAdd()">
+              <i class="fas fa-plus"></i> Add Document
+            </button>
+            <button class="btn btn-success" onclick="DocumentsModule.exportCSV()">
+              <i class="fas fa-download"></i> Export
+            </button>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap mb-2" style="align-items:center;">
+          <div class="search-bar">
+            <i class="fas fa-search"></i>
+            <input type="text" id="docSearch" placeholder="Search by name, category, or notes…" oninput="DocumentsModule.onSearch(this.value)">
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Document</th>
+                <th>Category</th>
+                <th>Link</th>
+                <th>Notes</th>
+                <th>Added</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="documentsTableBody">
+              <tr><td colspan="6"><div class="loading-block"><div class="loading-spinner"></div><span>Loading documents…</span></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination" id="documentsPagination"></div>
+      </div>
+    `;
+
+    loadDocuments();
+  }
+
+  async function loadDocuments() {
+    const tbody = document.getElementById('documentsTableBody');
+    if (!tbody) return;
+    try {
+      const snap = await App.companyCollection('documents').get();
+      state.cache.documents = snap.docs.map(function (d) {
+        return Object.assign({ id: d.id }, d.data());
+      });
+      state.cache.documents.sort(function (a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+      renderDocumentsTable();
+    } catch (err) {
+      console.error('[Documents] load error:', err);
+      showToast('Failed to load documents: ' + (err.message || 'Unknown'), 'error');
+      tbody.innerHTML =
+        '<tr><td colspan="6"><div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>Failed to load documents</p></div></td></tr>';
+    }
+  }
+
+  function renderDocumentsTable() {
+    const tbody = document.getElementById('documentsTableBody');
+    if (!tbody) return;
+
+    let filtered = state.cache.documents.slice();
+    if (docFilters.search) {
+      const q = docFilters.search.toLowerCase();
+      filtered = filtered.filter(function (d) {
+        return (d.name || '').toLowerCase().includes(q) ||
+               (d.category || '').toLowerCase().includes(q) ||
+               (d.notes || '').toLowerCase().includes(q);
+      });
+    }
+
+    const pg = state.pagination.documents;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pg.perPage));
+    if (pg.page > totalPages) pg.page = totalPages;
+    const start = (pg.page - 1) * pg.perPage;
+    const pageItems = filtered.slice(start, start + pg.perPage);
+
+    if (pageItems.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="6"><div class="empty-state">' +
+          '<i class="fas fa-folder-open"></i>' +
+          '<h4>No documents</h4>' +
+          '<p>' + (state.cache.documents.length === 0
+            ? 'Add your first document reference'
+            : 'Try a different search') + '</p>' +
+        '</div></td></tr>';
+    } else {
+      tbody.innerHTML = pageItems.map(function (d) {
+        const addedStr = d.createdAt ? formatDate(d.createdAt) : '—';
+        return '<tr>' +
+          '<td>' +
+            '<div class="user-cell">' +
+              '<div class="avatar avatar-sm" style="background:var(--gradient-info);"><i class="fas fa-file"></i></div>' +
+              '<div class="user-cell-info"><strong>' + escapeHtml(d.name || 'Untitled') + '</strong></div>' +
+            '</div>' +
+          '</td>' +
+          '<td><span class="badge badge-info">' + escapeHtml(d.category || 'General') + '</span></td>' +
+          '<td>' +
+            (d.url
+              ? '<a href="' + escapeHtml(d.url) + '" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:none;font-weight:600;"><i class="fas fa-external-link-alt"></i> Open</a>'
+              : '<span class="text-muted">—</span>') +
+          '</td>' +
+          '<td>' + escapeHtml(d.notes || '—') + '</td>' +
+          '<td>' + addedStr + '</td>' +
+          '<td>' +
+            '<div class="d-flex gap-1">' +
+              '<button class="btn btn-sm btn-icon btn-warning" title="Edit" onclick="DocumentsModule.openEdit(\'' + d.id + '\')"><i class="fas fa-edit"></i></button>' +
+              '<button class="btn btn-sm btn-icon btn-danger" title="Delete" onclick="DocumentsModule.confirmDelete(\'' + d.id + '\')"><i class="fas fa-trash"></i></button>' +
+            '</div>' +
+          '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    App.renderPagination('documentsPagination', pg, totalPages, 'DocumentsModule.goToPage');
+  }
+
+  window.DocumentsModule = {
+    onSearch: function (val) {
+      docFilters.search = val || '';
+      state.pagination.documents.page = 1;
+      renderDocumentsTable();
+    },
+    goToPage: function (p) {
+      state.pagination.documents.page = p;
+      renderDocumentsTable();
+    },
+    openAdd: function () { openDocumentForm(null); },
+    openEdit: function (id) {
+      const d = state.cache.documents.find(function (x) { return x.id === id; });
+      if (d) openDocumentForm(d);
+    },
+    confirmDelete: function (id) {
+      const d = state.cache.documents.find(function (x) { return x.id === id; });
+      if (!d) return;
+      state.deleteTarget = { collection: 'documents', id: id, label: d.name || 'this document' };
+      App.openDeleteConfirm();
+    },
+    save: async function (id) {
+      const name = document.getElementById('doc_name').value.trim();
+      const category = document.getElementById('doc_category').value.trim();
+      const url = document.getElementById('doc_url').value.trim();
+      const notes = document.getElementById('doc_notes').value.trim();
+
+      if (!name) { showToast('Document name is required', 'error'); return; }
+
+      const payload = {
+        name: name, category: category || 'General', url: url, notes: notes,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      try {
+        if (id) {
+          await db.collection('documents').doc(id).update(payload);
+          showToast('Document updated', 'success');
+        } else {
+          payload.companyId = state.company.id;
+          payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('documents').add(payload);
+          showToast('Document added', 'success');
+        }
+        App.closeGlobalModal();
+        loadDocuments();
+      } catch (err) {
+        console.error('[Documents] save error:', err);
+        showToast('Failed to save: ' + (err.message || 'Unknown'), 'error');
+      }
+    },
+    exportCSV: function () {
+      if (state.cache.documents.length === 0) {
+        showToast('No documents to export', 'warning');
+        return;
+      }
+      const rows = [['Name', 'Category', 'URL', 'Notes']];
+      state.cache.documents.forEach(function (d) {
+        rows.push([d.name || '', d.category || 'General', d.url || '', d.notes || '']);
+      });
+      App.downloadCSV(rows, 'documents_' + new Date().toISOString().split('T')[0] + '.csv');
+      showToast('Documents exported', 'success');
+    }
+  };
+
+  function openDocumentForm(doc) {
+    const isEdit = !!doc;
+    const v = isEdit ? doc : {};
+    const cats = Array.from(new Set(state.cache.documents.map(function (d) { return d.category; }).filter(Boolean)));
+
+    const html =
+      '<div class="modal-header">' +
+        '<h3><i class="fas fa-' + (isEdit ? 'edit' : 'plus-circle') + '"></i> ' + (isEdit ? 'Edit Document' : 'Add Document') + '</h3>' +
+        '<button class="modal-close" onclick="App.closeGlobalModal()">&times;</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<form id="documentForm" onsubmit="return false;">' +
+          '<div class="form-group">' +
+            '<label>Document Name <span class="required">*</span></label>' +
+            '<input type="text" class="form-control" id="doc_name" value="' + escapeHtml(v.name || '') + '" placeholder="e.g. Q4 Vendor Contract" required>' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>Category</label>' +
+            '<input type="text" class="form-control" id="doc_category" value="' + escapeHtml(v.category || '') + '" placeholder="e.g. Contracts, Invoices, Reports" list="docCatList">' +
+            '<datalist id="docCatList">' +
+              cats.map(function (c) { return '<option value="' + escapeHtml(c) + '">'; }).join('') +
+            '</datalist>' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>URL / Link</label>' +
+            '<input type="url" class="form-control" id="doc_url" value="' + escapeHtml(v.url || '') + '" placeholder="https://drive.google.com/...">' +
+            '<div class="form-hint">Paste a shareable link to Google Drive, Dropbox, etc.</div>' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>Notes</label>' +
+            '<textarea class="form-control" id="doc_notes" rows="2" placeholder="Optional description">' + escapeHtml(v.notes || '') + '</textarea>' +
+          '</div>' +
+          '<div class="form-actions">' +
+            '<button type="button" class="btn btn-outline" onclick="App.closeGlobalModal()">Cancel</button>' +
+            '<button type="button" class="btn btn-success" onclick="DocumentsModule.save(' + (isEdit ? "'" + doc.id + "'" : 'null') + ')">' +
+              '<i class="fas fa-save"></i> ' + (isEdit ? 'Update' : 'Save') + ' Document' +
+            '</button>' +
+          '</div>' +
+        '</form>' +
+      '</div>';
+
+    App.openGlobalModal(html);
+    setTimeout(function () {
+      const el = document.getElementById('doc_name');
+      if (el) el.focus();
+    }, 100);
+  }
+
+  // ============================================================
+  // ===================== SETTINGS =============================
+  // ============================================================
+  async function renderSettings(container) {
+    container.innerHTML = '<div class="loading-block"><div class="loading-spinner lg"></div><span>Loading settings…</span></div>';
+
+    try {
+      const collections = ['inventory', 'sales', 'purchases', 'employees', 'customers', 'suppliers', 'projects', 'transactions', 'expenses', 'documents'];
+      const counts = {};
+      await Promise.all(collections.map(function (col) {
+        return App.companyCollection(col).get()
+          .then(function (snap) { counts[col] = snap.size; })
+          .catch(function () { counts[col] = 0; });
+      }));
+      const totalRecords = Object.keys(counts).reduce(function (s, k) { return s + counts[k]; }, 0);
+
+      container.innerHTML = `
+        <div class="dashboard-grid fade-in">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-building"></i> Company Info</div>
+            </div>
+            <div style="padding:6px 0;">
+              <div class="d-flex justify-between" style="padding:8px 0;border-bottom:1px solid var(--gray-100);">
+                <span class="text-muted">Company Name</span>
+                <strong>${escapeHtml(state.company.name || '—')}</strong>
+              </div>
+              <div class="d-flex justify-between" style="padding:8px 0;border-bottom:1px solid var(--gray-100);">
+                <span class="text-muted">Industry</span>
+                <strong>${escapeHtml(state.company.type || '—')}</strong>
+              </div>
+              <div class="d-flex justify-between" style="padding:8px 0;border-bottom:1px solid var(--gray-100);">
+                <span class="text-muted">Company ID</span>
+                <strong style="font-size:0.75rem;font-family:monospace;">${escapeHtml(state.company.id || '—')}</strong>
+              </div>
+              <div class="d-flex justify-between" style="padding:8px 0;">
+                <span class="text-muted">Signed in as</span>
+                <strong>${escapeHtml(state.user && state.user.email ? state.user.email : '—')}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-database"></i> Data Summary</div>
+            </div>
+            <div style="padding:6px 0;">
+              ${collections.map(function (col) {
+                return '<div class="d-flex justify-between" style="padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:0.85rem;">' +
+                  '<span style="text-transform:capitalize;color:var(--gray-600);">' + col + '</span>' +
+                  '<strong>' + counts[col] + '</strong>' +
+                '</div>';
+              }).join('')}
+              <div class="d-flex justify-between" style="padding:10px 0;font-size:0.9rem;font-weight:700;">
+                <span>Total Records</span>
+                <strong style="color:var(--primary);">${totalRecords}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card fade-in">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-tools"></i> Actions</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-info" onclick="window.location.href='dashboard.html'">
+              <i class="fas fa-home"></i> Back to Companies
+            </button>
+            <button class="btn btn-warning" onclick="SettingsModule.logout()">
+              <i class="fas fa-sign-out-alt"></i> Sign Out
+            </button>
+            <button class="btn btn-danger" onclick="SettingsModule.resetData()">
+              <i class="fas fa-exclamation-triangle"></i> Reset Company Data
+            </button>
+          </div>
+          <div style="margin-top:1.2rem;padding:1rem;background:#fef3c7;border-radius:var(--radius-md);border-left:4px solid var(--warning);">
+            <strong style="color:#92400e;font-size:0.85rem;">⚠️ Warning</strong>
+            <p style="color:#78350f;font-size:0.8rem;margin-top:4px;line-height:1.4;">
+              "Reset Company Data" permanently deletes ALL data in this company workspace — inventory, sales, purchases, employees, customers, suppliers, projects, transactions, expenses, and documents. This cannot be undone.
+            </p>
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      console.error('[Settings] load error:', err);
+      container.innerHTML =
+        '<div class="card"><div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h4>Failed to load settings</h4><p>' +
+        escapeHtml(err.message || 'Unknown error') + '</p></div></div>';
+    }
+  }
+
+  window.SettingsModule = {
+    logout: function () {
+      App.logout();
+    },
+    resetData: function () {
+      const html =
+        '<div class="modal-header" style="background:var(--gradient-danger);">' +
+          '<h3><i class="fas fa-exclamation-triangle"></i> Reset All Company Data</h3>' +
+          '<button class="modal-close" onclick="App.closeGlobalModal()">&times;</button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+          '<p style="margin-bottom:1rem;color:var(--gray-700);font-size:0.9rem;line-height:1.5;">' +
+            'This will <strong style="color:var(--danger);">permanently delete</strong> all records (inventory, sales, purchases, employees, customers, suppliers, projects, transactions, expenses, documents) for <strong>' + escapeHtml(state.company.name) + '</strong>.' +
+          '</p>' +
+          '<p style="margin-bottom:1rem;color:var(--danger);font-size:0.85rem;font-weight:700;">This action CANNOT be undone.</p>' +
+          '<div class="form-group">' +
+            '<label>Type <code style="background:var(--gray-100);padding:2px 8px;border-radius:4px;">DELETE ALL</code> to confirm</label>' +
+            '<input type="text" class="form-control" id="reset_confirm" placeholder="DELETE ALL" autocomplete="off">' +
+          '</div>' +
+          '<div class="form-actions">' +
+            '<button class="btn btn-outline" onclick="App.closeGlobalModal()">Cancel</button>' +
+            '<button class="btn btn-danger" onclick="SettingsModule.confirmReset()"><i class="fas fa-trash"></i> Permanently Delete</button>' +
+          '</div>' +
+        '</div>';
+      App.openGlobalModal(html);
+    },
+    confirmReset: async function () {
+      const input = document.getElementById('reset_confirm').value.trim();
+      if (input !== 'DELETE ALL') {
+        showToast('Type "DELETE ALL" exactly to confirm', 'error');
+        return;
+      }
+      const collections = ['inventory', 'sales', 'purchases', 'employees', 'customers', 'suppliers', 'projects', 'transactions', 'expenses', 'documents'];
+      try {
+        showToast('Deleting all company data…', 'info');
+        let deleted = 0;
+        for (let i = 0; i < collections.length; i++) {
+          const col = collections[i];
+          const snap = await App.companyCollection(col).get();
+          for (let j = 0; j < snap.docs.length; j++) {
+            await snap.docs[j].ref.delete();
+            deleted++;
+          }
+        }
+        showToast('Deleted ' + deleted + ' records. Workspace reset.', 'success');
+        App.closeGlobalModal();
+        setTimeout(function () {
+          renderSettings(document.getElementById('dynamicContent'));
+        }, 500);
+      } catch (err) {
+        console.error('[Settings] reset error:', err);
+        showToast('Reset failed: ' + (err.message || 'Unknown'), 'error');
+      }
+    }
+  };
+
+  // ============================================================
+  // ================= GLOBAL ENHANCEMENTS ======================
+  // ============================================================
+
+  // Keyboard shortcuts: press "g" then letter to navigate
+  let lastKey = '';
+  let lastKeyTime = 0;
+  document.addEventListener('keydown', function (e) {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (['input', 'textarea', 'select'].indexOf(tag) !== -1) return;
+
+    const now = Date.now();
+    const key = e.key.toLowerCase();
+
+    if (lastKey === 'g' && (now - lastKeyTime) < 800) {
+      const map = {
+        d: 'dashboard', i: 'inventory', s: 'sales', p: 'purchases',
+        e: 'employees', c: 'customers', u: 'suppliers', j: 'projects',
+        a: 'accounts', x: 'expenses', r: 'reports', k: 'calendar',
+        o: 'documents', t: 'settings'
+      };
+      if (map[key]) {
+        document.querySelectorAll('.nav-link').forEach(function (l) {
+          l.classList.toggle('active', l.dataset.page === map[key]);
+        });
+        App.navigateTo(map[key]);
+        lastKey = '';
+        return;
+      }
+    }
+    lastKey = key;
+    lastKeyTime = now;
+  });
+
+  // 30-minute idle warning
+  let idleTimer = null;
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+      const warn = document.createElement('div');
+      warn.className = 'toast warning';
+      warn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;max-width:320px;';
+      warn.innerHTML =
+        '<i class="fas fa-clock toast-icon"></i>' +
+        '<div class="toast-content">' +
+          '<div class="toast-title">Session Expiring Soon</div>' +
+          '<div class="toast-message">You have been idle for 30 minutes. Click anywhere to stay signed in.</div>' +
+        '</div>';
+      document.body.appendChild(warn);
+      const cleanup = function () {
+        if (warn.parentElement) warn.parentElement.removeChild(warn);
+      };
+      setTimeout(cleanup, 60000);
+      document.addEventListener('mousemove', cleanup, { once: true });
+      document.addEventListener('keydown', cleanup, { once: true });
+    }, 30 * 60 * 1000);
+  }
+  ['mousemove', 'keydown', 'click', 'scroll'].forEach(function (evt) {
+    document.addEventListener(evt, resetIdleTimer, { passive: true });
+  });
+  resetIdleTimer();
+
+  // ============================================================
+  // ==================== REGISTER RENDERERS ====================
+  // ============================================================
+  App.registerPageRenderer('reports', renderReports);
+  App.registerPageRenderer('calendar', renderCalendar);
+  App.registerPageRenderer('documents', renderDocuments);
+  App.registerPageRenderer('settings', renderSettings);
+
+  // Expose reload functions
+  App.loadDocuments = loadDocuments;
+
+  console.log('[Part 6] Reports + Calendar + Documents + Settings loaded ✓');
+  console.log('==============================================');
+  console.log('  BudgetFlow Inventory Pro — COMPLETE');
+  console.log('  All 6 parts loaded successfully');
+  console.log('  Modules: dashboard, inventory, sales, purchases,');
+  console.log('  employees, customers, suppliers, projects,');
+  console.log('  accounts, expenses, reports, calendar, documents, settings');
+  console.log('  Shortcuts: g+d/i/s/p/e/c/u/j/a/x/r/k/o/t');
+  console.log('==============================================');
+})();
+</script>
+
+<!-- ============================================================
+     PRINT STYLES
+     ============================================================ -->
+<style media="print">
+  .sidebar, .sidebar-overlay, .menu-toggle, .header-right, .nav-link,
+  .toast-container, .modal, .btn, .search-bar, .filter-tabs, .pagination {
+    display: none !important;
+  }
+  .main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+  .top-header {
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 1rem 0 !important;
+  }
+  .card, .stat-card {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    page-break-inside: avoid;
+  }
+  body {
+    background: white !important;
+  }
+</style>
+</body>
+</html>
